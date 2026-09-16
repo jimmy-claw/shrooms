@@ -79,7 +79,7 @@ func cmdConfigFlatten(args []string) error {
 	}
 
 	if !*yes {
-		ans, err := readSecret(fmt.Sprintf("Write it, keeping the old file as %s? [y/N] ",
+		ans, err := readPhrase(fmt.Sprintf("Write it, keeping the old file as %s? [y/N] ",
 			*cfgPath+flattenBackupSuffix))
 		if err != nil {
 			return err

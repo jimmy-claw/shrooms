@@ -5,6 +5,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"time"
@@ -546,9 +547,27 @@ func readPhrase(prompt string) (string, error) {
 	fmt.Fprint(os.Stderr, prompt)
 	line, err := stdin().ReadString('\n')
 	if err != nil && line == "" {
-		return "", err
+		return "", noInput(err)
 	}
 	return strings.TrimSpace(line), nil
+}
+
+// noInput turns "there is nothing to read" into an answer somebody can act on.
+//
+// A confirmation with no stdin fails as `error: EOF`, which says nothing about
+// what happened or what to do. It is not an edge case: the container wrappers
+// run the CLI through `docker exec` without a terminal, so EVERY interactive
+// command on a containerised node fails this way. Seen on vps, 2026-09-16,
+// running `config flatten` — the plan printed, then "error: EOF", and the
+// honest reading was that flattening had failed rather than that nobody had
+// been asked.
+func noInput(err error) error {
+	if errors.Is(err, io.EOF) {
+		return errors.New("nothing to read the answer from — this is not a terminal, " +
+			"which is how the container wrappers run the CLI. Pass --yes to " +
+			"answer in advance, or pipe the answer in")
+	}
+	return err
 }
 
 func cmdKey(args []string) error {

@@ -62,3 +62,28 @@ func TestReadPhraseOnClosedInput(t *testing.T) {
 	}
 	stdinReader = nil
 }
+
+// Nothing to read must say what to do about it.
+//
+// The container wrappers run the CLI through `docker exec` with no terminal, so
+// every interactive command on a containerised node hits this. On vps,
+// 2026-09-16, `config flatten` printed its plan and then "error: EOF" — which
+// reads as the flatten having failed rather than as nobody having been asked.
+func TestNoInputSaysWhatToDo(t *testing.T) {
+	stdinReader = bufio.NewReader(strings.NewReader(""))
+	_, err := readPhrase("confirm: ")
+	stdinReader = nil
+
+	if err == nil {
+		t.Fatal("closed input produced no error")
+	}
+	msg := err.Error()
+	if msg == "EOF" {
+		t.Fatal("still reports a bare EOF, which says nothing about what to do")
+	}
+	for _, want := range []string{"not a terminal", "--yes"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("error %q does not mention %q", msg, want)
+		}
+	}
+}
