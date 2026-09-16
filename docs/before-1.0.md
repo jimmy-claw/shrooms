@@ -135,6 +135,12 @@ performs that exact fetch successfully, checked directly. The same upstream
 commit added a `~/.nimble/pkgcache` cache to their CI, so their builds run warm
 and ours is the cold case.
 
+**The relay image is not affected and now builds for both architectures in CI**
+(2026-09-16). internal/relay links nothing native, so it cross-compiles in
+seconds — an arm64 relay image was built on an amd64 laptop to check. That job
+also exists because the deployed relay had gone four weeks stale: the node image
+publishes on every push and the relay's was a local-only make target.
+
 **So the recommendation is to stop building it.** The arm64 library already
 exists — recovered from the 2026-08-27 image, `ELF 64-bit ARM aarch64`, carrying
 `.ld-rev = 7a3a064b`, the exact revision we pin. Published as

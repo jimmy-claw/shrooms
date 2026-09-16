@@ -331,6 +331,13 @@ relay:
 ## Build the relay container. amd64 explicitly, because that is what hosted
 ## providers run and a scratch image built for the wrong architecture fails at
 ## run rather than at pull.
+## Build the relay image locally, for this machine's architecture.
+##
+## CI publishes it for amd64 AND arm64 on every push (see .github/workflows/
+## ci.yml, relay-image) — this target is for trying a change before pushing.
+## The Dockerfile cross-compiles, so `--platform linux/arm64` here works from an
+## amd64 machine in seconds, which is worth knowing because nothing else in this
+## project does.
 relay-image:
 	docker build --platform linux/amd64 -f docker/relay.Dockerfile \
 		-t ghcr.io/vpavlin/shrooms-relay:latest \

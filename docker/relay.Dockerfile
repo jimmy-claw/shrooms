@@ -10,7 +10,17 @@
 # and there is nothing here to persist. A redeployed relay costs one refresh
 # interval of downtime, because the forwarding table is soft state that its
 # clients rebuild without being asked.
-FROM golang:1.23-alpine AS build
+# --platform=$BUILDPLATFORM pins the build stage to the machine doing the
+# building, and GOARCH below picks the target. Without it, buildx runs this
+# stage under QEMU for every architecture — minutes become tens of minutes, and
+# for no reason: a Go compiler cross-compiles natively, and there is no cgo here
+# to need a cross toolchain.
+#
+# This is the one image in the project that can be built for any architecture on
+# any machine. The node image cannot, because liblogosdelivery has to be built
+# or fetched per architecture and building it from source has been broken
+# upstream since September. None of that applies here.
+FROM --platform=$BUILDPLATFORM golang:1.23-alpine AS build
 WORKDIR /src
 
 # Dependencies first, so a source change does not re-download the module cache.
@@ -26,7 +36,9 @@ COPY internal/ ./internal/
 #
 # Trimpath and no build id so the same source produces the same binary, which is
 # worth having for something strangers are invited to run.
-RUN CGO_ENABLED=0 GOFLAGS=-trimpath \
+ARG TARGETOS
+ARG TARGETARCH
+RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-amd64} GOFLAGS=-trimpath \
     go build -ldflags="-s -w -buildid=" -o /shrooms-relay ./cmd/shrooms-relay
 
 FROM scratch

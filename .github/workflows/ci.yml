@@ -291,6 +291,81 @@ jobs:
           echo "arm64 hosts can now: docker pull ${{ steps.img.outputs.name }}:latest"
           echo "NOTE: the package is private until made public in the repo's package settings."
 
+  # The blind relay's image, for both architectures, in one job.
+  #
+  # Nothing above applies to it. internal/relay links no native library, so
+  # there is no liblogosdelivery to fetch or build, no per-architecture cache,
+  # and no dependence on the upstream build that has been broken since
+  # September. The Dockerfile cross-compiles from the build machine's own
+  # architecture (see --platform=$BUILDPLATFORM there), so arm64 costs seconds
+  # rather than the hours of emulation that rule it out for the node image.
+  #
+  # It exists because the deployed relay was four weeks stale: the node image is
+  # published on every push and this one was a local-only make target, so it
+  # rotted quietly while everything else moved. A relay strangers are invited to
+  # run should not be the least maintained thing here.
+  #
+  # Pushed straight to the multi-arch names rather than assembled from per-arch
+  # tags like the node image, because buildx writes one manifest for both in a
+  # single command — the reason that dance exists is that the two node builds
+  # happen in separate jobs.
+  relay-image:
+    name: publish relay image
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push'
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Resolve image name
+        id: img
+        run: |
+          owner=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')
+          echo "name=ghcr.io/$owner/shrooms-relay" >> "$GITHUB_OUTPUT"
+
+      # :latest only on the default branch. A relay is deployed by tag from a
+      # manifest that says :latest (deploy/akash/relay.yaml), so moving it from
+      # a branch build would redeploy somebody's relay from unreviewed code.
+      - name: Tags
+        id: tags
+        run: |
+          IMG=${{ steps.img.outputs.name }}
+          t="$IMG:${{ github.sha }}"
+          case "${{ github.ref }}" in
+            refs/heads/master|refs/heads/main) t="$t,$IMG:latest" ;;
+          esac
+          case "${{ github.ref }}" in
+            refs/tags/v*) t="$t,$IMG:${GITHUB_REF_NAME}" ;;
+          esac
+          echo "list=$t" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/relay.Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.tags.outputs.list }}
+          provenance: false
+
+      - name: Report
+        run: |
+          echo "pushed ${{ steps.tags.outputs.list }}"
+          echo "redeploy with: docker pull ${{ steps.img.outputs.name }}:latest"
+
   # Build liblogosdelivery from source in a pinned container, then build
   # logos-vpn against it. The library build is slow, so it is cached by the
   # upstream revision it was built from.
