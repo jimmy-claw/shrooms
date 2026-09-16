@@ -4,7 +4,8 @@
 # liblogosdelivery has no canonical distribution, and building it from source is
 # blocked upstream, so the only other source is a Logos Basecamp install. That
 # makes a fresh machine — CI, a VPS, a new laptop — unable to build at all.
-# This downloads a repackaged copy instead.
+# This downloads a repackaged copy instead, for whichever architecture it is
+# running on.
 #
 #   make deps-release
 set -euo pipefail
@@ -13,7 +14,15 @@ cd "$(dirname "$0")/.."
 
 REPO=${REPO:-vpavlin/shrooms}
 TAG=${DEPS_TAG:-deps-v1}
-ASSET=liblogosdelivery-linux-amd64.tar.gz
+# Which prebuilt to fetch. Both architectures are published as release assets, so
+# this is the only thing that differs between them — the amd64 image, the tests and
+# the end-to-end jobs all take this path, and arm64 does now too.
+case "$(uname -m)" in
+    x86_64|amd64)  ARCH=amd64 ;;
+    aarch64|arm64) ARCH=arm64 ;;
+    *) echo "no prebuilt liblogosdelivery for $(uname -m); build it with docker/build-lib.Dockerfile" >&2; exit 1 ;;
+esac
+ASSET=liblogosdelivery-linux-$ARCH.tar.gz
 DEST=${LD_DIR:-docker/build/lib}
 
 if [ -f "$DEST/liblogosdelivery.so" ] && [ -f "$DEST/liblogosdelivery.h" ] && [ "${FORCE:-0}" != "1" ]; then
