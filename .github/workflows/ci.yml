@@ -312,7 +312,12 @@ jobs:
   relay-image:
     name: publish relay image
     runs-on: ubuntu-latest
-    if: github.event_name == 'push'
+    # Not `== 'push'`: this workflow offers workflow_dispatch precisely "so a
+    # run can be forced without an empty commit", and a publish job that skips
+    # it makes that useless for the thing most worth forcing — re-publishing a
+    # relay after fixing its package permissions, which is how this was found.
+    # Pull requests still never publish.
+    if: github.event_name != 'pull_request'
     permissions:
       contents: read
       packages: write
