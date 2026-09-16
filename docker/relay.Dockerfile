@@ -44,6 +44,21 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-amd64} GOFLAGS=-t
 FROM scratch
 COPY --from=build /shrooms-relay /shrooms-relay
 
+# Links the package to this repository on ghcr.
+#
+# Not decoration: GitHub grants a workflow's GITHUB_TOKEN write access to
+# packages associated with the repository, and association comes from this
+# label. Without it a package pushed by hand stays unlinked, and CI gets
+# "denied: permission_denied: write_package" — which is exactly what happened
+# on the first run of the relay-image job, against a package created from a
+# laptop in August.
+#
+# It fixes the next package rather than that one: an existing package still
+# needs the repository added under its settings, once.
+LABEL org.opencontainers.image.source=https://github.com/vpavlin/shrooms
+LABEL org.opencontainers.image.description="Blind relay for shrooms (docs/blind-relays.md)"
+LABEL org.opencontainers.image.licenses=MIT
+
 # No certificates, no /etc/passwd, nothing else: the relay speaks raw UDP to
 # addresses it is given and resolves no names, so an empty filesystem is not an
 # austerity measure — there is genuinely nothing it needs.
