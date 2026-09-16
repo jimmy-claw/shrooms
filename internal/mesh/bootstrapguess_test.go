@@ -85,3 +85,36 @@ func TestBootstrapGuessWithNoLocalAddresses(t *testing.T) {
 		t.Errorf("got %q, want none", got)
 	}
 }
+
+// A relay's report of where it saw us is only worth having when the relay is
+// genuinely outside. Measured against the blind relay on Akash, 2026-09-16:
+//
+//	first   device seen by the relay at 10.42.9.1:39733
+//	second  device seen by the relay at 10.42.9.1:10096
+//
+// The provider NATs inbound UDP, so the relay sees its own ingress rather than
+// the client — two devices, one address. Believing it would have every node
+// announce a private address shared with strangers, which is the failure that
+// cost two days in September.
+func TestARelayBehindItsOwnNATIsIgnored(t *testing.T) {
+	for _, tc := range []struct {
+		addr string
+		want bool
+	}{
+		{"10.42.9.1:39733", false},    // the Akash provider's pod network
+		{"192.168.10.1:51820", false}, // a relay on somebody's LAN
+		{"100.64.3.7:51820", false},   // carrier shared space
+		{"127.0.0.1:51820", false},
+		{"169.254.1.1:51820", false},
+		{"85.160.39.54:11053", true}, // a relay that can actually see us
+		{"[2001:db8::1]:51820", true},
+	} {
+		ap := netip.MustParseAddrPort(tc.addr)
+		if got := relayObservationIsUseful(ap); got != tc.want {
+			t.Errorf("relayObservationIsUseful(%s) = %v, want %v", tc.addr, got, tc.want)
+		}
+	}
+	if relayObservationIsUseful(netip.AddrPort{}) {
+		t.Error("the zero address was accepted")
+	}
+}

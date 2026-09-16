@@ -110,6 +110,12 @@ func probeOnce(at netip.AddrPort, token string, framed bool) error {
 		if framed {
 			fmt.Printf("  %-7s device registered in %v (challenge answered)\n", d.name, took.Round(time.Millisecond))
 		}
+		if d.dev.observed.IsValid() {
+			fmt.Printf("  %-7s device seen by the relay at %v\n", d.name, d.dev.observed)
+		} else if framed {
+			fmt.Printf("  %-7s device was told nothing about where it was seen — this relay\n", d.name)
+			fmt.Printf("          predates observed addresses (internal/relay/observed.go)\n")
+		}
 	}
 
 	payload := []byte("shrooms relay probe")
@@ -199,6 +205,11 @@ type probeDevice struct {
 	priv   ed25519.PrivateKey
 	wg     identity.WGKey
 	framed bool
+
+	// observed is where the relay said it saw this device, when it says so at
+	// all. Empty against a relay that predates observed addresses, which is how
+	// this doubles as a way of telling one deployment from another.
+	observed netip.AddrPort
 }
 
 // ctrlOverhead and relayFrameOverhead turn a frame size into the two figures a
@@ -305,5 +316,21 @@ func (d *probeDevice) join(at netip.AddrPort, k relay.Key, tag identity.WGKey) (
 	if err := d.send(at, relay.EncodeConfirm(k, tag, f.Nonce, d.priv, time.Now())); err != nil {
 		return 0, err
 	}
-	return time.Since(start), nil
+	took := time.Since(start)
+
+	// And where did it say it saw us?
+	//
+	// A relay built since 2026-09-16 answers a completed registration with the
+	// address it arrived from (internal/relay/observed.go), which is the one
+	// fact a device behind NAT cannot work out for itself. An older relay says
+	// nothing at all, so this is also how to tell the two apart from outside —
+	// worth having, because "which relay did I just redeploy" is a question
+	// with no other answer once several are running.
+	//
+	// Not an error either way. The probe's subject is whether the relay
+	// forwards, and a relay that does not report addresses still does.
+	if g, err := d.recv(k); err == nil && g.Type == relay.TypeObserved {
+		d.observed = g.Observed
+	}
+	return took, nil
 }

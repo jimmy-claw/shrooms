@@ -140,7 +140,7 @@ func (m *Mesh) handleRelayFrame(payload []byte, from netip.AddrPort) ([]byte, co
 	// Even from a configured one it is a candidate, not a fact: it is probed
 	// like any other, and Reflexive weighs it against what peers report.
 	if f.Type == relay.TypeObserved {
-		if configured && f.Observed.IsValid() {
+		if configured && relayObservationIsUseful(f.Observed) {
 			m.prober.NoteReflexive(f.Observed, "relay:"+from.String(), time.Now())
 		}
 		return nil, nil, false
@@ -391,6 +391,39 @@ func (m *Mesh) heldDiscovered(now time.Time) (relayChoice, bool) {
 // a 2 minute TTL, about 40x more often than the mapping needed, forever, even
 // when every peer had a direct path and the relay carried nothing.
 const RelayRefresh = relay.RegistrationTTL / 2
+
+// relayObservationIsUseful reports whether an address a relay says it saw us at
+// is one worth announcing.
+//
+// Globally routable only, which is stricter than the rule for a peer's pong —
+// and deliberately. disco.usableReflexive keeps private addresses because a
+// peer on the same LAN observing us at one is the single most useful candidate
+// we ever collect. A relay is a different proposition: the reason to ask one is
+// that it is OUTSIDE, so a private answer means the relay cannot see our real
+// source and its observation describes the path to itself rather than us.
+//
+// Measured on 2026-09-16 against a blind relay deployed on Akash, which
+// reported every device at 10.42.9.1 — the provider's own pod network, because
+// inbound UDP is NAT'd before it reaches the container. Two devices, one
+// address, different ports. Believing that would have had every node announce a
+// private address shared with strangers, which is the failure that cost two
+// days in September when a router handed out a carrier-NAT address and we
+// announced it.
+//
+// So a relay behind its own NAT contributes nothing here, and says so by
+// contributing nothing rather than by being believed.
+func relayObservationIsUseful(ap netip.AddrPort) bool {
+	if !ap.IsValid() || ap.Port() == 0 {
+		return false
+	}
+	a := ap.Addr().Unmap()
+	if !a.IsGlobalUnicast() || a.IsPrivate() || a.IsLoopback() ||
+		a.IsLinkLocalUnicast() || a.IsMulticast() {
+		return false
+	}
+	// 100.64/10 is carrier shared space and netip does not call it private.
+	return !netip.MustParsePrefix("100.64.0.0/10").Contains(a)
+}
 
 // registerWithRelay tells our relay where to reach us.
 //
