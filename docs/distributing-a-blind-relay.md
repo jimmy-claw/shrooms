@@ -76,6 +76,23 @@ Small, on either choice:
 - nothing else: selection, registration, tags and first-claim-wins already work
   once an address is in that list
 
+## A correction worth keeping
+
+The blind relay at the centre of this — the one three machines were pointed at
+in September — was repeatedly described in this session's notes as dead, on the
+evidence of a laptop sending 143 KB into it and receiving nothing. It **was
+never dead**. It was carrying traffic for other devices throughout, and Vaclav
+reached pi5 through it from a phone on 2026-09-16.
+
+The silence had a different cause: the laptop had registered with that relay
+while k11 had registered with vps, and a relay forwards only between peers
+registered with IT. Two working ends, two working relays, no path. See
+`registerWithRelay`, which used to register with whatever was CONFIGURED while
+`selectRelay` routed through whatever it had CHOSEN.
+
+"The relay is dead" is the tempting reading of one-way traffic and it is usually
+wrong. Check which relay each end registered with first.
+
 ## Related, and worth doing either way
 
 **A blind relay reports where it saw you — built 2026-09-16.** It has `from` on every

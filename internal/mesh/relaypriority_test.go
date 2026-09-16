@@ -13,14 +13,21 @@ import (
 // answering at all — the first thing in the config.
 //
 // selectRelay used to return a configured relay unconditionally, live or not,
-// and never reached discovery while anything was configured. So a blind relay
-// somebody pointed at months ago outranked a member relay that was up and
-// carrying traffic, for as long as the line stayed in the file. That cost most
-// of a day across three machines: the laptop pushed 143 KB into a dead blind
-// relay while vps sat there working, and a phone pinned to that same relay
-// could not reach k11, which had registered with vps. A relay forwards only
-// between peers registered with IT, so two devices on different relays never
-// meet.
+// and never reached discovery while anything was configured. So a relay named
+// in a config outranked a member relay that was up and carrying traffic, for as
+// long as the line stayed in the file.
+//
+// That cost most of a day across three machines, and the symptom was one
+// direction of silence: the laptop pushed 143 KB into a blind relay and got
+// nothing back, while vps sat there as a live member relay with working tunnels
+// to both ends.
+//
+// Worth being exact about the cause, because the obvious reading is wrong and I
+// took it: the blind relay was NOT dead. It was carrying traffic for other
+// devices the whole time. The laptop had registered with it while k11 had
+// registered with vps, and a relay forwards only between peers registered with
+// IT — so two working ends on two working relays never meet. The fix for that
+// half is in registerWithRelay; this file is about which relay gets chosen.
 
 // live marks a configured relay as having answered a routability challenge.
 func live(m *Mesh, addr netip.AddrPort, when time.Time) {
@@ -46,8 +53,8 @@ func bareMesh(t *testing.T) *Mesh {
 	return f.m
 }
 
-// The case that was broken: a configured blind relay that has gone quiet, and a
-// live member relay on the mesh.
+// The case that was broken: a configured relay that has not answered a
+// routability challenge recently, and a live member relay on the mesh.
 func TestDeadBlindRelayDoesNotHideALiveDiscoveredOne(t *testing.T) {
 	f := newRelayFixture(t)
 	pin(f.m, "222.167.212.15:31760", true) // never answers
