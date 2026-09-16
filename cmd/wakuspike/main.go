@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -125,10 +126,18 @@ func main() {
 
 	if ids, err := node.NodeInfoIDs(); err == nil {
 		log.Printf("node info ids: %s", truncate(ids, 400))
-		for _, id := range []string{"peerId", "listenAddresses", "enr"} {
-			if v, err := node.NodeInfo(id); err == nil {
-				log.Printf("  %s = %s", id, truncate(v, 300))
+		// Ask for what the library says it has, rather than for names we
+		// guessed. This asked for "peerId", "listenAddresses" and "enr"; the
+		// library offers MyPeerId, MyMultiaddresses and MyENR, so every query
+		// returned nothing and the spike printed nothing — which reads as "the
+		// library exposes no node info" and is the opposite of true.
+		for _, id := range parseIDs(ids) {
+			v, err := node.NodeInfo(id)
+			if err != nil {
+				log.Printf("  %s: %v", id, err)
+				continue
 			}
+			log.Printf("  %s = %s", id, truncate(v, 400))
 		}
 	}
 
@@ -207,6 +216,22 @@ func main() {
 			os.Exit(1)
 		}
 	}
+}
+
+// parseIDs reads the id list the library returns, which arrives in Nim's own
+// seq syntax — `@[Version, Metrics, MyENR]` — rather than as JSON.
+func parseIDs(raw string) []string {
+	raw = strings.TrimSpace(raw)
+	raw = strings.TrimPrefix(raw, "@")
+	raw = strings.TrimPrefix(raw, "[")
+	raw = strings.TrimSuffix(raw, "]")
+	var out []string
+	for _, f := range strings.Split(raw, ",") {
+		if f = strings.Trim(strings.TrimSpace(f), `"`); f != "" {
+			out = append(out, f)
+		}
+	}
+	return out
 }
 
 func truncate(s string, n int) string {
