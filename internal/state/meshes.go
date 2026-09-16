@@ -255,22 +255,89 @@ func (c Config) Meshes() []Mesh {
 	// switching one mesh off moved every later mesh to a different interface
 	// and a different port on the next restart, which drops their tunnels and
 	// invalidates the endpoints their peers remember.
-	for i := range out {
-		iface, port := c.Interface, c.ListenPort
-		if i > 0 {
-			iface, port = fmt.Sprintf("%s%d", c.Interface, i), c.ListenPort+uint16(i)
+	// Pins first, so what is derived can avoid them.
+	//
+	// A pin wins, so a mesh keeps what it had when something before it in the
+	// order was renamed or removed. But an UNPINNED mesh derives from its
+	// position, and that derivation used to ignore the pins entirely — so a
+	// mesh could be handed an interface and a port another mesh had already
+	// been promised, and the daemon would try to create one device twice.
+	//
+	// Seen on vps, 2026-09-16, and it took the node down: `config flatten`
+	// pinned home to logos01/51821, `mesh remove default` shifted office from
+	// index 2 to index 1, and office — which had no pin, having been joined
+	// after the flatten — derived logos01/51821 on top of home. The daemon
+	// crashed on the second device and systemd restarted it 22 times.
+	//
+	// Nothing reported it. Two meshes each announcing the same port is exactly
+	// the class of problem ADR-014 and docs/two-nodes-one-address.md are about,
+	// and here we were doing it to ourselves.
+	takenIface := map[string]bool{}
+	takenPort := map[uint16]bool{}
+	for _, m := range out {
+		if m.Interface != "" {
+			takenIface[m.Interface] = true
 		}
-		// A pin wins, so a mesh keeps what it had when something before it in
-		// the order was renamed or removed.
+		if m.ListenPort != 0 {
+			takenPort[m.ListenPort] = true
+		}
+	}
+
+	for i := range out {
 		if out[i].Interface == "" {
-			out[i].Interface = iface
+			out[i].Interface = freeIface(c.Interface, i, takenIface)
+			takenIface[out[i].Interface] = true
 		}
 		if out[i].ListenPort == 0 {
-			out[i].ListenPort = port
+			out[i].ListenPort = freePort(c.ListenPort, i, takenPort)
+			takenPort[out[i].ListenPort] = true
 		}
 	}
 	return out
 }
+
+// freeIface is the interface name for the mesh at index i, skipping any a
+// pinned mesh already holds.
+//
+// Starts where it always did, so a config with no pins numbers exactly as
+// before and nothing renames itself on upgrade. Only a collision moves it, and
+// then only forward.
+func freeIface(base string, i int, taken map[string]bool) string {
+	for n := i; n < i+maxMeshes; n++ {
+		name := base
+		if n > 0 {
+			name = fmt.Sprintf("%s%d", base, n)
+		}
+		if !taken[name] {
+			return name
+		}
+	}
+	// Every candidate taken, which needs more meshes than a device can have.
+	// Returning the positional answer keeps this total; validateMeshes is where
+	// an impossible config is refused.
+	if i == 0 {
+		return base
+	}
+	return fmt.Sprintf("%s%d", base, i)
+}
+
+// freePort is the same for the UDP port.
+func freePort(base uint16, i int, taken map[uint16]bool) uint16 {
+	for n := i; n < i+maxMeshes; n++ {
+		p := base + uint16(n)
+		if p < base { // wrapped
+			break
+		}
+		if !taken[p] {
+			return p
+		}
+	}
+	return base + uint16(i)
+}
+
+// maxMeshes bounds the search for a free interface or port. Far more than any
+// device has, and small enough that an exhausted search is still bounded.
+const maxMeshes = 64
 
 // validateMeshes checks the mesh set. Called from Validate, so that a config
 // naming two meshes with one key fails at load rather than as a mesh where
