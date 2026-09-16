@@ -490,7 +490,32 @@ func SetMeshEnabled(configDir, label string, enabled bool) error {
 	}
 	m, ok := cfg.MeshSet[label]
 	if !ok {
-		return fmt.Errorf("no mesh called %q, or it is the original one", label)
+		// The ORIGINAL mesh, described by the config's top-level fields rather
+		// than by a [mesh.<label>] block. It used to be unleavable, and the
+		// error said so — "or it is the original one" — which on a phone means
+		// the option simply does not exist, with no way to reach it and no
+		// `config flatten` to run first.
+		//
+		// That made the desktop and the phone disagree about something they
+		// should not: the same operation, possible on one and not the other,
+		// for a reason that is a config FORMAT rather than anything about the
+		// mesh. Flattening is exactly what the CLI does before removing it, so
+		// do that here rather than asking somebody to clear the app's data.
+		//
+		// Guarded by the check above: this is never the only mesh, so
+		// flattening cannot leave the device with nothing.
+		flat, ferr := cfg.Flatten()
+		if ferr != nil {
+			return ferr
+		}
+		if verr := flat.Validate(); verr != nil {
+			return fmt.Errorf("the flattened config does not validate, so nothing "+
+				"was changed: %w", verr)
+		}
+		if m, ok = flat.MeshSet[label]; !ok {
+			return fmt.Errorf("no mesh called %q", label)
+		}
+		cfg = flat
 	}
 	m.Disabled = !enabled
 	cfg.MeshSet[label] = m
@@ -517,7 +542,32 @@ func LeaveMesh(configDir, label string) error {
 	}
 	m, ok := cfg.MeshSet[label]
 	if !ok {
-		return fmt.Errorf("no mesh called %q, or it is the original one", label)
+		// The ORIGINAL mesh, described by the config's top-level fields rather
+		// than by a [mesh.<label>] block. It used to be unleavable, and the
+		// error said so — "or it is the original one" — which on a phone means
+		// the option simply does not exist, with no way to reach it and no
+		// `config flatten` to run first.
+		//
+		// That made the desktop and the phone disagree about something they
+		// should not: the same operation, possible on one and not the other,
+		// for a reason that is a config FORMAT rather than anything about the
+		// mesh. Flattening is exactly what the CLI does before removing it, so
+		// do that here rather than asking somebody to clear the app's data.
+		//
+		// Guarded by the check above: this is never the only mesh, so
+		// flattening cannot leave the device with nothing.
+		flat, ferr := cfg.Flatten()
+		if ferr != nil {
+			return ferr
+		}
+		if verr := flat.Validate(); verr != nil {
+			return fmt.Errorf("the flattened config does not validate, so nothing "+
+				"was changed: %w", verr)
+		}
+		if m, ok = flat.MeshSet[label]; !ok {
+			return fmt.Errorf("no mesh called %q", label)
+		}
+		cfg = flat
 	}
 	nk, err := m.Key()
 	if err == nil {
