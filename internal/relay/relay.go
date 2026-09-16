@@ -33,6 +33,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"net/netip"
 	"time"
 
 	"golang.org/x/crypto/hkdf"
@@ -107,6 +108,11 @@ type Frame struct {
 
 	// Nonce is the routability challenge, on the two frames that carry one.
 	Nonce [NonceLen]byte
+
+	// Observed is where the relay says this device's frames arrive from, on a
+	// TypeObserved frame. See observed.go: it is the one fact a node behind NAT
+	// cannot work out for itself.
+	Observed netip.AddrPort
 
 	// ProbeID and Saw are the path-MTU exchange: which probe this refers to,
 	// and how many bytes actually arrived.
@@ -202,6 +208,9 @@ func Decode(k Key, pkt []byte) (*Frame, error) {
 
 	case TypeMTUEcho:
 		return decodeMTUEcho(k, pkt)
+
+	case TypeObserved:
+		return decodeObserved(k, pkt)
 
 	default:
 		return nil, fmt.Errorf("unknown relay frame type %d", pkt[0])

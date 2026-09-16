@@ -78,7 +78,7 @@ Small, on either choice:
 
 ## Related, and worth doing either way
 
-**A blind relay could report where it saw you.** It has `from` on every
+**A blind relay reports where it saw you — built 2026-09-16.** It has `from` on every
 register and never says so. One new frame type — the challenge frame is
 fixed-length and MAC'd, so it cannot be extended without breaking every client
 — and a node pointed at a blind relay gets reflexive discovery without any
@@ -89,3 +89,13 @@ enough.
 That is the piece that makes `office` work *directly* rather than through the
 relay: each machine learns its public address, announces it, and the phone dials
 it. The relay carries nothing unless punching fails.
+
+Shipped as `relay.TypeObserved` (frame type 7) and `Prober.NoteReflexive`. A
+relay answers every accepted registration — member or blind — with the address
+it arrived from; registrations already refresh on a timer, so a NAT rebinding
+changes the answer without needing anything new. The client takes it only from a
+relay it configured, and treats it as a candidate: it is probed like any other
+address, and `Reflexive` weighs it against what peers report, so one relay
+repeating itself cannot corroborate itself past the agreement rule.
+
+Only the distribution question above is left.

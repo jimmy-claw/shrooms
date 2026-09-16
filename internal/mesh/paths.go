@@ -130,6 +130,21 @@ func (m *Mesh) handleRelayFrame(payload []byte, from netip.AddrPort) ([]byte, co
 		}
 		return nil, nil, false
 	}
+	// Where the relay saw us. The one fact a node behind NAT cannot work out
+	// for itself, and on a mesh whose every member is behind the same router
+	// the only way it is ever learned (internal/relay/observed.go).
+	//
+	// Only from a relay we configured. An unsolicited frame from anywhere else
+	// is somebody telling us we are somewhere we are not, and the address is
+	// announced to peers — so it is exactly the thing not to take on trust.
+	// Even from a configured one it is a candidate, not a fact: it is probed
+	// like any other, and Reflexive weighs it against what peers report.
+	if f.Type == relay.TypeObserved {
+		if configured && f.Observed.IsValid() {
+			m.prober.NoteReflexive(f.Observed, "relay:"+from.String(), time.Now())
+		}
+		return nil, nil, false
+	}
 	if f.Type != relay.TypeForward {
 		return nil, nil, false
 	}

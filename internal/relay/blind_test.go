@@ -55,8 +55,25 @@ func TestABlindRelayInstallsNothingBeforeTheAddressAnswers(t *testing.T) {
 	}
 
 	// Echo it, and only now does the mapping exist.
-	if _, _, send := s.Handle(EncodeConfirm(k, wg, f.Nonce, priv, now), here, now); send {
-		t.Error("the confirm produced a reply, which it should not")
+	//
+	// The confirm is answered — with where we were seen, which is the whole
+	// point of observed.go and is the moment a device behind NAT can finally
+	// learn its own external address. It used to produce nothing.
+	cOut, cTo, send := s.Handle(EncodeConfirm(k, wg, f.Nonce, priv, now), here, now)
+	if !send {
+		t.Error("the confirm told the device nothing about where it was seen")
+	} else {
+		if cTo != here {
+			t.Errorf("the reply went to %v, not %v", cTo, here)
+		}
+		cf, err := Decode(k, cOut)
+		if err != nil {
+			t.Errorf("decode the confirm reply: %v", err)
+		} else if cf.Type != TypeObserved {
+			t.Errorf("confirm reply type = %d, want TypeObserved", cf.Type)
+		} else if cf.Observed != here {
+			t.Errorf("observed = %v, want %v", cf.Observed, here)
+		}
 	}
 	at, ok := registered(s, wg)
 	if !ok {
@@ -143,11 +160,22 @@ func TestRefreshingAnUnchangedMappingNeedsNoChallenge(t *testing.T) {
 	s.Handle(EncodeConfirm(k, wg, f.Nonce, priv, now), here, now)
 
 	later := now.Add(30 * time.Second)
-	if _, _, send := s.Handle(EncodeRegister(k, wg, priv, later), here, later); send {
-		t.Error("an unchanged refresh was challenged again")
-	}
+	out, _, send := s.Handle(EncodeRegister(k, wg, priv, later), here, later)
 	if _, ok := registered(s, wg); !ok {
 		t.Error("the refresh dropped the registration")
+	}
+	// A refresh is answered with where we were seen, not with a challenge.
+	// Every refresh, deliberately: a NAT rebinding changes the answer and
+	// nothing else tells either side, so it rides the timer that already
+	// exists (observed.go).
+	if send {
+		if f, err := Decode(k, out); err != nil {
+			t.Errorf("decode the refresh reply: %v", err)
+		} else if f.Type == TypeChallenge {
+			t.Error("an unchanged refresh was challenged again")
+		} else if f.Type != TypeObserved {
+			t.Errorf("refresh reply type = %d, want TypeObserved", f.Type)
+		}
 	}
 }
 
@@ -373,11 +401,35 @@ func TestAMemberRelayIsUnchanged(t *testing.T) {
 	here := netip.MustParseAddrPort("198.51.100.10:51820")
 	now := time.Now()
 
-	if _, _, send := s.Handle(EncodeRegister(k, wg, priv, now), here, now); send {
-		t.Error("a member relay issued a challenge")
-	}
+	out, to, send := s.Handle(EncodeRegister(k, wg, priv, now), here, now)
 	if _, ok := registered(s, wg); !ok {
 		t.Error("a member relay did not install a registration in one step")
+	}
+
+	// It answers now, where it used to say nothing — with where it saw us, not
+	// with a challenge. The one-step registration is what must not change, and
+	// has not: the entry above is installed by this single frame.
+	//
+	// A client that predates observed.go refuses the reply in Decode and drops
+	// it, which is why this could be added without a flag day.
+	if !send {
+		t.Fatal("a member relay told the device nothing about where it was seen")
+	}
+	if to != here {
+		t.Errorf("replied to %v, want the address it came from %v", to, here)
+	}
+	f, err := Decode(k, out)
+	if err != nil {
+		t.Fatalf("decode the reply: %v", err)
+	}
+	if f.Type == TypeChallenge {
+		t.Fatal("a member relay issued a challenge")
+	}
+	if f.Type != TypeObserved {
+		t.Fatalf("reply type = %d, want TypeObserved", f.Type)
+	}
+	if f.Observed != here {
+		t.Errorf("observed = %v, want %v", f.Observed, here)
 	}
 }
 

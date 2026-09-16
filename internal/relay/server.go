@@ -130,6 +130,10 @@ type Server struct {
 	challenged uint64
 	confirmed  uint64
 	probed     uint64
+	// told counts registrations answered with where we saw them, so an
+	// operator can see the feature working at all — a device that never hears
+	// it looks identical to one behind a NAT that gives it nothing.
+	told uint64
 
 	// framedNow carries the current packet's dialect into registerLocked
 	// without threading it through every branch. Read and written under mu on
@@ -237,7 +241,7 @@ func (s *Server) HandleFramed(pkt []byte, from netip.AddrPort, now time.Time, fr
 			s.registerLocked(f.Key, from, now, f.DevicePub)
 			s.expireLocked(now)
 			s.mu.Unlock()
-			return nil, netip.AddrPort{}, false
+			return s.observed(from, now)
 		}
 
 		// New binding on a blind relay: prove you receive where you claim
@@ -299,7 +303,7 @@ func (s *Server) HandleFramed(pkt []byte, from netip.AddrPort, now time.Time, fr
 		s.registerLocked(f.Key, from, now, f.DevicePub)
 		s.expireLocked(now)
 		s.mu.Unlock()
-		return nil, netip.AddrPort{}, false
+		return s.observed(from, now)
 
 	case TypeMTUProbe:
 		// Answered by anybody, registered or not, and deliberately: a device
@@ -381,6 +385,31 @@ func (s *Server) HandleFramed(pkt []byte, from netip.AddrPort, now time.Time, fr
 // made the table unbounded. Re-registering the same key from a new address
 // (a NAT rebinding, or a phone that moved) drops the stale reverse entry, which
 // the old code leaked because there was no reverse map to leak from.
+// observed answers a completed registration with the address it arrived from.
+//
+// The one fact a node behind NAT cannot work out for itself, and the relay has
+// had it all along. Sent on every accepted registration rather than once: a NAT
+// rebinding changes the answer and nothing tells either side, and registrations
+// already refresh on a timer, so this rides one that exists.
+//
+// Rate limited with the same budget as every other control reply, and small —
+// under forty bytes — so it cannot be used to amplify: it goes only to the
+// address a signed, in-window registration just arrived from.
+func (s *Server) observed(from netip.AddrPort, now time.Time) ([]byte, netip.AddrPort, bool) {
+	out, err := EncodeObserved(s.key, from)
+	if err != nil {
+		return nil, netip.AddrPort{}, false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.control.allow(len(out), now) {
+		s.throttled++
+		return nil, netip.AddrPort{}, false
+	}
+	s.told++
+	return out, from, true
+}
+
 func (s *Server) registerLocked(key identity.WGKey, from netip.AddrPort, now time.Time, devicePub []byte) {
 	prev, existed := s.peers[key]
 	if !existed && len(s.peers) >= s.opts.maxRegistrations() {
@@ -539,6 +568,12 @@ type Stat struct {
 	// how large a packet may be looks like from here.
 	Probed uint64
 
+	// Told counts registrations answered with the address they arrived from
+	// (observed.go). Worth a number because the alternative reading — a device
+	// that never hears one — is indistinguishable from a device behind a NAT
+	// that gives it nothing useful.
+	Told uint64
+
 	// Bytes is payload forwarded, excluding relay headers — what an operator
 	// would compare against a bandwidth bill.
 	Bytes uint64
@@ -570,6 +605,7 @@ func (s *Server) Stats() Stat {
 		Challenged: s.challenged,
 		Confirmed:  s.confirmed,
 		Probed:     s.probed,
+		Told:       s.told,
 		Bytes:      s.bytes,
 		Peak:       s.peak,
 		Sources:    len(s.perSource),

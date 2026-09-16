@@ -70,19 +70,32 @@ func (d *device) send(t *testing.T, to netip.AddrPort, pkt []byte) {
 	}
 }
 
+// recv reads until something other than an observed frame arrives.
+//
+// The relay answers every accepted registration with where it saw the device
+// (internal/relay/observed.go), so a client reading this socket sees those
+// interleaved with real traffic and skips them — which is what internal/mesh
+// does too. A test that treated the first frame as the answer would be
+// asserting the absence of a feature rather than the presence of a payload.
 func (d *device) recv(t *testing.T, k relay.Key) *relay.Frame {
 	t.Helper()
-	d.conn.SetReadDeadline(time.Now().Add(2 * time.Second))
-	buf := make([]byte, 65535)
-	n, _, err := d.conn.ReadFromUDPAddrPort(buf)
-	if err != nil {
-		t.Fatalf("nothing came back: %v", err)
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		d.conn.SetReadDeadline(deadline)
+		buf := make([]byte, 65535)
+		n, _, err := d.conn.ReadFromUDPAddrPort(buf)
+		if err != nil {
+			t.Fatalf("nothing came back: %v", err)
+		}
+		f, err := relay.Decode(k, buf[:n])
+		if err != nil {
+			t.Fatalf("undecodable reply: %v", err)
+		}
+		if f.Type == relay.TypeObserved {
+			continue
+		}
+		return f
 	}
-	f, err := relay.Decode(k, buf[:n])
-	if err != nil {
-		t.Fatalf("undecodable reply: %v", err)
-	}
-	return f
 }
 
 // waitPeers blocks until the relay holds n registrations.

@@ -398,6 +398,37 @@ func (p *Prober) Paths(peerID string) []Path {
 	return out
 }
 
+// NoteReflexive records an address something outside reported seeing us at,
+// when it did not arrive on a pong.
+//
+// A relay is the case this exists for. It is outside the NAT by definition and
+// has `from` on every frame, and a device can talk to a blind one without being
+// a member of anything — so this is how a mesh whose every member sits behind
+// one router learns its own external address at all. See internal/relay/
+// observed.go.
+//
+// observer names who said it, and is kept for the same reason a peer id is: two
+// vantage points agreeing is what distinguishes an address that generalises
+// from one that is only true for whoever reported it. A relay counts as one
+// vantage point, no more — see Reflexive, which keeps a single uncorroborated
+// observation rather than discarding it.
+func (p *Prober) NoteReflexive(ap netip.AddrPort, observer string, now time.Time) {
+	if !usableReflexive(ap) || observer == "" {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if e := p.reflexive[ap]; e != nil {
+		e.last = now
+		e.by[observer] = now
+		return
+	}
+	if len(p.reflexive) >= MaxReflexive {
+		return
+	}
+	p.reflexive[ap] = &reflexObs{last: now, by: map[string]time.Time{observer: now}}
+}
+
 // reflexObs is one reflexive address and the peers that reported it.
 type reflexObs struct {
 	last time.Time
