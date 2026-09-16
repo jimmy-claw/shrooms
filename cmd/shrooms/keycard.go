@@ -272,7 +272,7 @@ func cmdKeycardFreeSlots(args []string) error {
 	if !*yes {
 		fmt.Println("Every other device paired with this card stops being able to use it.")
 		fmt.Println("That cannot be undone; they would each have to pair again.")
-		ans, err := readSecret("Type yes to continue: ")
+		ans, err := readPhrase("Type yes to continue: ")
 		if err != nil {
 			return err
 		}

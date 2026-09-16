@@ -393,7 +393,7 @@ func cmdMeshRemove(args []string) error {
 
 	if !*yes {
 		fmt.Println()
-		ans, err := readSecret("Type the mesh's name to confirm: ")
+		ans, err := readPhrase("Type the mesh's name to confirm: ")
 		if err != nil {
 			return err
 		}

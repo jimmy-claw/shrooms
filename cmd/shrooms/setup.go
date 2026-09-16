@@ -533,6 +533,24 @@ func readSecret(prompt string) (string, error) {
 	return line, nil
 }
 
+// readPhrase reads one line WITH echo, for a confirmation that is not a secret.
+//
+// Typing a mesh's name to confirm deleting it, or "yes" to wipe a card, went
+// through readSecret — the passphrase reader — so the terminal showed nothing
+// as it was typed. A confirmation you cannot see is one you cannot check, and
+// the failure is indistinguishable from changing your mind: "stopped, and
+// nothing was changed", with no clue that a keystroke went astray.
+//
+// Same fallback as readSecret so a piped answer still works in a script.
+func readPhrase(prompt string) (string, error) {
+	fmt.Fprint(os.Stderr, prompt)
+	line, err := stdin().ReadString('\n')
+	if err != nil && line == "" {
+		return "", err
+	}
+	return strings.TrimSpace(line), nil
+}
+
 func cmdKey(args []string) error {
 	// Strip the sub-subcommand before parsing: Go's flag package stops at the
 	// first positional argument, so `key show --config X` would otherwise leave
