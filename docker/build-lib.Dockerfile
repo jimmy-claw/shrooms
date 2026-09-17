@@ -110,9 +110,13 @@ SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 # It was missing from the first handover because the originating builds ran the script on the
 # host rather than through this Dockerfile — which is also why their artifact needed a newer
 # glibc than the CI base provides.
+#
+# Invoked with bash, not sh: the script uses `set -o pipefail`, and Debian's /bin/sh is dash,
+# which rejects it ("set: Illegal option -o pipefail"). The image has bash — this file already
+# sets SHELL to bash — so the `sh` call was stepping outside that for no reason.
 COPY docker/build-lib-nimblefree.sh /src/docker/build-lib-nimblefree.sh
 RUN make librln \
-    && sh /src/docker/build-lib-nimblefree.sh /src
+    && bash /src/docker/build-lib-nimblefree.sh /src
 
 # The public header includes "generated/logosdelivery.h", which upstream says
 # plainly is "a build artifact, not checked in" — written by the build we just
