@@ -228,6 +228,9 @@ func TestCompletionActuallyCompletes(t *testing.T) {
 		{"renew", []string{"shrooms", "admin"}},
 		{"--mesh", []string{"shrooms", "admin", "revoke"}},
 		{"--keep-for", []string{"shrooms", "admin", "revoke"}},
+		{"relay", []string{"shrooms", "admin"}},
+		{"set", []string{"shrooms", "admin", "relay"}},
+		{"--token", []string{"shrooms", "admin", "relay", "set"}},
 		{"--keycard", []string{"shrooms", "init"}},
 		// Values, not only flag names. These need no daemon: the list is here.
 		{"720h", []string{"shrooms", "admin", "revoke", "--keep-for"}},

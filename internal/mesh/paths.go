@@ -291,8 +291,8 @@ func (m *Mesh) selectRelay(now time.Time) relayChoice {
 	// 4. Nothing is answering. Fall back to the first configured relay, which
 	//    is where this function used to START — and the reason a stale relay
 	//    could hide a working one for as long as it stayed in the config.
-	if len(m.relays) > 0 {
-		return relayChoice{ok: true, addr: m.relays[0].addr}
+	if all := m.allRelays(); len(all) > 0 {
+		return relayChoice{ok: true, addr: all[0].addr}
 	}
 	return relayChoice{}
 }
@@ -306,7 +306,7 @@ func (m *Mesh) selectRelay(now time.Time) relayChoice {
 func (m *Mesh) liveConfigured(now time.Time) (member, blind relayChoice) {
 	m.relayMu.Lock()
 	defer m.relayMu.Unlock()
-	for _, t := range m.relays {
+	for _, t := range m.allRelays() {
 		seen, ok := m.relayLive[t.addr]
 		if !ok || now.Sub(seen) >= RelayLiveFor {
 			continue
@@ -531,7 +531,8 @@ func hasRelay(ts []relayTarget, addr netip.AddrPort) bool {
 }
 
 func (m *Mesh) registerWith(now time.Time) []relayTarget {
-	if len(m.relays) == 0 {
+	relays := m.allRelays()
+	if len(relays) == 0 {
 		return nil
 	}
 	m.relayMu.Lock()
@@ -542,12 +543,12 @@ func (m *Mesh) registerWith(now time.Time) []relayTarget {
 	m.relayMu.Unlock()
 
 	out := make([]relayTarget, 0, maxRelayRegistrations)
-	for _, t := range m.relays {
+	for _, t := range relays {
 		if live[t.addr] {
 			out = append(out, t)
 		}
 	}
-	for _, t := range m.relays {
+	for _, t := range relays {
 		if len(out) >= maxRelayRegistrations {
 			break
 		}
@@ -571,7 +572,7 @@ const RelayLiveFor = 3 * RelayRefresh
 func (m *Mesh) liveRelay(now time.Time) (relayTarget, bool) {
 	m.relayMu.Lock()
 	defer m.relayMu.Unlock()
-	for _, t := range m.relays {
+	for _, t := range m.allRelays() {
 		if seen, ok := m.relayLive[t.addr]; ok && now.Sub(seen) < RelayLiveFor {
 			return t, true
 		}
@@ -584,7 +585,7 @@ func (m *Mesh) liveRelay(now time.Time) (relayTarget, bool) {
 // A frame arriving from somewhere we never configured is not something to
 // answer: it would mean signing a registration for a relay nobody chose.
 func (m *Mesh) targetFor(addr netip.AddrPort) (relayTarget, bool) {
-	for _, t := range m.relays {
+	for _, t := range m.allRelays() {
 		if t.addr == addr {
 			return t, true
 		}

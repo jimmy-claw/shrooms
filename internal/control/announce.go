@@ -67,6 +67,9 @@ const (
 	KindRevoke   Kind = "revoke"
 	KindGrant    Kind = "grant"
 	KindServices Kind = "services"
+	// KindAdvice carries the admin's choice of blind relays
+	// (docs/distributing-a-blind-relay.md).
+	KindAdvice Kind = "relay-advice"
 )
 
 // Announce is a device advertising itself and its reachable endpoints.
@@ -504,6 +507,51 @@ func (k Keyring) OpenGrant(epoch int64, raw []byte, now time.Time) (*Grant, erro
 		return nil, fmt.Errorf("timestamp skew %s exceeds %s", skew.Round(time.Second), MaxClockSkew)
 	}
 	return &g, nil
+}
+
+// Advice carries an admin-signed choice of blind relays to every node
+// (docs/distributing-a-blind-relay.md).
+//
+// The same shape as Grant and Revoke, and relayable for the same reason: the
+// statement inside is verified against the mesh's authority by whoever acts on
+// it, so the member passing it on need not be trusted. Unlike a revocation it
+// is sealed under the current generation, because it may carry a relay token
+// and a device that has been rotated out has no business learning a new one.
+type Advice struct {
+	Kind      Kind   `json:"kind"`
+	DevicePub []byte `json:"device_pub"` // the relayer, not the admin
+	Payload   []byte `json:"payload"`    // cred.RelayAdvice, wire form
+	Timestamp int64  `json:"ts"`
+}
+
+// OpenAdvice reads a relay advice message. The statement inside is not checked
+// here: only the mesh's authority can, and this package does not know it.
+func (k Keyring) OpenAdvice(epoch int64, raw []byte, now time.Time) (*Advice, error) {
+	plain, err := k.open(epoch, raw)
+	if err != nil {
+		return nil, err
+	}
+	envBody, envSig, err := decodeEnvelope(plain)
+	if err != nil {
+		return nil, err
+	}
+	var a Advice
+	if err := json.Unmarshal(envBody, &a); err != nil {
+		return nil, fmt.Errorf("unmarshal relay advice: %w", err)
+	}
+	if a.Kind != KindAdvice {
+		return nil, fmt.Errorf("unexpected kind %q", a.Kind)
+	}
+	if len(a.DevicePub) != ed25519.PublicKeySize {
+		return nil, errors.New("bad device public key length")
+	}
+	if !ed25519.Verify(ed25519.PublicKey(a.DevicePub), envBody, envSig) {
+		return nil, errors.New("signature verification failed")
+	}
+	if skew := now.Sub(time.Unix(a.Timestamp, 0)); skew > MaxClockSkew || skew < -MaxClockSkew {
+		return nil, fmt.Errorf("timestamp skew %s exceeds %s", skew.Round(time.Second), MaxClockSkew)
+	}
+	return &a, nil
 }
 
 // Services is what a device offers, by name (ADR-023).

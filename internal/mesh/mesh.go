@@ -128,6 +128,17 @@ type Mesh struct {
 	// once and selectRelay for which carries traffic.
 	relays []relayTarget
 
+	// adopted are the blind relays the admin named, used when this device
+	// named none of its own (advice.go). Swapped whole, so readers need no
+	// lock; allRelays is the list everything else walks.
+	adopted atomic.Pointer[[]relayTarget]
+	// adviceMu guards the statement held and its wire form, which is what gets
+	// repeated.
+	adviceMu      sync.Mutex
+	advice        *cred.RelayAdvice
+	adviceRaw     []byte
+	lastAdviceOut time.Time
+
 	// relayNow is the relay currently in use, for logging changes.
 	relayNow netip.AddrPort
 
@@ -372,6 +383,10 @@ func New(log *slog.Logger, cfg state.Config, st *state.State, node *waku.Node, d
 	for _, t := range m.relays {
 		dev.Bind.SetRelayIdentityFor(t.addr, t.key, m.handleFor(t, st.Identity.WGPub))
 	}
+
+	// After the relay identities: adopting advice registers its relays with
+	// the bind the same way.
+	m.loadRelayAdvice()
 
 	return m, nil
 }
@@ -649,6 +664,9 @@ func (m *Mesh) Run(ctx context.Context) error {
 			if e := topic.Epoch(now); e != m.lastEpoch {
 				if m.lastEpoch != 0 {
 					m.republishRevocations(now)
+					// The admin's relay advice is the other standing
+					// statement, and needs repeating for the same reason.
+					m.republishRelayAdvice(now)
 					// And hand the current generation to every member that can
 					// receive it, for the same reason and on the same schedule:
 					// a device that wakes finds its envelope waiting instead of
@@ -1868,6 +1886,11 @@ func (m *Mesh) handle(ev waku.Event) {
 				m.handleServices(sv, now)
 				return
 			}
+			if ad, aerr := kr.OpenAdvice(ep, msg.Payload, now); aerr == nil {
+				m.health.announceOpened(now)
+				m.handleRelayAdvice(ad.Payload, now)
+				return
+			}
 		}
 	}
 	if err != nil {
@@ -1949,6 +1972,7 @@ func (m *Mesh) handle(ev waku.Event) {
 		// published would otherwise admit that device until its credential
 		// expired, which is up to a month.
 		m.revocationsOnDiscovery(now)
+		m.adviceOnDiscovery(now)
 	}
 
 	// Introduce ourselves when asked, or when this peer plainly cannot reach us.

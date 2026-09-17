@@ -459,6 +459,16 @@ type meshStatus struct {
 	RelayUsing string `json:"relay_using,omitempty"`
 	// RelayUsingBlind says that relay is one somebody else runs.
 	RelayUsingBlind bool `json:"relay_using_blind,omitempty"`
+	// RelayUsingAdvised says the mesh's admin named it, rather than this
+	// device's config (docs/distributing-a-blind-relay.md).
+	RelayUsingAdvised bool `json:"relay_using_advised,omitempty"`
+
+	// RelayAdvised are the blind relays in use because the admin named them,
+	// and RelayAdviceSerial the statement that did. The serial is reported
+	// even when the relays are not used — this device configures its own, or
+	// refused — because it is what `admin relay set` has to exceed.
+	RelayAdvised      []string `json:"relay_advised,omitempty"`
+	RelayAdviceSerial uint64   `json:"relay_advice_serial,omitempty"`
 
 	// What the config says about this mesh, so a UI can show the current
 	// setting rather than only offering the buttons that change it.
@@ -1331,8 +1341,17 @@ func serveControl(ctx context.Context, log *slog.Logger, path string, instances 
 				ms.AuthorityID = a.ID().String()
 			}
 			ms.Announced = in.mesh.Announced()
+			for _, a := range in.mesh.AdoptedRelays() {
+				ms.RelayAdvised = append(ms.RelayAdvised, a.String())
+			}
+			ms.RelayAdviceSerial = in.mesh.RelayAdviceSerial()
 			if at, blind, ok := in.mesh.RelayInUse(); ok {
 				ms.RelayUsing, ms.RelayUsingBlind = at.String(), blind
+				for _, a := range ms.RelayAdvised {
+					if a == ms.RelayUsing {
+						ms.RelayUsingAdvised = true
+					}
+				}
 			}
 			if e := in.mesh.SelfExpiry(); !e.IsZero() {
 				ms.Expires = e.Unix()
@@ -1651,6 +1670,40 @@ func serveControl(ctx context.Context, log *slog.Logger, path string, instances 
 		}
 		if err := target.Revoke(blob); err != nil {
 			log.Warn("refused a revocation", "err", err)
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+
+	// The admin's choice of blind relays, on its way to the bus. The same
+	// shape and the same trust as /revoke: the socket decides who may ask, the
+	// admin signature inside decides whether any node acts on it.
+	mux.HandleFunc("/relay-advice", requireRoot(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "POST relay advice", http.StatusMethodNotAllowed)
+			return
+		}
+		raw, err := io.ReadAll(io.LimitReader(r.Body, 4096))
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		blob, err := base64.StdEncoding.DecodeString(strings.TrimSpace(string(raw)))
+		if err != nil {
+			http.Error(w, "relay advice is not base64: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+		// The mesh named, for the reason /revoke gives: the wrong mesh
+		// accepts nothing its own admin did not sign, and says so here rather
+		// than on every peer.
+		target := pickMesh(r.URL.Query().Get("mesh"))
+		if target == nil {
+			http.Error(w, "no such mesh is running here", http.StatusNotFound)
+			return
+		}
+		if err := target.RelayAdvice(blob); err != nil {
+			log.Warn("refused relay advice", "err", err)
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}

@@ -71,6 +71,15 @@ announces, topics and payload keys are all beyond it. Frames authenticate under
 its own token, or under a public key when it is open — a separate key doing a
 separate job (ADR: two keys, two questions).
 
+**Which relay a member uses is the admin's call or the member's, never another
+member's.** A mesh's admin can name blind relays for everybody
+(`shrooms admin relay set`), because doing so exposes every member's traffic
+pattern to a third party and that is the admin's kind of decision. The
+statement is admin-signed and verified by every node, a higher serial replaces
+a lower one so an old statement cannot be replayed, and a device that lists its
+own relays or says `relay_blind = "none"` ignores it
+(docs/distributing-a-blind-relay.md).
+
 **It cannot be pointed at a third party.** A registration installs nothing until
 the registrant echoes a nonce sent to the address it claims, so an attacker
 registering somebody else's address never receives it. Relaying is one packet in

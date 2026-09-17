@@ -282,7 +282,7 @@ _shrooms() {
             ;;
         admin)
             if [ "$cword" -eq 2 ]; then
-                COMPREPLY=($(compgen -W "init issue renew revoke show" -- "$cur"))
+                COMPREPLY=($(compgen -W "init issue renew revoke relay show" -- "$cur"))
                 return
             fi
             case ${words[2]} in
@@ -296,6 +296,13 @@ _shrooms() {
                     COMPREPLY=($(compgen -W "--dir --device --name --mesh --socket --serial --keep-for --publish --rotate --sign-with --external-signer" -- "$cur")) ;;
                 show)
                     COMPREPLY=($(compgen -W "--dir --mesh" -- "$cur")) ;;
+                relay)
+                    if [ "$cword" -eq 3 ]; then
+                        COMPREPLY=($(compgen -W "set clear" -- "$cur"))
+                    else
+                        COMPREPLY=($(compgen -W "--dir --mesh --token --serial --socket --publish --sign-with --external-signer" -- "$cur"))
+                    fi
+                    ;;
                 *)
                     COMPREPLY=($(compgen -W "--dir --mesh $common" -- "$cur")) ;;
             esac

@@ -287,10 +287,16 @@ type Config struct {
 	// redeployed at a new port, or simply gone. A device registers with at most
 	// two of them, and takes them in the order given.
 	//
-	// These have to be configured because they cannot be discovered: a blind
-	// relay holds no network key and runs no delivery node, so it has no way to
-	// announce itself.
+	// These cannot be discovered: a blind relay holds no network key and runs
+	// no delivery node, so it has no way to announce itself. A mesh's admin can
+	// name them for every member instead (docs/distributing-a-blind-relay.md);
+	// anything listed here takes precedence over that.
 	RelayBlind []string
+
+	// RelayNone refuses blind relays altogether, including any the mesh's
+	// admin names. Written as relay_blind = "none", at the top level or per
+	// mesh; an empty list cannot say it, because it reads as absent.
+	RelayNone bool
 
 	// StatusFile optionally writes the status JSON to a file, for a monitoring
 	// view that can read a file but not open a unix socket — QML can do the
@@ -1007,7 +1013,11 @@ func parseConfig(text string) (Config, error) {
 		case "relay_token":
 			c.RelayToken = unquote(val)
 		case "relay_blind":
-			c.RelayBlind = parseArray(val)
+			if unquote(val) == "none" {
+				c.RelayNone = true
+			} else {
+				c.RelayBlind = parseArray(val)
+			}
 		case "socket_group":
 			c.SocketGroup = unquote(val)
 		case "status_file_group":
@@ -1158,7 +1168,10 @@ func RenderConfig(c Config) (string, error) {
 		b.WriteString("# normally needed: member relays are found from their announces.\n")
 		fmt.Fprintf(&b, "relay_addr  = %q\n", c.RelayAddr)
 	}
-	if len(c.RelayBlind) > 0 {
+	if c.RelayNone {
+		b.WriteString("\n# No blind relays, not even ones the mesh's admin names.\n")
+		b.WriteString("relay_blind = \"none\"\n")
+	} else if len(c.RelayBlind) > 0 {
 		b.WriteString("\n# Relays run by people who are not on this mesh. They cannot announce\n")
 		b.WriteString("# themselves - no network key, no delivery node - so they are configured.\n")
 		b.WriteString("# This device registers with at most two, in the order given.\n")

@@ -174,6 +174,9 @@ func cmdStatus(args []string) error {
 			if st.Meshes[0].RelayUsingBlind {
 				kind = "run by somebody else; it cannot read what it carries"
 			}
+			if st.Meshes[0].RelayUsingAdvised {
+				kind += " (named by the mesh's admin)"
+			}
 			fmt.Fprintf(head, "relay\t%s\t%s\n", u, kind)
 		} else if relayNote(st.Meshes[0]) != "" {
 			fmt.Fprintf(head, "relay\tnone\tpeers on mobile data may reach only public addresses\n")

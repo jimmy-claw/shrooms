@@ -674,8 +674,11 @@ changed to RTT.
 
 1. a configured member relay (`relay_addr`) that has answered recently;
 2. a discovered member relay, by the rule above, used at once;
-3. a configured blind relay that has answered recently;
-4. the first configured relay, answering or not, as a last resort.
+3. a blind relay that has answered recently — one from `relay_blind`, or,
+   when the device lists none and has not said `relay_blind = "none"`, one
+   the mesh's admin named ([ADR-034](docs/adr/034-the-admin-names-the-blind-relays.md));
+4. the first of those relays, answering or not, as a last resort — configured
+   ones before admin-named ones.
 
 A discovered relay that has just gone stale is held for `RelayHold` (45 s)
 before falling back past it, so a late pong does not flip a device onto a

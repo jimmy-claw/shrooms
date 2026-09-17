@@ -33,6 +33,11 @@ type revocationFile struct {
 
 // revocationPath is where one mesh's withdrawals live.
 func (s *State) revocationPath(networkID string) string {
+	return s.meshFile("revocations-", networkID)
+}
+
+// meshFile is a per-mesh file in the state directory.
+func (s *State) meshFile(prefix, networkID string) string {
 	// The id is lowercase base32 by construction, but this file name is built
 	// from a value that arrives as a string, and a path separator in it would
 	// write somewhere else entirely.
@@ -45,7 +50,7 @@ func (s *State) revocationPath(networkID string) string {
 	if safe == "" {
 		safe = "default"
 	}
-	return filepath.Join(s.dir, "revocations-"+safe+".json")
+	return filepath.Join(s.dir, prefix+safe+".json")
 }
 
 // Revocations returns the stored withdrawals for one mesh, as signed wire

@@ -1,9 +1,10 @@
 # Blind relays: a stranger forwards for you without joining
 
-**Status:** built. The relay engine, the routability check, first-claim-wins,
-the operator's limits and a standalone `shrooms-relay` binary all exist and are
-tested; what is not yet wired is the client side, so nothing points at one of
-these yet. See `deploy/akash/` to run one.
+**Status:** built and in use. The relay engine, the routability check,
+first-claim-wins, the operator's limits, a standalone `shrooms-relay` binary,
+the client side (`relay_blind`, `relay_token`), observed-address reports, and
+admin-named relays (`shrooms admin relay set`, [ADR-034](adr/034-the-admin-names-the-blind-relays.md))
+all exist. See `deploy/akash/` to run one and [RELAYS.md](../RELAYS.md) to use one.
 
 **No guarantees, of any kind.** This is a best-effort experiment shared so that
 people can poke at it. It has not been audited, a relay may lose your traffic,
@@ -566,19 +567,27 @@ for a path that was working.
 Configuring `relay_addr` by hand on every device is the thing that stops anyone
 using this. Two ways out, and they answer different questions.
 
-### Within a mesh: a member says so
+### Within a mesh: the admin says so — built 2026-09-17
 
-The narrow one, and it needs nothing new. A device that knows a blind relay
-publishes it in its ordinary announce, exactly as `Boot` already carries a
-delivery multiaddr ([ADR-031](adr/031-bootstrap-from-the-mesh-itself.md)).
-Announces are sealed under the network key, so only members read it, and the
-relay never learns it is being advertised.
+This section used to propose that any member put a blind relay in its announce.
+It was built the other way: **the mesh's admin signs a statement naming the
+relays**, and members adopt it
+([distributing-a-blind-relay.md](distributing-a-blind-relay.md) has the
+decision and why).
 
-Configure one device, and the mesh knows. That also solves the address moving:
-a node port changes on redeploy, and reconfiguring one machine beats
-reconfiguring five. Announces are JSON, so the field is additive — no flag day.
+    shrooms admin relay set 203.0.113.10:31760[,198.51.100.7:32100] [--token T]
+    shrooms admin relay clear
 
-What it does not solve is a device that has never been told about any relay.
+The statement is sealed under the current announce generation, so only members
+read it and the relay never learns it is being advertised. Every node verifies
+it against the mesh's authority, keeps the highest serial, writes it to disk,
+and repeats it each epoch and when a peer appears. Configure it once, and the
+mesh knows — including where the relay moved after a redeploy.
+
+A device that lists blind relays of its own keeps them, and one that says
+`relay_blind = "none"` refuses the admin's too.
+
+What it does not solve is a device on a mesh whose admin has named none.
 
 ### Publicly: a well-known topic
 

@@ -71,6 +71,23 @@ and runs no delivery node, so it cannot announce itself the way a relay that is
 a member of your mesh does. That is not an oversight; it is the same property
 that lets a stranger run one safely.
 
+**But only once per mesh, if you are its admin.** On the machine holding the
+admin key (or with the Keycard):
+
+    shrooms admin relay set 203.0.113.10:31760 [--token "the token they gave you"]
+
+signs a statement naming the relays and publishes it through the local daemon.
+Every member verifies the signature and uses those relays — unless it lists
+blind relays of its own, which win, or says
+
+    relay_blind = "none"
+
+which refuses blind relays altogether, the admin's included. Nodes repeat the
+statement each epoch, so a device that was off learns it when it comes back.
+`shrooms admin relay clear` withdraws it. `shrooms status` marks a relay in use
+because of it with "(named by the mesh's admin)". Signing needs the admin key,
+so the phone cannot issue one; it adopts them like any member.
+
 **The address may move.** A relay on ephemeral compute with an assigned port
 gets a new one when it is redeployed, so an address here is a snapshot rather
 than a promise.

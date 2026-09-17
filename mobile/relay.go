@@ -16,11 +16,16 @@ import (
 // port per destination. A relay is the only way its traffic moves, and a blind
 // relay cannot announce itself, so somebody has to type it in.
 
-// BlindRelays returns the configured blind relays, comma-separated for the UI.
+// BlindRelays returns the configured blind relays, comma-separated for the UI,
+// or "none" when the device refuses them — including ones the mesh's admin
+// names (docs/distributing-a-blind-relay.md).
 func BlindRelays(configDir string) string {
 	cfg, _, err := load(configDir)
 	if err != nil {
 		return ""
+	}
+	if cfg.RelayNone {
+		return "none"
 	}
 	return strings.Join(cfg.RelayBlind, ", ")
 }
@@ -40,11 +45,23 @@ func BlindRelayToken(configDir string) string {
 // Addresses are validated here rather than at connect. A mistyped relay is
 // otherwise indistinguishable from one that is down — both are silence — and
 // the difference matters because only one of them is worth waiting for.
+//
+// An empty list lets the mesh's admin choose (docs/distributing-a-blind-relay.md);
+// "none" refuses blind relays altogether, the admin's included.
 func SetBlindRelays(configDir, list, token string) error {
 	cfg, _, err := load(configDir)
 	if err != nil {
 		return err
 	}
+
+	if strings.EqualFold(strings.TrimSpace(list), "none") {
+		cfg.RelayNone = true
+		cfg.RelayBlind = nil
+		cfg.RelayToken = ""
+		cfgPath, _ := paths(configDir)
+		return state.WriteConfig(cfgPath, cfg)
+	}
+	cfg.RelayNone = false
 
 	var out []string
 	for _, one := range strings.FieldsFunc(list, func(r rune) bool {

@@ -526,8 +526,12 @@ func (c Config) ForMesh(m Mesh, port uint16) Config {
 	switch {
 	case m.RelayNone:
 		out.RelayAddr, out.RelayToken, out.RelayBlind = "", "", nil
+		out.RelayNone = true
 	case m.RelayAddr != "" || len(m.RelayBlind) > 0:
 		out.RelayAddr, out.RelayToken, out.RelayBlind = m.RelayAddr, m.RelayToken, m.RelayBlind
+		// A mesh naming its own relays has opted back in, whatever the device
+		// said.
+		out.RelayNone = false
 	}
 	return out
 }

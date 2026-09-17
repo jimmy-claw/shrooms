@@ -93,9 +93,10 @@ func (m *Mesh) RelayInUse() (netip.AddrPort, bool, bool) {
 }
 
 // ConfiguredRelays counts the relays this device was told about, and how many
-// of those are run by people who are not members.
+// of those are run by people who are not members. Relays the admin named count:
+// they were told to this device, by the one party entitled to.
 func (m *Mesh) ConfiguredRelays() (total, blind int) {
-	for _, t := range m.relays {
+	for _, t := range m.allRelays() {
 		total++
 		if t.blind {
 			blind++

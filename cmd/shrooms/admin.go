@@ -144,7 +144,7 @@ func adminPathFor(dir, label string) string {
 
 func cmdAdmin(args []string) error {
 	if len(args) < 1 {
-		return errors.New("usage: shrooms admin {init|issue|renew|revoke|show} [flags]")
+		return errors.New("usage: shrooms admin {init|issue|renew|revoke|relay|show} [flags]")
 	}
 	switch args[0] {
 	case "init":
@@ -157,6 +157,8 @@ func cmdAdmin(args []string) error {
 		return cmdAdminRevoke(args[1:])
 	case "show":
 		return cmdAdminShow(args[1:])
+	case "relay":
+		return cmdAdminRelay(args[1:])
 	default:
 		return fmt.Errorf("unknown admin command %q", args[0])
 	}
@@ -818,7 +820,6 @@ func cmdAdminRevoke(args []string) error {
 	return nil
 }
 
-// publishRevocation hands a signed revocation to the local daemon.
 // deviceByName resolves a peer's name to its public key through the daemon.
 //
 // Refuses rather than picks when a name is ambiguous. Names are local labels
@@ -858,7 +859,14 @@ func deviceByName(sock, label, name string) (string, error) {
 		name, strings.Join(where, "\n"))
 }
 
+// publishRevocation hands a signed revocation to the local daemon.
 func publishRevocation(sock, label string, raw []byte) error {
+	return postSigned(sock, "/revoke", label, raw)
+}
+
+// postSigned hands an admin-signed statement to the local daemon, which is the
+// only thing on this machine with a rendezvous connection to publish it on.
+func postSigned(sock, path, label string, raw []byte) error {
 	if sock == DefaultSocket {
 		if _, err := os.Stat(sock); err != nil {
 			if _, err := os.Stat(LegacySocket); err == nil {
@@ -875,7 +883,7 @@ func publishRevocation(sock, label string, raw []byte) error {
 		Timeout: 10 * time.Second,
 	}
 	body := strings.NewReader(base64.StdEncoding.EncodeToString(raw))
-	url := "http://unix/revoke"
+	url := "http://unix" + path
 	if label != "" {
 		url += "?mesh=" + neturl.QueryEscape(label)
 	}

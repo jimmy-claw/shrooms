@@ -1,6 +1,9 @@
 package state
 
-import "testing"
+import (
+	"path/filepath"
+	"testing"
+)
 
 // advertise carries a port, so it cannot be shared between meshes. The relay
 // settings do not, so sharing them is the useful default. These two rules are
@@ -100,6 +103,11 @@ func TestAMeshCanOverrideOrRefuseTheRelay(t *testing.T) {
 		if len(got.RelayBlind) != 0 || got.RelayToken != "" || got.RelayAddr != "" {
 			t.Errorf("relay_blind = none did not opt out: %+v", got.RelayBlind)
 		}
+		// And says so, or the mesh would take the admin's relay advice as the
+		// replacement for the relays it just refused.
+		if !got.RelayNone {
+			t.Error(`relay_blind = "none" did not reach the mesh's config`)
+		}
 	}
 }
 
@@ -120,5 +128,40 @@ func TestMeshesMissingAdvertiseNamesThem(t *testing.T) {
 	c.Advertise = nil
 	if got := c.MeshesMissingAdvertise(); len(got) != 0 {
 		t.Errorf("warned with no device advertise: %v", got)
+	}
+}
+
+// A device can refuse blind relays everywhere, including ones its mesh's admin
+// names, and the refusal must survive the config being rewritten.
+func TestDeviceWideRelayNoneRoundTrips(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	c := DefaultConfig()
+	c.Name = "phone"
+	c.RelayNone = true
+	if err := WriteConfig(path, c); err != nil {
+		t.Fatal(err)
+	}
+	back, err := LoadConfigUnvalidated(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !back.RelayNone || len(back.RelayBlind) != 0 {
+		t.Errorf("after a rewrite: RelayNone=%v RelayBlind=%v", back.RelayNone, back.RelayBlind)
+	}
+	// Inherited by a mesh with no override of its own.
+	back.MeshSet = map[string]Mesh{"work": {NetworkKey: "w"}}
+	ms := back.Meshes()
+	if len(ms) != 1 {
+		t.Fatalf("want one mesh, got %d", len(ms))
+	}
+	if got := back.ForMesh(ms[0], ms[0].ListenPort); !got.RelayNone {
+		t.Error("a mesh lost the device's refusal")
+	}
+	// A mesh naming its own relays has opted back in.
+	back.MeshSet = map[string]Mesh{"home": {NetworkKey: "h", RelayBlind: []string{"192.0.2.9:31760"}}}
+	for _, m := range back.Meshes() {
+		if m.Label == "home" && back.ForMesh(m, m.ListenPort).RelayNone {
+			t.Error("a mesh with its own blind relays still refuses them")
+		}
 	}
 }
