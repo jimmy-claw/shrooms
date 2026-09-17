@@ -1054,14 +1054,16 @@ private fun MeshScreen(
         Box(Modifier.padding(start = 24.dp, end = 24.dp, top = 4.dp, bottom = 48.dp)) {
             Action(
                 when {
+                    snap.stopping -> "DISCONNECTING…"
                     !snap.connected -> "CONNECT"
                     confirming -> "TAP AGAIN TO DISCONNECT"
                     else -> "DISCONNECT"
                 },
-                enabled = true,
+                enabled = !snap.stopping,
                 danger = snap.connected,
             ) {
                 when {
+                    snap.stopping -> {}
                     !snap.connected -> onConnect()
                     confirming -> { confirming = false; onDisconnect() }
                     else -> confirming = true

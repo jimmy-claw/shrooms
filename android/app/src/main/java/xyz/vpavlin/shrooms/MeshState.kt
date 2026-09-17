@@ -143,6 +143,11 @@ data class Snapshot(
     // side: the point is to tell "nothing asked us" apart from "we answered
     // and it was ignored", which are indistinguishable from the outside.
     val dns: Dns = Dns(),
+
+    // A disconnect has been asked for and has not finished. The screen shows
+    // it rather than a live tunnel, which is what it showed while the request
+    // waited its turn — and why the Disconnect button looked broken.
+    val stopping: Boolean = false,
 ) {
     fun notificationLine(): String {
         val up = peers.count { it.reach == Peer.Reach.CONNECTED }
@@ -159,7 +164,12 @@ object MeshState {
     val logs: StateFlow<List<String>> = _logs
 
     fun connected(overlay: String) {
-        _snapshot.value = _snapshot.value.copy(connected = true, overlay = overlay, error = "")
+        _snapshot.value = _snapshot.value.copy(connected = true, overlay = overlay, error = "", stopping = false)
+    }
+
+    /** A disconnect was requested; see Snapshot.stopping. */
+    fun stopping() {
+        _snapshot.value = _snapshot.value.copy(stopping = true)
     }
 
     /** Records where the resolver was installed, or "" if it could not be. */
@@ -190,6 +200,9 @@ object MeshState {
             names = _snapshot.value.names,
             connected = true,
             error = _snapshot.value.error,
+            // The poll loop runs until the session is gone, so without this a
+            // pending disconnect was overwritten every two seconds.
+            stopping = _snapshot.value.stopping,
         )
     }
 

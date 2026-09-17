@@ -1213,15 +1213,51 @@ func stopSession(stopNode bool) error {
 	case <-time.After(5 * time.Second):
 		// Do not block the UI thread on a shutdown that is stuck.
 	}
-	// Stop, never destroy: destroying leaves state behind that stops the next
-	// node being created at all.
-	if stopNode && node != nil {
-		_ = node.Stop()
-	}
+	// The tunnel first, the node last.
+	//
+	// node.Stop is a library call that may take up to its thirty-second FFI
+	// timeout to answer, and it used to run before the devices were closed —
+	// so a disconnect could leave the tunnel carrying traffic for most of a
+	// minute while the app waited, and the Disconnect button appeared to do
+	// nothing.
 	for _, in := range s.instances {
 		in.dev.Close()
 	}
-	return s.mux.Close()
+	err := s.mux.Close()
+	if stopNode {
+		stopNodeLocked()
+	}
+	return err
+}
+
+// StopNode stops the rendezvous node when no session is using it.
+//
+// The second half of a disconnect: StopForRestart takes the tunnel down
+// promptly, the app tells the user so, and then this does the part that can be
+// slow. A session that started in between keeps its node — this is a no-op
+// while one is running.
+func StopNode() {
+	lifecycle.Lock()
+	defer lifecycle.Unlock()
+	mu.Lock()
+	busy := running != nil
+	mu.Unlock()
+	if !busy {
+		stopNodeLocked()
+	}
+}
+
+// stopNodeLocked stops the shared node. The caller holds lifecycle.
+//
+// Stop, never destroy: destroying leaves state behind that stops the next node
+// being created at all.
+func stopNodeLocked() {
+	mu.Lock()
+	n := node
+	mu.Unlock()
+	if n != nil {
+		_ = n.Stop()
+	}
 }
 
 // Running reports whether the mesh is up.

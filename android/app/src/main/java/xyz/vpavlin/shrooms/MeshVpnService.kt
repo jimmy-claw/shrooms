@@ -54,6 +54,21 @@ class MeshVpnService : VpnService() {
      */
     private val sessionLock = Mutex()
 
+    /**
+     * Every connect, reconnect and disconnect is numbered as it arrives, and a
+     * disconnect records its number in [stopAt].
+     *
+     * A start or restart that was queued on [sessionLock] before a disconnect
+     * arrived is then dropped when it finally gets the lock, instead of
+     * rebuilding the tunnel the user just asked to be rid of. A connect tapped
+     * AFTER the disconnect has a higher number and still runs. Without this, a
+     * watchdog restart queued ahead of the disconnect brought everything back
+     * the moment the disconnect finished.
+     */
+    private val requests = java.util.concurrent.atomic.AtomicLong()
+    @Volatile
+    private var stopAt = 0L
+
     /** The last summary pushed to the home-screen widget. See poll(). */
     private var lastWidgetLine = ""
     private var tunnel: android.os.ParcelFileDescriptor? = null
@@ -176,8 +191,13 @@ class MeshVpnService : VpnService() {
         // whether or not this particular call turns out to have work to do.
         startForeground(NOTIFICATION_ID, notification("Connecting…"))
 
+        val seq = requests.incrementAndGet()
         scope.launch {
             sessionLock.withLock {
+                if (seq < stopAt) {
+                    Log.i(TAG, "a disconnect arrived after this connect; not connecting")
+                    return@withLock
+                }
                 // Re-checked here, inside the lock, which is the only place the
                 // answer stays true long enough to act on.
                 if (Mobile.running()) {
@@ -556,8 +576,13 @@ class MeshVpnService : VpnService() {
      * silence.
      */
     private fun restart() {
+        val seq = requests.incrementAndGet()
         scope.launch {
             sessionLock.withLock {
+                if (seq < stopAt) {
+                    Log.i(TAG, "a disconnect arrived after this reconnect; not reconnecting")
+                    return@withLock
+                }
                 runCatching { Mobile.stopForRestart() }
                     .onFailure { Log.e(TAG, "stop for restart", it) }
                 runCatching { tunnel?.close() }
@@ -634,21 +659,43 @@ class MeshVpnService : VpnService() {
         mgr.notify(GONE_NOTIFICATION_ID, n)
     }
 
+    /**
+     * Disconnect, visibly at once and in two stages.
+     *
+     * The Disconnect button used to appear dead. This waited on [sessionLock]
+     * behind whatever held it — a connect whose library calls can each take
+     * thirty seconds to answer, or a watchdog restart — and said nothing while
+     * it waited. Meanwhile the poll loop kept marking the session connected, so
+     * the screen showed a live tunnel and the button rearmed to "tap again".
+     *
+     * Now the screen says "disconnecting" before the wait, anything queued
+     * ahead is dropped (see [stopAt]), the tunnel goes first, and the slow part
+     * — stopping the delivery node — runs after the user has been told the
+     * tunnel is gone.
+     */
     private fun stop() {
+        val seq = requests.incrementAndGet()
+        stopAt = seq
+        MeshState.stopping()
         scope.launch {
             sessionLock.withLock {
                 // This is the deliberate path — the stop action, and onRevoke
                 // when the user turns the VPN off. Saying so here is what makes
                 // the absence of it meaningful everywhere else.
                 runCatching { Mobile.sessionStopped(filesDir.absolutePath) }
-                runCatching { Mobile.stop() }.onFailure { Log.e(TAG, "stop", it) }
+                runCatching { Mobile.stopForRestart() }.onFailure { Log.e(TAG, "stop", it) }
                 runCatching { tunnel?.close() }
                 tunnel = null
                 MeshState.disconnected()
                 lastWidgetLine = ""
                 ShroomsWidget.refresh(this@MeshVpnService)
                 stopForeground(STOP_FOREGROUND_REMOVE)
-                stopSelf()
+
+                runCatching { Mobile.stopNode() }.onFailure { Log.e(TAG, "stop node", it) }
+
+                // Not if a connect arrived meanwhile: stopSelf ends the service,
+                // and onDestroy cancels the scope that connect is queued on.
+                if (requests.get() == seq) stopSelf()
             }
         }
     }
