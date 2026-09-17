@@ -182,6 +182,12 @@ for the slowest arch" for "arm64 can be behind, visibly".
 
 **A configured relay that has never answered still beats a live discovered one.**
 
+> **Resolved.** The narrower option below was taken on 2026-09-09: a live
+> member relay, configured or discovered, beats a live blind one, and the first
+> configured relay is only the last resort (`selectRelay`, with
+> `relaypriority_test.go`). Hysteresis sits on the fall-back side only. The
+> relay-registers-with-a-relay half was resolved on 2026-09-17 — see below.
+
 `internal/mesh/paths.go:206`, `selectRelay`:
 
 ```go
@@ -210,6 +216,17 @@ and never looked at vps. The fix on the day was to unpin the blind relay by
 hand.
 
 **And a relay never registers with a relay.** Same function, ten lines down:
+
+> **Resolved 2026-09-17**, by removing the gate rather than replacing it with a
+> reachability measurement. A relay now looks for a relay like any node. That
+> costs a public one nothing, because paths are direct first and a relay only
+> carries traffic for peers with no direct path. The one case that needed care
+> is the relay's own clients: a device registered with this node is reached
+> where it registered from (`relay.Server.Client`), never through a second
+> relay it is not registered with — which the naive change would have done,
+> and `relayclient_test.go` fails without that case. A measured "am I public"
+> was not needed: k11 had a router mapping and was still unreachable from the
+> laptop, so the obvious signals would have got its case wrong anyway.
 
 ```go
 // A relay is publicly reachable by definition, so it has no use for one.

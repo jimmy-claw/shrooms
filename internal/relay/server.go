@@ -612,6 +612,24 @@ func (s *Server) Stats() Stat {
 	}
 }
 
+// Client reports where a device registered with this relay was last heard
+// from, while its registration is live.
+//
+// For a relay that is also a member, reaching its own clients. That address is
+// the client's WireGuard socket as its NAT presents it — registrations are sent
+// from the same socket as the tunnel — and it has answered a routability
+// challenge, since an entry only exists once it has. So it is a better way to
+// reach the device than any relay, including one the relay itself is using.
+func (s *Server) Client(key identity.WGKey, now time.Time) (netip.AddrPort, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	r, ok := s.peers[key]
+	if !ok || now.Sub(r.seen) > RegistrationTTL {
+		return netip.AddrPort{}, false
+	}
+	return r.addr, true
+}
+
 // FramedFor reports whether the device at this address speaks the control-header
 // dialect, so a caller writing to it can match.
 //

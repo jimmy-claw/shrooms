@@ -236,15 +236,21 @@ func (m *Mesh) selectRelay(now time.Time) relayChoice {
 		return member
 	}
 
-	// A relay is publicly reachable by DEFINITION only in the config's terms:
-	// relaySrv is non-nil because somebody wrote relay = true, which is a
-	// setting and not a measurement. Kept here for now — see
-	// docs/before-1.0.md — but note it only decides whether to go LOOKING for
-	// one, and no longer suppresses a relay the operator named.
-	discovered := relayChoice{}
-	if m.relaySrv == nil {
-		discovered = m.discoveredRelay(now)
-	}
+	// Being a relay does not mean being reachable.
+	//
+	// This used to skip discovery on any node with relay = true, because "a
+	// relay is publicly reachable by definition". It is a setting, not a
+	// measurement, and k11 was the counter-example: a relay for the home mesh
+	// behind a NAT whose mapped port answered vps and not the laptop. It looked
+	// for no relay, registered with nobody, and was unreachable from anyone
+	// without a direct path, while still offering itself to others.
+	//
+	// Looking costs a public relay nothing. Paths are direct first, so a relay
+	// it selects carries only traffic for peers it genuinely cannot reach — and
+	// its own clients are reached where they registered, never through another
+	// relay (see the relaySrv case in syncPeers). discoveredRelay never returns
+	// this node: the roster does not contain it.
+	discovered := m.discoveredRelay(now)
 
 	// 2. A live member relay found by discovery, over
 	// 3. a live blind relay from the config.

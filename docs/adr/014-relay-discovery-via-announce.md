@@ -85,6 +85,14 @@ Two further rules fall out:
 - **A relay never selects an upstream relay.** It is publicly reachable by
   definition, and self-selection would loop.
 
+  > **Superseded 2026-09-17.** "By definition" was an assumption: k11 was a
+  > relay behind a NAT that answered some peers and not others, and selecting
+  > no relay left it unreachable from them. A relay now selects one like any
+  > node. Self-selection still cannot happen — discovery reads the roster, which
+  > never contains this node — and a relay reaches devices registered with
+  > itself where they registered, never through another relay. See
+  > docs/before-1.0.md.
+
 ## Consequences
 
 - `relay_addr` survives as a config escape hatch to pin a relay — useful for

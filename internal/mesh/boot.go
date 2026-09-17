@@ -36,9 +36,11 @@ var (
 //
 //   - Core. An Edge node subscribes and forwards nothing, so bootstrapping from
 //     it buys a connection to a node with no gossip to share.
-//   - relay. Already means publicly reachable — selectRelay skips relays for
-//     relay nodes "because a relay is publicly reachable by definition" — which
-//     is exactly the property a bootstrap address needs.
+//   - relay. The operator's statement that this node is meant to be dialled.
+//     It is a statement, not a measurement — selectRelay stopped treating it as
+//     proof of reachability on 2026-09-17, after k11 — which is why the public
+//     address below is also required: the flag says "meant to be", the address
+//     says where.
 //   - a pinned delivery port. The library will not say which port it chose, so
 //     an unpinned node cannot describe itself; and a random port would change
 //     on the next restart, publishing an address that quietly stops working.

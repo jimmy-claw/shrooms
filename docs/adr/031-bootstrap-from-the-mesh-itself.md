@@ -52,6 +52,13 @@ is publicly reachable by definition" — and `Core` means the node carries gossi
 so it is worth bootstrapping *from*. An Edge node is neither, and is correctly
 excluded.
 
+> **Amended 2026-09-17.** `selectRelay` no longer skips relays for relay nodes:
+> k11 was a relay behind a NAT that did not answer everyone, so "by definition"
+> was an assumption, and a wrong one. The predicate here survives because it
+> never rested on that alone — a node publishes a bootstrap address only when
+> it can also name a public IP for itself (`internal/mesh/boot.go`). `Relay` is
+> read as "meant to be dialled", not as proof that it can be.
+
 **2. Peers persist what they learn.** This is the part that makes it work rather
 than merely sound good. `internal/waku` exposes `Subscribe`, `Send`, `PeerID`
 and `PeersInMesh` — **there is no `AddPeer`**. Bootstrap addresses are consumed

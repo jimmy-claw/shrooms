@@ -670,6 +670,22 @@ measures differently and would disagree on. There is a regression test for this
 (`TestSelectRelayIsDeterministicAcrossNodes`); it fails if the tiebreak is
 changed to RTT.
 
+**The preference order**, as `selectRelay` implements it today:
+
+1. a configured member relay (`relay_addr`) that has answered recently;
+2. a discovered member relay, by the rule above, used at once;
+3. a configured blind relay that has answered recently;
+4. the first configured relay, answering or not, as a last resort.
+
+A discovered relay that has just gone stale is held for `RelayHold` (45 s)
+before falling back past it, so a late pong does not flip a device onto a
+different relay from its peers. Whatever is selected is also registered with,
+since a relay only forwards between devices registered with it.
+
+Relays select a relay too: `relay = true` is a setting, not proof of being
+reachable. A relay reaches devices registered with itself at the address they
+registered from, never through another relay.
+
 `relay_addr` remains as a config escape hatch to pin a relay, but is no longer
 needed in normal operation.
 

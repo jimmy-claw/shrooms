@@ -1970,6 +1970,17 @@ func (m *Mesh) handle(ev waku.Event) {
 	m.requestResync()
 }
 
+// clientOfOurs points peer at where it registered with this node's relay, and
+// reports whether it had.
+func (m *Mesh) clientOfOurs(key identity.WGKey, now time.Time, peer *wg.Peer) bool {
+	at, ok := m.relaySrv.Client(key, now)
+	if !ok {
+		return false
+	}
+	peer.Endpoint = at.String()
+	return true
+}
+
 // bootstrapEndpoint picks the announced candidate most likely to be reachable
 // from here, for a peer we have never probed successfully.
 //
@@ -2142,6 +2153,11 @@ func (m *Mesh) syncPeers() error {
 			// A probed path: packets have demonstrably reached the peer here.
 			best, _ := m.prober.Best(p.ID(), now)
 			peer.Endpoint = best.Addr.String()
+		case m.relaySrv != nil && m.clientOfOurs(p.WGPub, now, &peer):
+			// A device registered with the relay this node runs. It keeps a
+			// pinhole open to us to stay registered, so it is reachable where
+			// it registered from — and routing it through some other relay,
+			// which it may not be registered with, would cut it off.
 		case rl.ok && rl.id != p.ID():
 			// No direct path. Route through the relay rather than leaving the
 			// peer unreachable — failing over is just an endpoint swap, with no

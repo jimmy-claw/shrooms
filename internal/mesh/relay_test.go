@@ -179,14 +179,20 @@ func TestSelectRelayIsDeterministicAcrossNodes(t *testing.T) {
 	}
 }
 
-// A relay is publicly reachable by definition, so it has no use for one. More
-// importantly it must never select itself, which would loop.
-func TestSelectRelaySkippedWhenActingAsRelay(t *testing.T) {
+// Being a relay is not being reachable, so a relay still looks for one.
+//
+// This used to assert the opposite — "a relay is publicly reachable by
+// definition" — and k11 disproved it: a relay behind a NAT that answered vps
+// and not the laptop, selecting nothing and reachable by nobody without a
+// direct path. What must still hold is that it never selects itself, and the
+// roster, which never contains this node, is what guarantees that.
+func TestARelayStillSelectsOneForItself(t *testing.T) {
 	f := newRelayFixture(t)
 	f.m.relaySrv = relay.NewServer(f.m.relayKey, nil)
 
-	if got := f.m.selectRelay(f.now); got.ok {
-		t.Errorf("a relay selected an upstream relay %v", got.addr)
+	got := f.m.selectRelay(f.now)
+	if !got.ok || got.addr != netip.MustParseAddrPort("203.0.113.9:51820") {
+		t.Errorf("a relay behind a NAT selected %+v, want the discovered relay", got)
 	}
 }
 
