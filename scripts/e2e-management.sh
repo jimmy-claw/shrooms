@@ -102,10 +102,11 @@ scenario_enrol_a_second_device() {
   "$BIN" prepare --config "$(node two)/config.toml" --state "$(node two)/state" \
       --name bob --port 51901 >/dev/null 2>&1
 
-  # Bob joins the mesh by key, which is what a config carries.
-  local key; key=$(sh_ one key show 2>/dev/null | tail -1)
-  sh_ two set-key "$key" >/dev/null 2>&1 ||
-    "$BIN" set-key "$key" --config "$(node two)/config.toml" >/dev/null 2>&1
+  # Bob has no network key: `set-key` went with joining by key (b78fae6), and
+  # the invite that replaced it needs a live rendezvous, which this suite does
+  # not have. So his config keeps the placeholder and names no mesh — the
+  # state a device is in between `credential set` and its first join, and the
+  # one `keys` once reported as unenrolled.
 
   local dev wg seal keys
   keys=$(sh_ two keys 2>&1)

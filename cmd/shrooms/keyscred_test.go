@@ -160,3 +160,50 @@ func TestKeysWithNoCredentialAtAll(t *testing.T) {
 		t.Errorf("keys did not print the enrolment command, which is its main job:\n%s", out)
 	}
 }
+
+// A device that has a credential but no network key yet — prepared, then
+// `credential set` — is enrolled, and `keys` must say so. Its config still
+// carries the placeholder key, and a lookup that skipped every mesh without a
+// readable key reported "none yet" straight after the install succeeded; the
+// management end-to-end scenario caught it.
+func TestKeysWithACredentialAndNoNetworkKey(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.toml")
+	stateDir := filepath.Join(dir, "state")
+	cfg := state.DefaultConfig()
+	cfg.Name = "bob"
+	cfg.NetworkKey = "PASTE-THE-NETWORK-KEY-HERE"
+	if err := state.WriteConfig(cfgPath, cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	st, err := state.LoadOrCreateState(stateDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	admin, err := cred.NewAdmin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	auth, err := cred.NewAuthority(admin.Pub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := cred.IssueFor(admin, auth, st.Identity.DevicePub, st.Identity.WGPub[:],
+		st.Identity.SealPub[:], "bob", 42, time.Now(), 30*24*time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.Credential = raw
+	if err := st.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	out := capture(t, []string{"--config", cfgPath, "--state", stateDir})
+	if strings.Contains(out, "none yet") {
+		t.Errorf("keys called an enrolled device unenrolled:\n%s", out)
+	}
+	if !strings.Contains(out, "bob, serial 42") {
+		t.Errorf("keys did not report the installed credential:\n%s", out)
+	}
+}

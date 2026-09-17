@@ -76,16 +76,17 @@ fi
 mkdir -p "$WORK/b"
 "$BIN" prepare --config "$WORK/b/config.toml" --state "$WORK/b/state" \
     --name beta --port "$B_WG" >"$WORK/b/prepare.log" 2>&1
-# The key goes on stdin, not as an argument: set-key prompts for it, so that a
-# mesh key never lands in a shell history or a process list.
+# The key is written into B's config directly, which is what a config that
+# carries it looks like. `set-key` did this until joining by key was removed
+# (b78fae6); the invite that replaced it is a separate flow, and this suite is
+# about two enrolled nodes finding each other.
 KEY=$("$BIN" key show --config "$WORK/a/config.toml" 2>/dev/null | tail -1)
-printf '%s\n' "$KEY" | "$BIN" set-key --config "$WORK/b/config.toml" \
-    --socket "$SOCKS/none.sock" >"$WORK/b/setkey.log" 2>&1
-if grep -q '^network_key = "'"$KEY"'"' "$WORK/b/config.toml"; then
+sed -i 's|^network_key = .*|network_key = "'"$KEY"'"|' "$WORK/b/config.toml"
+if [ -n "$KEY" ] && grep -q '^network_key = "'"$KEY"'"' "$WORK/b/config.toml"; then
   ok "node B has the mesh key"
 else
   bad "node B never got the mesh key"
-  note "$(tail -2 "$WORK/b/setkey.log")"
+  note "key show gave '${KEY}'"
   exit 1
 fi
 {

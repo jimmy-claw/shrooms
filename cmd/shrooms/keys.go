@@ -75,8 +75,17 @@ func printMeshCredentials(cfgPath string, st *state.State) bool {
 		return printOneCredential("", st.Credential)
 	}
 
+	meshes := cfg.Meshes()
+	if len(meshes) == 0 {
+		// A device that is enrolled but has no network key yet: prepared,
+		// then `credential set`. Its config holds the placeholder, so it
+		// names no mesh, and the credential it was just given is in the
+		// single-mesh field. Returning "none yet" here told it so straight
+		// after the install succeeded.
+		return printOneCredential("", st.Credential)
+	}
 	found := false
-	for _, m := range cfg.Meshes() {
+	for _, m := range meshes {
 		nk, err := m.Key()
 		if err != nil {
 			continue
@@ -89,7 +98,7 @@ func printMeshCredentials(cfgPath string, st *state.State) bool {
 			raw = ms.Credential
 		}
 		label := m.Label
-		if len(cfg.Meshes()) == 1 {
+		if len(meshes) == 1 {
 			// One mesh needs no naming, and printing "default" invites the
 			// question of what the other one is.
 			label = ""
