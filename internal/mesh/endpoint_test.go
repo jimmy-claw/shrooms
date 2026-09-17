@@ -65,7 +65,7 @@ func TestBootstrapPrefersRoutableAddress(t *testing.T) {
 	}
 
 	for _, c := range cases {
-		if got := bootstrapEndpoint(c.in); got != c.want {
+		if got := bootstrapEndpoint(c.in, 51820); got != c.want {
 			t.Errorf("%s: bootstrapEndpoint(%v) = %q, want %q", c.name, c.in, got, c.want)
 		}
 	}

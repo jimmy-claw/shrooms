@@ -1976,8 +1976,8 @@ func (m *Mesh) handle(ev waku.Event) {
 // Globally-routable addresses first. A peer announces every address it has, and
 // taking the list head meant a LAN address could be chosen over a public one
 // purely because of interface ordering on the far side.
-func bootstrapEndpoint(candidates []string) string {
-	return bootstrapFrom(candidates, localAddrs())
+func bootstrapEndpoint(candidates []string, ownPort uint16) string {
+	return bootstrapFrom(candidates, localAddrs(), ownPort)
 }
 
 // bootstrapFrom is bootstrapEndpoint against a given set of local addresses, so
@@ -1990,6 +1990,14 @@ func bootstrapEndpoint(candidates []string) string {
 // days dialling a pi5 at 10.222.140.253: a carrier-NAT address the pi5's router
 // had handed it, first in its announce, and unreachable from anywhere.
 //
+// An address of our own is ourselves only on our own port. On another port it
+// is a second node on this machine — two daemons on one host, which is what the
+// two-node end-to-end test is, and what containers sharing the host network
+// are. So it is kept, but ranked below any LAN address: a peer's docker bridge
+// names the same 172.17.0.1 we have, and dialling that is only right when
+// nothing better was announced. Dropping it outright left the restarted node
+// in that test with nothing to dial, and it never came back.
+//
 // Returning "" is a real answer and a better one than a guess that cannot work.
 // SetPeers writes no endpoint line for it, so WireGuard keeps whatever it
 // learned from the peer's own packets — see wg.Peer.KeepEndpoint, which makes
@@ -2000,8 +2008,8 @@ func bootstrapEndpoint(candidates []string) string {
 // probed regardless (probeAll), so an address that genuinely works is confirmed
 // and wins as a probed path; the guess only ever covers the window before that,
 // or a peer whose disco never answers.
-func bootstrapFrom(candidates []string, mine []netip.Addr) string {
-	var plausible string
+func bootstrapFrom(candidates []string, mine []netip.Addr, ownPort uint16) string {
+	var plausible, sameHost string
 	for _, c := range candidates {
 		ap, err := netip.ParseAddrPort(c)
 		if err != nil {
@@ -2012,10 +2020,12 @@ func bootstrapFrom(candidates []string, mine []netip.Addr) string {
 			a.IsMulticast() || a.IsUnspecified() {
 			continue
 		}
-		// Ours. A peer announcing 172.17.0.1 is naming its own docker bridge,
-		// which on this machine is this machine — dialling it talks to
-		// ourselves.
+		// Ours. On our own port that is this node, and dialling it talks to
+		// ourselves; on another it may be a neighbour on this host.
 		if isOwnAddr(a, mine) {
+			if ap.Port() != ownPort && sameHost == "" {
+				sameHost = c
+			}
 			continue
 		}
 		if a.IsGlobalUnicast() && !a.IsPrivate() {
@@ -2025,7 +2035,10 @@ func bootstrapFrom(candidates []string, mine []netip.Addr) string {
 			plausible = c
 		}
 	}
-	return plausible
+	if plausible != "" {
+		return plausible
+	}
+	return sameHost
 }
 
 // isOwnAddr reports whether an announced address belongs to this machine.
@@ -2153,11 +2166,11 @@ func (m *Mesh) syncPeers() error {
 			// endpoint that has not answered a probe; this case is where that
 			// rule was being broken.
 			peer.KeepEndpoint = true
-		case bootstrapEndpoint(p.Endpoints) != "":
+		case bootstrapEndpoint(p.Endpoints, m.cfg.ListenPort) != "":
 			// Never reached this peer and have no relay: try what was announced.
 			// This is a bootstrap guess, so prefer an address that could
 			// plausibly work from here over one that certainly cannot.
-			peer.Endpoint = bootstrapEndpoint(p.Endpoints)
+			peer.Endpoint = bootstrapEndpoint(p.Endpoints, m.cfg.ListenPort)
 		}
 		// Has the device drifted away from what we last asked for? WireGuard
 		// roams a peer's endpoint to wherever its packets arrive from, so a

@@ -49,9 +49,17 @@ func TestBootstrapGuess(t *testing.T) {
 		cands: []string{"10.222.140.253:51821", "192.168.0.9:51820"},
 		want:  "192.168.0.9:51820",
 	}, {
-		name:  "our own docker bridge is not a way to reach anybody else",
+		name:  "our own docker bridge on our own port is ourselves",
 		cands: []string{"172.17.0.1:51820"},
 		want:  "",
+	}, {
+		name:  "our own address on another port is a neighbour on this host",
+		cands: []string{"192.168.0.151:51990", "172.17.0.1:51990"},
+		want:  "192.168.0.151:51990",
+	}, {
+		name:  "but a LAN peer still beats a guess at our own bridge",
+		cands: []string{"172.17.0.1:51990", "192.168.0.9:51990"},
+		want:  "192.168.0.9:51990",
 	}, {
 		name:  "loopback and link-local are never candidates",
 		cands: []string{"127.0.0.1:51820", "169.254.1.2:51820"},
@@ -66,7 +74,7 @@ func TestBootstrapGuess(t *testing.T) {
 		want:  "192.168.0.9:51820",
 	}} {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := bootstrapFrom(tc.cands, mine); got != tc.want {
+			if got := bootstrapFrom(tc.cands, mine, 51820); got != tc.want {
 				t.Errorf("bootstrapFrom(%v) = %q, want %q", tc.cands, got, tc.want)
 			}
 		})
@@ -76,12 +84,12 @@ func TestBootstrapGuess(t *testing.T) {
 // A node that cannot enumerate its own addresses — Android denies it — must
 // still take a public candidate. Without this a phone would refuse every guess.
 func TestBootstrapGuessWithNoLocalAddresses(t *testing.T) {
-	if got := bootstrapFrom([]string{"178.213.45.235:51822"}, nil); got != "178.213.45.235:51822" {
+	if got := bootstrapFrom([]string{"178.213.45.235:51822"}, nil, 51820); got != "178.213.45.235:51822" {
 		t.Errorf("got %q, want the public address", got)
 	}
 	// And a private one is not plausible when we know nothing about ourselves,
 	// which is correct: there is no evidence it is reachable.
-	if got := bootstrapFrom([]string{"192.168.0.9:51820"}, nil); got != "" {
+	if got := bootstrapFrom([]string{"192.168.0.9:51820"}, nil, 51820); got != "" {
 		t.Errorf("got %q, want none", got)
 	}
 }
