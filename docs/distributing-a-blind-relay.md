@@ -40,6 +40,15 @@ Every member:
 An adopted relay behaves exactly like a `relay_blind` entry, after any
 configured ones: it is registered with (at most two, as always), selected by the
 same order (DESIGN §8), and may report where it saw us (`relay.TypeObserved`).
+**It never displaces a member relay.** Because it is blind, it sits in the
+third tier of that order: a live member relay, whether configured or
+discovered from the mesh, is always chosen first, and the admin's relay carries
+traffic only when no member relay is answering (after the 45-second hold on a
+discovered one). The device still *registers* with it meanwhile, which costs a
+keepalive and is what brings back the "where we saw you" report — the part
+that lets members behind one NAT learn their public address at all.
+`TestAMemberRelayBeatsTheAdminsBlindOne` pins this.
+
 `shrooms status` marks it "(named by the mesh's admin)", and the status JSON
 carries `relay_advised` and `relay_advice_serial` per mesh.
 

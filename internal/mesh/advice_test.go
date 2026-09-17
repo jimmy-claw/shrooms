@@ -268,3 +268,32 @@ func TestAdviceRepeatsOnDiscoveryWithACooldown(t *testing.T) {
 		t.Error(`announce_revocations = "false" did not silence the repeat`)
 	}
 }
+
+// Advice adds a blind relay; it does not outrank the mesh's own.
+//
+// Asked on 2026-09-17: "will the mesh still prioritize a mesh peer relay? We do
+// not want to force blind relay if there is existing peer that can handle it."
+// It does, because an adopted relay is a blind target and selectRelay puts any
+// live member relay — configured or discovered — ahead of every blind one. This
+// pins that, with the admin's relay answering, so the test fails if adoption
+// ever lands in the member tier or ahead of discovery.
+func TestAMemberRelayBeatsTheAdminsBlindOne(t *testing.T) {
+	f := newAdviceFixture(t, state.Config{})
+	now := time.Now()
+	f.m.handleRelayAdvice(f.advise(t, 10, "tok", "222.167.212.15:31760"), now)
+	advised := netip.MustParseAddrPort("222.167.212.15:31760")
+	live(f.m, advised, now)
+
+	// The fixture's vps is a member relay, announced and probed.
+	got := f.m.selectRelay(now)
+	if !got.ok || got.addr == advised || got.id == "" {
+		t.Fatalf("with a live member relay on the mesh, selectRelay chose %+v", got)
+	}
+
+	// And a configured member relay beats it too.
+	member := pin(f.m, "192.0.2.50:51820", false)
+	live(f.m, member, now)
+	if got := f.m.selectRelay(now); got.addr != member {
+		t.Errorf("with a live configured member relay, selectRelay chose %+v", got)
+	}
+}
