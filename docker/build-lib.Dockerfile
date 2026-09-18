@@ -116,13 +116,19 @@ SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 # sets SHELL to bash — so the `sh` call was stepping outside that for no reason.
 COPY docker/build-lib-nimblefree.sh /src/docker/build-lib-nimblefree.sh
 
-# The Makefile bootstraps its own pinned nim/nimble via install-nim/install-nimble. The
-# nimble-free script calls `nim c` directly, so it needs that bootstrap to have happened:
-# previously `make liblogosdelivery` pulled it in as a prerequisite, and replacing that step
-# removed the bootstrap along with it. Without this the build dies with
-#   build-lib-nimblefree.sh: line 236: nim: command not found
-# (exit 127). nimble itself is NOT needed any more — only the compiler.
-RUN make install-nim
+# Bootstrap Nim from the UPSTREAM Makefile — /src is the logos-delivery clone, not this repo,
+# so `make liblogosdelivery` and its install-nim prereq are upstream's targets, not shrooms'.
+# (shrooms' own Makefile contains no reference to nim at all; a comment here used to imply
+# otherwise, which is how a first attempt at this fix invoked a target that does not exist.)
+#
+# The nimble-free script calls `nim c` directly, so the compiler must exist. Previously
+# `make liblogosdelivery` pulled install-nim in as a prerequisite; replacing that step removed
+# the bootstrap with it, and in a fresh container the build dies with
+#   build-lib-nimblefree.sh: line 236: nim: command not found   (exit 127)
+# On the originating host it worked only because nim was already installed system-wide.
+# nimble itself is deliberately still not bootstrapped: resolution is gone, so only the
+# compiler is needed.
+RUN cd /src && make install-nim
 
 RUN make librln \
     && bash /src/docker/build-lib-nimblefree.sh /src
