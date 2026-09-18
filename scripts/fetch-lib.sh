@@ -67,9 +67,16 @@ echo "==> checksum ok"
 tar xzf "$tmp/$ASSET" -C "$tmp"
 # The bundled files are read-only (they come from a Basecamp install), so a
 # plain cp over an existing copy fails with EACCES.
-cp -f --no-preserve=mode "$tmp"/lib/* "$DEST/" 2>/dev/null || {
+#
+# -r, and lib/. rather than lib/*, because a bundle may carry a directory beside
+# the library: the arm64 one has an (empty) generated/. Without -r, cp reports
+# "omitting directory", returns non-zero and `set -e` ends the script — after
+# copying the .so and .h, so it fails having apparently succeeded. That is how
+# the first arm64 image job failed, seconds after "checksum ok", while the same
+# copy exited 0 on the laptop it was tested on.
+cp -rf --no-preserve=mode "$tmp"/lib/. "$DEST/" 2>/dev/null || {
     chmod -R u+w "$DEST" 2>/dev/null || true
-    cp -f --no-preserve=mode "$tmp"/lib/* "$DEST/"
+    cp -rf --no-preserve=mode "$tmp"/lib/. "$DEST/"
 }
 
 [ -f "$DEST/liblogosdelivery.so" ] || { echo "bundle did not contain liblogosdelivery.so"; exit 1; }
