@@ -72,3 +72,37 @@ func TestForgetClearsTiming(t *testing.T) {
 		t.Errorf("timing survived forget: %s", got)
 	}
 }
+
+// Whether a tunnel came from the remembered roster is a question about the
+// ORDER of two events, and it was being answered with "has discovery happened
+// by now" — which is a question about when the poll ran.
+//
+// Handshakes are noticed by polling the UAPI every two seconds. On 2026-09-18
+// the two-node end-to-end suite restarted node B, which handshook on its
+// remembered endpoint after 22ms, and the announce arrived at 1.315s. Both had
+// happened by the time the poll looked, so a memory hit was reported as an
+// announce-driven connection and the suite failed a claim that was true.
+func TestFromMemoryComparesWhenNotWhether(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		in   Timing
+		want bool
+	}{
+		{"handshake first, announce later in the same poll",
+			Timing{TunnelAfter: 22 * time.Millisecond, DiscoveredAfter: 1315 * time.Millisecond}, true},
+		{"no announce at all",
+			Timing{TunnelAfter: 8 * time.Millisecond}, true},
+		{"announce first, then the tunnel it caused",
+			Timing{TunnelAfter: 1337 * time.Millisecond, DiscoveredAfter: 1315 * time.Millisecond}, false},
+		{"no tunnel yet is not a memory hit",
+			Timing{DiscoveredAfter: 2 * time.Second}, false},
+		{"nothing has happened",
+			Timing{}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := fromMemory(tc.in); got != tc.want {
+				t.Errorf("fromMemory(%+v) = %v, want %v", tc.in, got, tc.want)
+			}
+		})
+	}
+}

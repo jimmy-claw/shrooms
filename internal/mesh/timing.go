@@ -100,6 +100,18 @@ func (m *Mesh) Timing(id string) Timing {
 	}
 }
 
+// fromMemory reports whether the tunnel came up before this peer's first
+// announce — which means WireGuard used an endpoint the last run wrote down.
+//
+// Zero means "has not happened", so no announce at all is a memory hit, and a
+// tunnel that has not happened is not one.
+func fromMemory(t Timing) bool {
+	if t.TunnelAfter <= 0 {
+		return false
+	}
+	return t.DiscoveredAfter <= 0 || t.TunnelAfter < t.DiscoveredAfter
+}
+
 // checkTunnels notices the first completed handshake for each peer and reports
 // the full breakdown once.
 //
@@ -126,12 +138,22 @@ func (m *Mesh) checkTunnels(now time.Time) {
 		args := []any{"peer", p.Name, "after", t.TunnelAfter.Round(time.Millisecond)}
 		if t.DiscoveredAfter > 0 {
 			args = append(args, "discovered_after", t.DiscoveredAfter.Round(time.Millisecond))
-		} else {
-			// A tunnel before the first announce: this peer came from the
-			// remembered roster and WireGuard reached it on a stored endpoint
-			// while the rendezvous plane was still coming up. That is the whole
-			// point of remembering, and it used to be impossible — no announce
-			// meant no peer meant nothing to handshake with.
+		}
+		// A tunnel before the first announce: this peer came from the
+		// remembered roster and WireGuard reached it on a stored endpoint while
+		// the rendezvous plane was still coming up. That is the whole point of
+		// remembering, and it used to be impossible — no announce meant no peer
+		// meant nothing to handshake with.
+		//
+		// Decided by comparing WHEN each happened, not by whether discovery has
+		// happened by the time this poll runs. Handshakes are noticed by
+		// polling the UAPI every couple of seconds, so a tunnel that came up at
+		// 22ms is commonly first seen after an announce that arrived at 1.3s —
+		// and this then reported a memory hit as an announce-driven connection.
+		// The end-to-end suite caught it on 2026-09-18: node B restarted,
+		// handshook on the remembered endpoint in 22ms, and was recorded as
+		// having waited for discovery it had beaten by more than a second.
+		if fromMemory(t) {
 			args = append(args, "from", "memory")
 		}
 		if t.PathAfter > 0 {
