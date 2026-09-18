@@ -33,3 +33,5 @@ e69496a4aeb51ebe61d0775ae9fefc76eee640f12317aa5174da67e5d4ec8fd6  android/arm64-
 23bff042dfabf944395fa5e90febb7ff363477ff98c3cc26c6fc8ad53212e34f  android/arm64-v8a/liblogosdelivery.so
 766bd58a36f9233a4647bcba16f9192a6cb691a211950401b8e0d6c826478e45  android/arm64-v8a/librln.so
 3681d42a5ca834a8a0e187139cf282b642122870c14737a65bf5aa297d017cd8  android/liblogosdelivery.h
+
+f370aabc9e58c7b597983a95df9106d8c8ce4a98d241a2bf78e380957a5ed84f  deps-v1/liblogosdelivery-linux-arm64.tar.gz

@@ -132,17 +132,16 @@ jobs:
   # reason test-cgo is: this job has to be able to gate.
   # One job per architecture, on native runners.
   #
-  # Not QEMU. This image carries a Go binary and liblogosdelivery, and the arm64
-  # side has to build that library from source — Nim plus Rust — which under
-  # emulation is hours rather than minutes. GitHub's arm64 runners are free for
-  # public repositories, which this is.
+  # Not QEMU. Native runners on both architectures; GitHub's arm64 runners are
+  # free for public repositories, which this is.
   #
-  # The two halves are deliberately asymmetric about where the library comes
-  # from. amd64 fetches the checksum-pinned release tarball, which is what
-  # gates the rest of the repo; arm64 builds it from the pinned upstream
-  # revision, because no arm64 asset has been published yet. Publishing one
-  # would make both paths identical and this job faster — worth doing once the
-  # arm64 build has been green for a while.
+  # Both halves take the same path: the checksum-pinned release tarball, chosen
+  # by architecture. arm64 used to build the library from source, because no
+  # arm64 asset had been published — which made the ONLY job that exercised the
+  # from-source path the one architecture nobody could test locally. When that
+  # path broke it took the manifest with it, for BOTH architectures, because
+  # image-manifest needs both arches to have pushed. Now arm64 fetches a
+  # checksum-pinned tarball too, like the amd64 image, the tests and the e2e jobs.
   image:
     name: publish image (${{ matrix.arch }})
     strategy:
@@ -166,24 +165,8 @@ jobs:
         with:
           go-version: '1.24'
 
-      - name: Fetch liblogosdelivery (prebuilt, amd64)
-        if: matrix.arch == 'amd64'
+      - name: Fetch liblogosdelivery (prebuilt, checksum-pinned)
         run: make deps-release
-
-      # No published arm64 tarball yet, so build it from the same revision the
-      # amd64 asset was repackaged from. Cached on that revision and on this
-      # Dockerfile, since the patches it applies are part of what is built.
-      - name: Cache liblogosdelivery (arm64)
-        if: matrix.arch == 'arm64'
-        id: libcache
-        uses: actions/cache@v4
-        with:
-          path: docker/build/lib
-          key: liblogosdelivery-arm64-${{ hashFiles('docker/build-lib.Dockerfile') }}
-
-      - name: Build liblogosdelivery (arm64)
-        if: matrix.arch == 'arm64' && steps.libcache.outputs.cache-hit != 'true'
-        run: docker build -f docker/build-lib.Dockerfile --target lib -o docker/build/lib .
 
       - name: Log in to ghcr.io
         uses: docker/login-action@v3

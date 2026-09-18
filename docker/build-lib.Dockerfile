@@ -55,13 +55,10 @@ RUN git clone https://github.com/logos-messaging/logos-delivery.git . \
 # tree that needs no patching. What must hold either way is that the bad
 # construct is absent by the time make runs.
 RUN set -eux; \
-    # 1. nimble re-resolves taskpools past the lockfile pin (0.2.1 instead of
-    #    0.1.0), and 0.2.1 dropped taskpools/channels_spsc_single.nim, so the
-    #    build dies on a missing import. Naming the commit leaves nothing to
-    #    resolve. `nimble setup --localdeps` re-runs on every make, so fixing
-    #    the staged tree by hand is undone; the requirement is the durable fix.
-    sed -i 's|^\( *\)"taskpools",|\1"https://github.com/status-im/nim-taskpools#9e8ccc754631ac55ac2fd495e167e74e86293edb",|' logos_delivery.nimble; \
-    ! grep -qE '^ *"taskpools",' logos_delivery.nimble; \
+    # 1. The taskpools pin is no longer needed: it existed to stop nimble
+    #    re-resolving past the lockfile, and nimble no longer resolves at all
+    #    (the deps come from nimble.lock). Left out deliberately rather than
+    #    kept as folklore.
     # 2. chronos 4.4.0 refuses `waitFor` inside an async handler — NestedPoll —
     #    and this call site is already inside one that awaits eight lines up.
     #    Upstream master uses the await form.
@@ -96,23 +93,45 @@ SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 # Errors from the top, because the first one is the cause and everything after
 # it is consequence — the opposite of what a tail gives you. The last 200 lines
 # come too, for a failure with no line matching at all.
-RUN echo "building liblogosdelivery from $(cat /src/.ld-rev)" \
-    && { make liblogosdelivery > /tmp/build.log 2>&1 || { \
-            echo "=== FIRST errors (the cause) ==="; \
-            grep -nE '^ *Error:|error:|fatal error|cannot open|undefined reference' /tmp/build.log \
-                | head -60 || true; \
-            first=$(grep -nE '^ *Error:|error:|fatal error' /tmp/build.log \
-                     | head -1 | cut -d: -f1); \
-            if [ -n "$first" ]; then \
-                echo "=== around the first error (line $first) ==="; \
-                sed -n "$(( first > 60 ? first - 60 : 1 )),$(( first + 160 ))p" /tmp/build.log; \
-            fi; \
-            echo "=== last 200 lines (context) ==="; \
-            tail -200 /tmp/build.log; \
-            echo "=== log was $(wc -l < /tmp/build.log) lines ==="; \
-            exit 1; \
-         }; } \
-    && tail -20 /tmp/build.log
+# The dependency resolution is gone, so nimble is not used at all here.
+#
+# At this revision nimble cannot resolve its own graph: it fails in `solveLockFileDeps` on a
+# pristine tree with a freshly downloaded package list, and it fails AGAIN when running the
+# compile task (`nimble liblogosdelivery …`), so staging deps and touching the setup stamp does
+# not help. nimble.lock is itself a complete resolution -- 46 packages, each with a url, a
+# vcsRevision and a sha1 -- so the script materialises from the lock and calls the compiler
+# directly with the flags the .nimble's own buildLibrary proc uses.
+#
+# librln is a cargo build, not a nimble one, so it stays.
+# The script has to be IN the image: the builder stage is a fresh debian:bookworm with the
+# upstream repo cloned into /src, so nothing from this repository is present unless it is
+# COPYed. Without this line the build dies with
+#   sh: 0: cannot open /src/docker/build-lib-nimblefree.sh: No such file
+# It was missing from the first handover because the originating builds ran the script on the
+# host rather than through this Dockerfile — which is also why their artifact needed a newer
+# glibc than the CI base provides.
+#
+# Invoked with bash, not sh: the script uses `set -o pipefail`, and Debian's /bin/sh is dash,
+# which rejects it ("set: Illegal option -o pipefail"). The image has bash — this file already
+# sets SHELL to bash — so the `sh` call was stepping outside that for no reason.
+COPY docker/build-lib-nimblefree.sh /src/docker/build-lib-nimblefree.sh
+
+# Bootstrap Nim from the UPSTREAM Makefile — /src is the logos-delivery clone, not this repo,
+# so `make liblogosdelivery` and its install-nim prereq are upstream's targets, not shrooms'.
+# (shrooms' own Makefile contains no reference to nim at all; a comment here used to imply
+# otherwise, which is how a first attempt at this fix invoked a target that does not exist.)
+#
+# The nimble-free script calls `nim c` directly, so the compiler must exist. Previously
+# `make liblogosdelivery` pulled install-nim in as a prerequisite; replacing that step removed
+# the bootstrap with it, and in a fresh container the build dies with
+#   build-lib-nimblefree.sh: line 236: nim: command not found   (exit 127)
+# On the originating host it worked only because nim was already installed system-wide.
+# nimble itself is deliberately still not bootstrapped: resolution is gone, so only the
+# compiler is needed.
+RUN cd /src && make install-nim
+
+RUN make librln \
+    && bash /src/docker/build-lib-nimblefree.sh /src
 
 # The public header includes "generated/logosdelivery.h", which upstream says
 # plainly is "a build artifact, not checked in" — written by the build we just
