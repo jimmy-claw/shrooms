@@ -217,16 +217,30 @@ jobs:
       - name: Report
         run: echo "pushed ${{ steps.img.outputs.name }}:${{ github.sha }}-${{ matrix.arch }}"
 
-  # The tags people pull, pointing at both architectures.
+  # The tags people pull.
   #
-  # A separate job so it runs only when every arch has been pushed: a manifest
-  # naming an image that does not exist is a pull that fails on exactly the
-  # platform the manifest was meant to serve.
+  # :latest and :<sha> require BOTH architectures: a manifest list naming an image
+  # that does not exist is a pull that fails on exactly the platform it was meant
+  # to serve, and a single-arch :latest would hand every arm64 host an amd64 image
+  # for as long as the other build takes.
+  #
+  # But this job must not be *skipped* when one arch fails. Skipped is silent, and
+  # silence here is expensive: :latest keeps pointing at an older commit, the run
+  # stays green, and the only signal is a job that never appeared. That is how a
+  # broken arm64 build froze :latest for a month (2026-08 to 2026-09).
+  #
+  # So it runs whenever it can, and then:
+  #   - :<sha> and :latest move only when both arches are present, unchanged;
+  #   - :latest-<arch> moves for whichever arch did succeed, so a host that knows
+  #     its own architecture can always pull by name;
+  #   - a missing arch is an error, so the run is never quietly green.
   image-manifest:
     name: publish image manifest
     needs: image
     runs-on: ubuntu-latest
-    if: github.event_name == 'push'
+    # !cancelled() rather than always(): a cancelled workflow stays cancelled, but
+    # a *failed* sibling must not hide this job.
+    if: ${{ !cancelled() && github.event_name == 'push' }}
     permissions:
       contents: read
       packages: write
@@ -244,28 +258,65 @@ jobs:
 
       - name: Assemble
         run: |
-          set -eux
+          set -eu
           IMG=${{ steps.img.outputs.name }}
           SHA=${{ github.sha }}
-          # Retried for the same reason as the per-arch push above: this
-          # writes to the same registry and fails the same transient way, and
-          # a manifest that did not land leaves :latest on the previous commit.
-          manifest() {
-            docker manifest create "$IMG:$1" "$IMG:$SHA-amd64" "$IMG:$SHA-arm64"
+
+          # Retried for the same reason as the per-arch push above: this writes to
+          # the same registry and fails the same transient way, and a manifest that
+          # did not land leaves :latest on the previous commit.
+          push_manifest() {
+            tag=$1; shift
+            docker manifest create "$IMG:$tag" "$@"
             for attempt in 1 2 3 4 5; do
-              docker manifest push "$IMG:$1" && return 0
-              echo "manifest push $1 failed (attempt $attempt)"
+              docker manifest push "$IMG:$tag" && return 0
+              echo "manifest push $tag failed (attempt $attempt)"
               sleep $((attempt * 10))
             done
-            echo "::error::manifest push of $IMG:$1 failed five times"
+            echo "::error::manifest push of $IMG:$tag failed five times"
             return 1
           }
-          manifest "$SHA"
-          if [ "${{ github.ref }}" = "refs/heads/master" ] || [ "${{ github.ref }}" = "refs/heads/main" ]; then
-            manifest latest
-          fi
-          case "${{ github.ref }}" in
-            refs/tags/v*) manifest "${GITHUB_REF_NAME}" ;;
+
+          # Which architectures actually reached the registry. The image job has
+          # fail-fast: false, so at most one can be absent.
+          present=""
+          for arch in amd64 arm64; do
+            if docker manifest inspect "$IMG:$SHA-$arch" >/dev/null 2>&1; then
+              present="$present $arch"
+              echo "present: $arch"
+            else
+              echo "::warning::no image for $arch at $SHA - that build did not push"
+            fi
+          done
+          present="${present# }"
+
+          case "$(echo "$present" | wc -w)" in
+            2)
+              push_manifest "$SHA" "$IMG:$SHA-amd64" "$IMG:$SHA-arm64"
+              # Per-arch aliases, so neither architecture is hostage to the other.
+              for arch in amd64 arm64; do
+                push_manifest "latest-$arch" "$IMG:$SHA-$arch"
+              done
+              if [ "${{ github.ref }}" = "refs/heads/master" ] || [ "${{ github.ref }}" = "refs/heads/main" ]; then
+                push_manifest latest "$IMG:$SHA-amd64" "$IMG:$SHA-arm64"
+              fi
+              case "${{ github.ref }}" in
+                refs/tags/v*) push_manifest "${GITHUB_REF_NAME}" "$IMG:$SHA-amd64" "$IMG:$SHA-arm64" ;;
+              esac
+              ;;
+            1)
+              # One arch is enough for its own alias and is *not* enough for
+              # :latest - see the comment above. The alias keeps a host of the
+              # surviving architecture current instead of stuck on an older
+              # commit; the error makes the partial state loud rather than green.
+              push_manifest "latest-$present" "$IMG:$SHA-$present"
+              echo "::error::$SHA has only $present; :latest and :$SHA were NOT moved, so a host on the other architecture is still on the previous :latest."
+              exit 1
+              ;;
+            *)
+              echo "::error::neither architecture published an image for $SHA"
+              exit 1
+              ;;
           esac
 
       - name: Report
