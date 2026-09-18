@@ -74,6 +74,28 @@ than discovering later.
 
 **Whether `:latest` should wait for arm64 — and arm64 may not be fixable here.**
 
+> **Resolved 2026-09-18.** The delivery team built the pinned revision without
+> nimble — the lock is already a complete resolution, so the packages are
+> materialised at their recorded revisions and the compiler invoked directly —
+> and published an arm64 tarball, verified inside bookworm: `.ld-rev`
+> `7a3a064b…`, ELF aarch64, max GLIBC 2.34 against bookworm's 2.36. It is now a
+> `deps-v1` release asset pinned in `deps/CHECKSUMS`, and both architectures
+> fetch a prebuilt: the from-source path is gone from CI. `:latest` is a
+> two-architecture manifest again, for the first time since 10 August.
+>
+> Two things are worth keeping from how it went. The failure was never
+> arm64-specific — it reproduced on amd64 against the same revision, and arm64
+> was simply the only job that built from source. And the first green attempt
+> still failed, one line after "checksum ok": the arm64 bundle carries an empty
+> `generated/` directory, a non-recursive `cp` returned non-zero after copying
+> the library, and `set -e` ended the script. It exits 0 on the laptop it was
+> tested on. Scripts are gated on their exit code, not on whether the files
+> appear.
+>
+> The manifest still needs BOTH architectures to push, so one failing
+> architecture still freezes `:latest` for everyone. That part is unchanged and
+> the decision below still stands.
+
 Diagnosed properly on 2026-09-07, after two wrong answers from me. The arm64 job
 is the only one that builds liblogosdelivery from source (amd64 fetches a
 checksum-pinned tarball), and that build fails inside nimble's resolver before a
