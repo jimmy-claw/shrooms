@@ -115,6 +115,15 @@ SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 # which rejects it ("set: Illegal option -o pipefail"). The image has bash — this file already
 # sets SHELL to bash — so the `sh` call was stepping outside that for no reason.
 COPY docker/build-lib-nimblefree.sh /src/docker/build-lib-nimblefree.sh
+
+# The Makefile bootstraps its own pinned nim/nimble via install-nim/install-nimble. The
+# nimble-free script calls `nim c` directly, so it needs that bootstrap to have happened:
+# previously `make liblogosdelivery` pulled it in as a prerequisite, and replacing that step
+# removed the bootstrap along with it. Without this the build dies with
+#   build-lib-nimblefree.sh: line 236: nim: command not found
+# (exit 127). nimble itself is NOT needed any more — only the compiler.
+RUN make install-nim
+
 RUN make librln \
     && bash /src/docker/build-lib-nimblefree.sh /src
 
