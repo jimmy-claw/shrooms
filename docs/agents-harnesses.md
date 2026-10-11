@@ -97,7 +97,7 @@ A harness's own errors are best shown as an assistant text block ("error:
 
 ### Adding one, by the example of pi
 
-pi (`@mariozechner/pi-coding-agent`, pi.dev) is driven in its RPC mode,
+pi (`@earendil-works/pi-coding-agent`, pi.dev) is driven in its RPC mode,
 `pi --mode rpc`: JSON commands on stdin, events on stdout (pi's
 `docs/rpc.md`). It runs on any model pi is set up with — a local one
 included, which is why it is first: a machine with a GPU and no Claude

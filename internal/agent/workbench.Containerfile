@@ -13,7 +13,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         git curl ca-certificates openssh-client build-essential pkg-config python3 python3-pip python3-venv \
         ripgrep jq less procps psmisc unzip xz-utils file \
     && rm -rf /var/lib/apt/lists/*
-RUN npm install -g @mariozechner/pi-coding-agent && npm cache clean --force
+# pi moved to @earendil-works; @mariozechner/pi-coding-agent stopped at 0.73.1,
+# which takes a models.json apiKey of "$VAR" literally and fails with 401.
+# Pinned to the version the RPC driver (pi.go) has run against.
+RUN npm install -g @earendil-works/pi-coding-agent@0.85.1 && npm cache clean --force
 # The GitHub CLI, for a cage given the owner's login (Cage.GitHub).
 RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg -o /usr/share/keyrings/githubcli.gpg \
     && echo "deb [signed-by=/usr/share/keyrings/githubcli.gpg] https://cli.github.com/packages stable main" > /etc/apt/sources.list.d/github-cli.list \

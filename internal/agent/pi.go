@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-// Pi is pi (pi.dev, @mariozechner/pi-coding-agent), driven in its RPC mode:
+// Pi is pi (pi.dev, @earendil-works/pi-coding-agent), driven in its RPC mode:
 // `pi --mode rpc`, JSON commands in and events out, one per line (pi's
 // docs/rpc.md). It runs on whatever model pi is set up with — a local one
 // included — which is the point for machines with no Claude account.
