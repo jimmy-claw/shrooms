@@ -374,6 +374,21 @@ func TestASessionKeptRunningComesBack(t *testing.T) {
 	}
 }
 
+// A conversation pi never wrote — its first start ended before a message —
+// is not resumed: pi would exit, and a session kept running would fail to
+// start again forever. It starts afresh.
+func TestAPiConversationNeverWrittenStartsAfresh(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PI_CODING_AGENT_DIR", dir)
+	t.Setenv("PI_CODING_AGENT_SESSION_DIR", "")
+	os.MkdirAll(filepath.Join(dir, "sessions", "--home-somewhere--"), 0o700)
+	for _, a := range (Pi{}).Args(StartOptions{Resume: "01a12bae-71ee"}) {
+		if a == "--session" {
+			t.Fatalf("resumed a conversation pi never kept: %q", (Pi{}).Args(StartOptions{Resume: "01a12bae-71ee"}))
+		}
+	}
+}
+
 // A pi conversation kept in another directory's sessions — an agent started
 // by a script of its own, with --session-dir — is continued by its file, and
 // in the directory it ran in.

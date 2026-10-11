@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -81,6 +82,16 @@ func fakePi() {
 			emit(map[string]any{"type": "response", "command": "abort", "success": true})
 		case "prompt":
 			text, _ := c["message"].(string)
+			// As pi: a conversation is written once it has a message, and
+			// only then can it be resumed.
+			if d := os.Getenv("PI_CODING_AGENT_DIR"); d != "" && !strings.HasSuffix(id, ".jsonl") {
+				dir := filepath.Join(d, "sessions", "--fake--")
+				if m, _ := filepath.Glob(filepath.Join(d, "sessions", "*", "*_"+id+".jsonl")); len(m) == 0 {
+					os.MkdirAll(dir, 0o700)
+					os.WriteFile(filepath.Join(dir, "2026-10-11T00-00-00-000Z_"+id+".jsonl"),
+						[]byte(`{"type":"session","version":3,"id":"`+id+`"}`+"\n"), 0o600)
+				}
+			}
 			emit(map[string]any{"id": reqID, "type": "response", "command": "prompt", "success": true})
 			emit(map[string]any{"type": "agent_start"})
 			emit(map[string]any{"type": "message_end", "message": map[string]any{"role": "user",
@@ -149,5 +160,9 @@ func fakePiBin(t *testing.T) string {
 		t.Fatal(err)
 	}
 	t.Setenv("FAKE_PI", "1")
+	// Where it keeps its conversations, as pi does: never the person's own.
+	if os.Getenv("PI_CODING_AGENT_DIR") == "" {
+		t.Setenv("PI_CODING_AGENT_DIR", t.TempDir())
+	}
 	return self
 }

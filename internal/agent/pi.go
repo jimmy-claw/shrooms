@@ -40,11 +40,20 @@ func (p Pi) Args(o StartOptions) []string {
 		// the sessions of the directory it runs in, and says there is none
 		// for a conversation kept elsewhere — one started with
 		// --session-dir, as an agent run from a script of its own may be.
-		session := o.Resume
-		if f, _ := p.TranscriptPath(o.Resume); f != "" {
-			session = f
+		//
+		// And not at all when no directory has it: pi writes a conversation
+		// only once it has a message, so a session whose first start ended
+		// before one has an id pi never kept. Given it, pi exits with 1 —
+		// and a session kept running was started again every 15 seconds,
+		// failing each time, and never took a message (seen on proteus).
+		// Searched everywhere pi keeps conversations, so pi could not find
+		// it either.
+		switch f, err := p.TranscriptPath(o.Resume); {
+		case f != "":
+			args = append(args, "--session", f)
+		case err != nil:
+			args = append(args, "--session", o.Resume)
 		}
-		args = append(args, "--session", session)
 	}
 	if o.Note != "" {
 		args = append(args, "--append-system-prompt", o.Note)
