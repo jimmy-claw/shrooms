@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>shrooms — agents quick start</title>
+<meta name="description" content="The Claude Code sessions on your own machines, on your phone, in about ten minutes: one installer on the machine, one app on the phone, over the mesh you already have.">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="style.css">
+<meta property="og:title" content="Shrooms Agents — your coding agents on your phone in ten minutes">
+<meta property="og:description" content="Claude Code or pi on your own machines, from your phone or Basecamp. No cloud relay, no account: being on your mesh is the access control.">
+<meta property="og:image" content="https://shrooms.vpavlin.xyz/og-agents.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="theme-color" content="#07090b">
+</head>
+<body>
+<div class="aurora" aria-hidden="true"><i></i><i></i><i></i></div>
+<div class="lattice" aria-hidden="true"></div>
+<canvas id="field"></canvas>
+<div class="grain" aria-hidden="true"></div>
+
+<div class="page">
+<nav>
+    <a class="mark" href="index.html"><img class="nav-logo" src="logo.svg" alt="" width="24" height="24">shrooms</a>
+    <a href="index.html">what &amp; why</a>
+    <a href="start.html">quick start</a>
+    <a href="install.html">install</a>
+    <a href="guides.html">guides</a>
+    <a href="basecamp.html">desktop</a>
+    <a href="keycard.html">keycard</a>
+    <a href="agents.html" class="here">agents</a>
+    <a href="dev.html">dev notes</a>
+    <span class="spacer"></span>
+    <a href="https://github.com/vpavlin/shrooms">github</a>
+</nav>
+
+<nav class="tabs" aria-label="Shrooms Agents">
+    <a href="agents.html">overview</a>
+    <a href="agents-start.html" class="here">quick start</a>
+    <a href="agents-using.html">using it</a>
+    <a href="agents-setup.html">setting up</a>
+    <a href="agents-together.html">agents together</a>
+    <a href="agents-cages.html">cages</a>
+    <a href="agents-reference.html">reference</a>
+</nav>
+
+<header class="hero">
+    <img src="agents-logo.svg" alt="" width="72" height="72">
+    <h1>Your coding agents,<br>on your phone,<br>in ten minutes.</h1>
+    <p class="lede">
+        Leave Claude Code working on the laptop and walk away. When it stops to
+        ask whether it may run something, your phone buzzes; you read the reply
+        as it is written, allow it, and it carries on.
+    </p>
+</header>
+
+<h2 id="need">What you need</h2>
+
+<ul>
+    <li><strong>A shrooms mesh</strong> with the machine and the phone on it.
+    No mesh yet? <a href="start.html">Five minutes</a>.</li>
+    <li><strong>Claude Code or pi working in a terminal</strong> on that
+    machine, as your own user: installed, logged in, paid for. The agent runs
+    what is there; it does not install or log in either.</li>
+    <li>Linux with systemd, and docker or podman (shrooms already uses one).</li>
+</ul>
+
+<h2 id="machine">1 · The machine: install the agent</h2>
+
+<ol class="steps">
+<li>
+<p>As your own user — not root — fetch the installer and run it with sudo.
+It works out from <code>sudo</code> whose agents it serves:</p>
+<pre><code><span class="cmd">curl -fsSLO https://raw.githubusercontent.com/vpavlin/shrooms/master/scripts/install-agent.sh</span>
+<span class="cmd">sudo bash install-agent.sh</span></code></pre>
+<p>Add <code>--voice</code> to transcribe voice notes on the machine itself
+(no speech service involved).</p>
+</li>
+<li>
+<p>It should end like this:</p>
+<pre><code>==&gt; checking
+  serving on port 7387: Claude Code,pi
+done: the Shrooms Agents app and Basecamp module find it on the mesh.</code></pre>
+<p>If it says Claude Code is missing or not logged in, fix that in a terminal
+first — <code>claude</code> has to work for your user.</p>
+</li>
+</ol>
+
+<h2 id="phone">2 · The phone: install the app</h2>
+
+<ol class="steps">
+<li><p>In F-Droid, from the same repository as Shrooms
+(<code>https://apps.vpavlin.xyz/fdroid/repo</code>), install
+<strong>Shrooms Agents</strong>.</p></li>
+<li><p>Open it from the <strong>agents</strong> link in the Shrooms app — or
+directly. It looks for agents on every peer of your mesh, and your machine
+appears with its sessions.</p></li>
+</ol>
+
+<h2 id="session">3 · Start a session</h2>
+
+<ol class="steps">
+<li><p><strong>+ session</strong> beside the machine's name. Give it a name
+(<code>webapp</code>), a directory on that machine (<code>~/src/webapp</code>),
+and pick Claude Code.</p></li>
+<li><p>Type what you want done. The reply streams in as it is written.</p></li>
+<li><p>When it asks to run something, the card turns amber — <strong>NEEDS
+YOU</strong> — and the phone notifies you. Allow, deny, or answer its
+question. Or set the session to auto-approve, ideally
+<a href="agents-cages.html">in a cage</a>.</p></li>
+</ol>
+
+<div class="note">
+    <p>
+        <strong>Already working in a terminal?</strong> Below the new-session
+        form, "or continue a conversation" lists the Claude Code conversations
+        in that directory. Pick one and carry on from the phone — the same
+        conversation, not a copy.
+    </p>
+</div>
+
+<h2 id="desktop">4 · On the desktop, too</h2>
+
+<p>
+    In Logos Basecamp, from <code>https://apps.vpavlin.xyz/basecamp/logos-repo.json</code>,
+    install <strong>Shrooms Agents</strong> beside Shrooms. The same sessions,
+    plus a board: a card per session, and lines between agents that are working
+    on each other's tasks.
+</p>
+
+<h2 id="next">Where it goes from here</h2>
+
+<div class="grid">
+    <a class="card t1" href="agents-together.html">
+        <h3>Agents together</h3>
+        <p>A session on the laptop asks one on the home server to run the tests
+        or review a diff — a task that stays open until it is done.</p>
+    </a>
+    <a class="card t2" href="agents-cages.html">
+        <h3>Cages</h3>
+        <p>A session in a rootless container of its own: auto-approve without
+        handing it your home directory.</p>
+    </a>
+    <a class="card t3" href="agents-using.html#usage">
+        <h3>Will it last?</h3>
+        <p>What your sessions used, and whether your plan's limits hold until
+        they reset at the pace of the last hours.</p>
+    </a>
+    <a class="card t4" href="agents-in-one-page.html">
+        <h3>The one-page version</h3>
+        <p>What it is, how the access control works, and what it is not — to
+        hand to somebody else.</p>
+    </a>
+</div>
+
+<div class="warn">
+    <p>
+        <strong>The mesh is the access control.</strong> Every member of the
+        mesh can drive the agents on it, and an agent can do whatever its user
+        can. Right for a mesh of your own devices; wrong for one you share with
+        other people. Run the agent only where every member is you.
+    </p>
+</div>
+
+<footer>
+    <p>
+        shrooms is built in the open at
+        <a href="https://github.com/vpavlin/shrooms">github.com/vpavlin/shrooms</a>,
+        dual licensed Apache-2.0 or MIT.
+        Part of the <a href="https://logos.co">Logos</a> ecosystem.
+    </p>
+</footer>
+</div>
+
+<script src="field.js"></script>
+<script src="copy.js"></script>
+</body>
+</html>

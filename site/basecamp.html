@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>shrooms — on the desktop</title>
+<meta name="description" content="Shrooms in Logos Basecamp: the mesh as a graph, every peer and service, every setting the daemon has — and, with a Keycard, admitting, renewing and removing devices without a terminal.">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="style.css">
+<meta property="og:title" content="shrooms — the desktop app">
+<meta property="og:description" content="Your mesh in Logos Basecamp: graph, roster, services, settings, logs — and Keycard-signed invites, renewals and revocations.">
+<meta property="og:image" content="https://shrooms.vpavlin.xyz/og.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="theme-color" content="#07090b">
+</head>
+<body>
+<div class="aurora" aria-hidden="true"><i></i><i></i><i></i></div>
+<div class="lattice" aria-hidden="true"></div>
+<canvas id="field"></canvas>
+<div class="grain" aria-hidden="true"></div>
+
+<div class="page">
+<nav>
+    <a class="mark" href="index.html"><img class="nav-logo" src="logo.svg" alt="" width="24" height="24">shrooms</a>
+    <a href="index.html">what &amp; why</a>
+    <a href="start.html">quick start</a>
+    <a href="install.html">install</a>
+    <a href="guides.html">guides</a>
+    <a href="basecamp.html" class="here">desktop</a>
+    <a href="keycard.html">keycard</a>
+    <a href="agents.html">agents</a>
+    <a href="dev.html">dev notes</a>
+    <span class="spacer"></span>
+    <a href="https://github.com/vpavlin/shrooms">github</a>
+</nav>
+
+<header class="hero">
+    <h1>Your mesh,<br>on the desktop.</h1>
+    <p class="lede">
+        Shrooms in <a href="https://logos.co">Logos Basecamp</a> does what the
+        phone app does, with the room a desktop has: the mesh as a living graph,
+        every peer and what it offers, every setting the daemon can change — and,
+        with a Keycard, admitting and removing devices without a terminal.
+    </p>
+</header>
+
+<h2 id="install">Install</h2>
+
+<ol class="steps">
+<li><p>Run the shrooms daemon on the same machine (<a href="start.html">quick
+start</a>, <a href="install.html#linux">install</a>), and let your user talk
+to it: set <code>socket_group</code> in <code>/etc/shrooms/config.toml</code>
+to a group you are in, then <code>sudo systemctl restart shrooms</code>.</p></li>
+<li><p>In Basecamp: <strong>Package Manager → Repositories → add</strong></p>
+<pre><code>https://apps.vpavlin.xyz/basecamp/logos-repo.json</code></pre></li>
+<li><p>Install <strong>Shrooms</strong>. It brings <code>shrooms_core</code>, the
+part that talks to the daemon. Optionally install <strong>Shrooms
+Agents</strong> beside it (<a href="agents.html">what that is</a>).</p></li>
+<li><p>Restart Basecamp after installing or updating
+<code>shrooms_core</code>: a core module is loaded once, at startup.</p></li>
+</ol>
+
+<h2 id="see">What you see</h2>
+
+<div class="grid">
+    <div class="card t1">
+        <h3>The mesh, drawn</h3>
+        <p>This device in the middle, every peer around it, coloured by mesh.
+        Solid lines are direct tunnels, dashed violet ones go through a relay.
+        Click a node to jump to its card.</p>
+    </div>
+    <div class="card t2">
+        <h3>Every peer</h3>
+        <p>Direct or relayed and how fast, its name and both addresses (IPv6 and
+        the IPv4 alias) to copy, what it offers and listens on, a
+        <code>ping6</code> to paste, and a sparkline of its traffic.</p>
+    </div>
+    <div class="card t3">
+        <h3>Every service</h3>
+        <p>All the meshes' services in one list — <code>http://immich.nas.mesh</code>
+        opens with a click; a bound port copies as <code>nas.mesh:22</code>.</p>
+    </div>
+    <div class="card t4">
+        <h3>The daemon's log</h3>
+        <p>The last two hundred lines, filtered to warnings or errors, copied in
+        one click — and a diagnostics report to paste to whoever is helping.</p>
+    </div>
+</div>
+
+<h2 id="change">What you can change</h2>
+
+<p>Everything this device decides for itself, without a terminal:</p>
+
+<ul>
+    <li><strong>Its name</strong>, and whether it runs as an edge node
+    (~3 MB/h) or a core node of the gossip network (~20 MB/h).</li>
+    <li><strong>Per mesh</strong>: switch it on or off, leave it, publish
+    services, tell peers about them and about bound ports, relay for others,
+    repeat revocations.</li>
+    <li><strong>Blind relays</strong> — relays somebody else runs, for a
+    device behind carrier-grade NAT — with the operator's token saved but never
+    shown again.</li>
+    <li><strong>The domain</strong> names are answered under, for a machine
+    that also lives on a network that uses <code>.internal</code>.</li>
+    <li><strong>Joining a mesh</strong> with an invite — the first one too: a
+    machine with a fresh daemon opens on a join panel, like the phone's.</li>
+    <li><strong>Reload and restart</strong>, which is what applies the settings
+    that say so.</li>
+</ul>
+
+<h2 id="keycard">Admitting devices, with a Keycard</h2>
+
+<p>
+    On a mesh whose admin key is on a <a href="keycard.html">Keycard</a>,
+    Basecamp does the admin work too — and never holds the key. Install
+    <strong>keycard</strong> and <strong>keycard-ui</strong> from the same
+    repository, and plug in a USB smartcard reader.
+</p>
+
+<ol class="steps">
+<li><p><strong>Invite a device.</strong> Membership → invite a device. A QR
+appears; the phone scans it, or a laptop pastes the token. "kitchen-pi wants
+to join" — <em>admit</em>.</p></li>
+<li><p><strong>Approve on the card.</strong> The Keycard module shows a
+signature request from shrooms. Card on the reader, PIN on its screen,
+approve. Shrooms never sees the PIN or the key.</p></li>
+<li><p><strong>Done.</strong> The daemon checks the signature against the
+mesh's admin keys before it admits anybody, and the device appears on the
+roster.</p></li>
+</ol>
+
+<p>
+    <strong>Renewing</strong> is the same: credentials last thirty days, and
+    "renew home with the card" asks for one approval per device that is due.
+    <strong>Revoking</strong> a lost phone is one click on its row and one
+    approval.
+</p>
+
+<div class="note">
+    <p>
+        <strong>Why only with a card.</strong> Anyone in the socket group can
+        ask the daemon to publish a signed statement. With a card, only the
+        card could have signed it, whoever asked. With a key file, anybody
+        running as that file's owner could have — so on a mesh with a key file,
+        admitting stays with <code>shrooms invite</code> and
+        <code>shrooms admin</code>, run where the key is.
+        <a href="https://github.com/vpavlin/shrooms/blob/master/docs/adr/051-a-card-lets-the-socket-group-renew-and-revoke.md">ADR-051</a>
+        is the argument.
+    </p>
+</div>
+
+<h2 id="parity">Desktop and phone</h2>
+
+<table>
+<tr><th></th><th>Basecamp</th><th>Android</th></tr>
+<tr><td>Graph, roster, peer details, services</td><td>✓</td><td>✓</td></tr>
+<tr><td>Several meshes: on, off, leave, join</td><td>✓</td><td>✓</td></tr>
+<tr><td>Node mode, blind relays, device name</td><td>✓</td><td>✓</td></tr>
+<tr><td>Log, diagnostics</td><td>✓ filter, copy</td><td>✓ share</td></tr>
+<tr><td>Invite with a Keycard</td><td>✓ USB reader</td><td>✓ NFC</td></tr>
+<tr><td>Renew and revoke with a Keycard</td><td>✓</td><td>—</td></tr>
+<tr><td>Publish services, bound ports, relay, port mapping</td><td>✓</td><td>— (a phone serves nothing)</td></tr>
+<tr><td>Home-screen widget, start on boot</td><td>—</td><td>✓</td></tr>
+<tr><td>Open Shrooms Agents</td><td>✓</td><td>✓</td></tr>
+</table>
+
+<h2 id="how">How it reaches the daemon</h2>
+
+<p>
+    A Basecamp view runs in a sandbox that cannot open a socket or read a file.
+    So the view comes with <code>shrooms_core</code>, a small module in its own
+    process that speaks to the daemon's control socket and hands back JSON.
+    Anything that needs a format — tokens, credentials, signatures — is done by
+    the daemon, in Go, in one place; the card is the Keycard module's. The
+    whole design: <a href="https://github.com/vpavlin/shrooms/blob/master/docs/adr/025-control-from-a-desktop-app.md">ADR-025</a>,
+    <a href="https://github.com/vpavlin/shrooms/blob/master/docs/adr/050-basecamp-at-parity-with-the-phone.md">ADR-050</a>.
+</p>
+
+<footer>
+    <p>
+        shrooms is built in the open at
+        <a href="https://github.com/vpavlin/shrooms">github.com/vpavlin/shrooms</a>,
+        dual licensed Apache-2.0 or MIT.
+        Part of the <a href="https://logos.co">Logos</a> ecosystem.
+    </p>
+</footer>
+</div>
+
+<script src="field.js"></script>
+<script src="copy.js"></script>
+</body>
+</html>

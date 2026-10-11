@@ -685,3 +685,46 @@ details > *:first-of-type:not(summary) { margin-top: 0; }
     text-align: center;
 }
 .steps > li > :first-child { margin-top: 0; }
+
+/* --- on paper -------------------------------------------------------------
+   The one-page explainers are meant to be handed to somebody, and some of them
+   will be printed. Dark backgrounds, an animated canvas and a grain overlay
+   are a screen's business: on paper they are a page of toner. */
+@media print {
+    :root {
+        --void: #ffffff;
+        --panel: #f4f6f8;
+        --line: #c9d0d6;
+        --ash: #4a535b;
+        --bone: #111417;
+        --phosphor: #0a7a4f;
+        --amber: #8a5a00;
+        --violet: #5b3fc4;
+    }
+    body { background: #fff !important; color: #111; }
+    .aurora, .lattice, .grain, #field, nav, .cta, .snip .copy, footer { display: none !important; }
+    .page { max-width: none; padding: 0; }
+    h2 { break-after: avoid; }
+    .card, .note, .warn, pre { break-inside: avoid; }
+    a { color: inherit; text-decoration: underline; }
+    .print-only { display: block !important; }
+    .card, pre, .note, .warn, th, td {
+        background: #fff !important;
+        backdrop-filter: none !important;
+        box-shadow: none !important;
+    }
+    .card { border: 1px solid #c9d0d6 !important; }
+    p, li, td, .card p { color: #222 !important; }
+    h1, h2, h3, .card h3 { color: #111 !important; -webkit-text-fill-color: #111 !important; background: none !important; }
+    code, pre code { color: #0a5a3a !important; background: #eef2f4 !important; }
+}
+.print-only { display: none; }
+.onepager .grid { gap: 0.8rem; }
+.onepager h2 { margin-top: 2.2rem; }
+
+/* A wide table scrolls inside itself rather than widening the page: the
+   install page's troubleshooting table made every phone scroll sideways. */
+@media (max-width: 640px) {
+    table { display: block; overflow-x: auto; max-width: 100%; }
+    td code { word-break: break-word; }
+}

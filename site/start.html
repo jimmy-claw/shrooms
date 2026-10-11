@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>shrooms — quick start</title>
+<meta name="description" content="Your laptop and your phone on one private network in about five minutes: one command on Linux, one app on Android, one invite between them.">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="style.css">
+<meta property="og:title" content="shrooms — your first mesh in five minutes">
+<meta property="og:description" content="One command on the laptop, one app on the phone, one invite between them. No account, no server, no company in the path.">
+<meta property="og:image" content="https://shrooms.vpavlin.xyz/og.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="theme-color" content="#07090b">
+</head>
+<body>
+<div class="aurora" aria-hidden="true"><i></i><i></i><i></i></div>
+<div class="lattice" aria-hidden="true"></div>
+<canvas id="field"></canvas>
+<div class="grain" aria-hidden="true"></div>
+
+<div class="page">
+<nav>
+    <a class="mark" href="index.html"><img class="nav-logo" src="logo.svg" alt="" width="24" height="24">shrooms</a>
+    <a href="index.html">what &amp; why</a>
+    <a href="start.html" class="here">quick start</a>
+    <a href="install.html">install</a>
+    <a href="guides.html">guides</a>
+    <a href="basecamp.html">desktop</a>
+    <a href="keycard.html">keycard</a>
+    <a href="agents.html">agents</a>
+    <a href="dev.html">dev notes</a>
+    <span class="spacer"></span>
+    <a href="https://github.com/vpavlin/shrooms">github</a>
+</nav>
+
+<header class="hero">
+    <h1>Your first mesh,<br>in five minutes.</h1>
+    <p class="lede">
+        A Linux laptop and an Android phone on one private network: one
+        command, one app, one invite between them. Then
+        <code>ssh laptop.mesh</code> from the phone works from anywhere —
+        café wifi, mobile data, another country.
+    </p>
+    <p class="sub">
+        No account to create. No server to run. Nothing to pay for.
+    </p>
+</header>
+
+<h2 id="need">What you need</h2>
+
+<ul>
+    <li>A <strong>Linux machine</strong> with systemd and docker or podman —
+    a laptop, a desktop, a home server or a VPS — and root on it.</li>
+    <li>An <strong>Android phone</strong> (8 or newer, arm64) with
+    <a href="https://f-droid.org">F-Droid</a>.</li>
+    <li>Five minutes. Most of the waiting is a node joining the gossip network,
+    about twenty seconds.</li>
+</ul>
+
+<h2 id="laptop">1 · The laptop: create the mesh</h2>
+
+<ol class="steps">
+<li>
+<p>Fetch the installer (read it if you like: it is plain shell, and
+<a href="https://github.com/vpavlin/shrooms/blob/master/scripts/install.sh">this is it</a>):</p>
+<pre><code><span class="cmd">curl -fsSLO https://raw.githubusercontent.com/vpavlin/shrooms/master/scripts/install.sh</span></code></pre>
+</li>
+<li>
+<p>Create a mesh called <code>home</code>, with this machine called <code>laptop</code>:</p>
+<pre><code><span class="cmd">sudo bash install.sh init --mesh home --name laptop</span></code></pre>
+<p>
+    It asks for a passphrase for the <strong>admin key</strong> — the key that
+    admits devices — and prints a <strong>recovery key once</strong>. Write
+    that down somewhere that is not this laptop. Losing the laptop then costs
+    the laptop, not the mesh.
+</p>
+</li>
+<li>
+<p>If a firewall is on, open the port (laptops too — a closed port looks like
+everything except a closed port):</p>
+<pre><code><span class="cmd">sudo ufw allow 51820/udp</span>   <span class="c"># Ubuntu, Debian</span>
+<span class="cmd">sudo firewall-cmd --add-port=51820/udp --permanent &amp;&amp; sudo firewall-cmd --reload</span>   <span class="c"># Fedora</span></code></pre>
+</li>
+</ol>
+
+<h2 id="phone">2 · The phone: install the app</h2>
+
+<ol class="steps">
+<li>
+<p>In F-Droid: <strong>Settings → Repositories → +</strong>, and add</p>
+<pre><code>https://apps.vpavlin.xyz/fdroid/repo</code></pre>
+</li>
+<li><p>Install <strong>Shrooms</strong> from that repository and open it. It
+opens on a join screen with one field and a scan button.</p></li>
+</ol>
+
+<h2 id="invite">3 · Invite the phone</h2>
+
+<ol class="steps">
+<li>
+<p>On the laptop:</p>
+<pre><code><span class="cmd">sudo shrooms invite</span>
+Invite valid for 15m0s. On the joining device:
+  shrooms join BEGUZ-N4WOX-PYMTR-CYKWT-QBYSX-U
+  [QR code]
+Waiting.</code></pre>
+</li>
+<li><p>On the phone: <strong>scan the QR</strong> (or paste the token), name
+the phone, tap <strong>Join</strong>. Keep both screens open until it says
+it joined — an invite is answered live, once, by the machine that made it.</p></li>
+<li><p>Allow the VPN when Android asks. The phone's roster fills with
+<code>laptop</code>, and the laptop's with the phone.</p></li>
+</ol>
+
+<h2 id="check">4 · Check it</h2>
+
+<pre><code><span class="cmd">sudo shrooms status</span>
+network  fd48:d107:3fce::/48                     peers 1 (1 up)
+self     laptop  fd48:d107:3fce:2b84:226b:ac:f2c3:9f30
+NAME    OVERLAY IP                               ANNOUNCE  TUNNEL  ENDPOINT
+phone   fd48:d107:3fce:9d1c:7b2e:41a:cc90:1f22   online    up 31s  192.168.1.23:51820
+<span class="cmd">ping6 phone.mesh</span></code></pre>
+
+<p>
+    <strong>That is the mesh.</strong> Both devices have a stable address that
+    is theirs on any network, and a name under <code>.mesh</code>. Turn off
+    the phone's wifi and the tunnel follows it onto mobile data.
+</p>
+
+<div class="note">
+    <p>
+        <strong>When both ends are behind NAT</strong> — the phone on mobile
+        data, the laptop on café wifi — they need one reachable member to meet
+        through. A cheap VPS is the usual answer: install it with
+        <code>sudo bash install.sh prepare --name vps</code>, invite it like the
+        phone, and set it to relay. <a href="guides.html#relays">Relays and
+        reachability</a> has the details, including relays somebody else runs.
+    </p>
+</div>
+
+<h2 id="more">5 · More devices, and the desktop</h2>
+
+<div class="grid">
+    <a class="card t1" href="install.html#linux">
+        <h3>Another Linux machine</h3>
+        <p><code>sudo bash install.sh prepare --name nas</code>, then
+        <code>sudo shrooms invite</code> on the laptop and
+        <code>sudo shrooms join TOKEN</code> on the newcomer.</p>
+    </a>
+    <a class="card t2" href="basecamp.html">
+        <h3>The desktop app</h3>
+        <p>Shrooms in Logos Basecamp: the graph, the roster, every setting, and
+        — with a Keycard — inviting devices without a terminal.</p>
+    </a>
+    <a class="card t3" href="guides.html#services">
+        <h3>Services by name</h3>
+        <p><code>http://immich.nas.mesh</code> instead of a port number, and
+        ports bound only to the mesh.</p>
+    </a>
+    <a class="card t5" href="agents-start.html">
+        <h3>Your coding agents</h3>
+        <p>The Claude Code sessions on your machines, on your phone — over the
+        mesh you just made.</p>
+    </a>
+</div>
+
+<h2 id="trouble">If it does not connect</h2>
+
+<ul>
+    <li><strong>The phone never appears.</strong> The invite expired (fifteen
+    minutes) or the laptop's <code>shrooms invite</code> was closed before the
+    phone answered. Run it again.</li>
+    <li><strong>Both show online, no tunnel.</strong> Almost always the
+    firewall: step 1.3. Then <code>shrooms status</code> again.</li>
+    <li><strong>Works at home, not outside.</strong> Two devices behind NAT
+    need a reachable member: the VPS in the note above.</li>
+    <li>Everything else: <a href="install.html#trouble">when it does not
+    work</a>, and the phone's <em>share diagnostics</em> button, which
+    produces a report worth pasting into an issue.</li>
+</ul>
+
+<p class="warn">
+    <strong>An experiment, with no guarantees.</strong> It is used daily by
+    its author and has never had an independent audit.
+    <a href="https://github.com/vpavlin/shrooms/blob/master/SECURITY.md">SECURITY.md</a>
+    says what it protects and what it does not.
+</p>
+
+<footer>
+    <p>
+        shrooms is built in the open at
+        <a href="https://github.com/vpavlin/shrooms">github.com/vpavlin/shrooms</a>,
+        dual licensed Apache-2.0 or MIT.
+        Part of the <a href="https://logos.co">Logos</a> ecosystem.
+    </p>
+</footer>
+</div>
+
+<script src="field.js"></script>
+<script src="copy.js"></script>
+</body>
+</html>

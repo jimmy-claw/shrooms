@@ -474,6 +474,8 @@ PAGE = """<!doctype html>
 <link rel="stylesheet" href="{up}style.css">
 <meta property="og:title" content="{title}">
 <meta property="og:description" content="{description}">
+<meta property="og:image" content="https://shrooms.vpavlin.xyz/{og_image}">
+<meta name="twitter:card" content="summary_large_image">
 <meta name="theme-color" content="#07090b">
 </head>
 <body>
@@ -486,8 +488,10 @@ PAGE = """<!doctype html>
 <nav>
     <a class="mark" href="{up}index.html"><img class="nav-logo" src="{up}logo.svg" alt="" width="24" height="24">shrooms</a>
     <a href="{up}index.html">what &amp; why</a>
+    <a href="{up}start.html">quick start</a>
     <a href="{up}install.html">install</a>
     <a href="{up}guides.html">guides</a>
+    <a href="{up}basecamp.html">desktop</a>
     <a href="{up}keycard.html">keycard</a>
     <a href="{up}agents.html"{here_agents}>agents</a>
     <a href="{up}dev.html"{here_dev}>dev notes</a>
@@ -527,6 +531,7 @@ PAGE = """<!doctype html>
 # same strip; agents_tabs() is what both are checked against.
 AGENTS_TABS = [
     ("agents.html", "overview"),
+    ("agents-start.html", "quick start"),
     ("agents-using.html", "using it"),
     ("agents-setup.html", "setting up"),
     ("agents-together.html", "agents together"),
@@ -552,6 +557,7 @@ def page(title, heading, description, lead, cta, body, up="../", section="dev", 
         up=up,
         here_agents=' class="here"' if section == "agents" else "",
         here_dev=' class="here"' if section == "dev" else "",
+        og_image="og-agents.png" if section == "agents" else "og.png",
         tabs=tabs,
         title=html.escape(title, quote=True),
         description=html.escape(description, quote=True),

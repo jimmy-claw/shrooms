@@ -9,6 +9,8 @@
 <link rel="stylesheet" href="style.css">
 <meta property="og:title" content="shrooms — install">
 <meta property="og:description" content="A Linux node from a container, an Android app, a Basecamp module. Then one command to create a mesh and two to admit the next device.">
+<meta property="og:image" content="https://shrooms.vpavlin.xyz/og.png">
+<meta name="twitter:card" content="summary_large_image">
 <meta name="theme-color" content="#07090b">
 </head>
 <body>
@@ -21,8 +23,10 @@
 <nav>
     <a class="mark" href="index.html"><img class="nav-logo" src="logo.svg" alt="" width="24" height="24">shrooms</a>
     <a href="index.html">what &amp; why</a>
+    <a href="start.html">quick start</a>
     <a href="install.html" class="here">install</a>
     <a href="guides.html">guides</a>
+    <a href="basecamp.html">desktop</a>
     <a href="keycard.html">keycard</a>
     <a href="agents.html">agents</a>
     <a href="dev.html">dev notes</a>
@@ -381,11 +385,13 @@ and back here:
     terminal: this device's name, whether it runs the rendezvous plane as edge
     or core, what it publishes and whether those names and its bound ports are
     announced, whether it relays for a mesh, whether the router is asked for a
-    way in, which meshes run, joining one with an invite token and leaving one
-    — and restarting the daemon, which is what applies the settings that need
-    it. Beside that: every device's services as addresses you can click, when
-    each credential expires, and the daemon's own log, because Basecamp cannot
-    read the journal.
+    way in, which meshes run, blind relays, the domain names answer under,
+    joining one with an invite token (the first one too) and leaving one — and
+    restarting the daemon, which is what applies the settings that need it.
+    Beside that: every device's services as addresses you can click, peer
+    details and traffic, when each credential expires and what renews it, and
+    the daemon's own log, because Basecamp cannot read the journal.
+    <a href="basecamp.html">The desktop app</a> has the tour.
 </p>
 </details>
 
@@ -423,14 +429,17 @@ and back here:
 <p>
     It can change what this device decides for itself: its name, relay or light
     node, published services, which meshes run, and leaving one. What it
-    <strong>cannot do is admit anybody</strong>, and that is the line the design
+    <strong>cannot do is sign anything</strong>, and that is the line the design
     draws. Membership is a credential signed by an admin key the daemon has
-    never held — a passphrase-protected file in your home directory — so nothing
-    reachable through that socket can make a device a member or remove one.
-    Admission stays with <code>shrooms invite</code> and a passphrase prompt,
-    which is where the friction belongs.
-    <a href="adr/025-control-from-a-desktop-app.html">ADR-025</a> is the whole
-    argument.
+    never held. When that key is a <a href="keycard.html">Keycard</a>, Basecamp
+    can carry what the card signs — invites, renewals, revocations — because only
+    the card could have signed them, whoever asked. When it is a
+    passphrase-protected file, admission stays with <code>shrooms invite</code>
+    and a passphrase prompt, which is where the friction belongs.
+    <a href="adr/025-control-from-a-desktop-app.html">ADR-025</a>,
+    <a href="adr/050-basecamp-at-parity-with-the-phone.html">ADR-050</a> and
+    <a href="adr/051-a-card-lets-the-socket-group-renew-and-revoke.html">ADR-051</a>
+    are the whole argument.
 </p>
 
 <div class="note">

@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>shrooms — in one page</title>
+<meta name="description" content="Shrooms in one page: a private network between your own devices, with no coordination server, no account and no company in the path. What it is, how it works, what it protects, and how to start.">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="style.css">
+<meta property="og:title" content="shrooms, in one page">
+<meta property="og:description" content="Your laptop, phone, NAS and a VPS on one private network that nobody runs. What it is, how it works, what it protects, how to start.">
+<meta property="og:image" content="https://shrooms.vpavlin.xyz/og.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="theme-color" content="#07090b">
+</head>
+<body class="onepager">
+<div class="aurora" aria-hidden="true"><i></i><i></i><i></i></div>
+<div class="lattice" aria-hidden="true"></div>
+<canvas id="field"></canvas>
+<div class="grain" aria-hidden="true"></div>
+
+<div class="page">
+<nav>
+    <a class="mark" href="index.html"><img class="nav-logo" src="logo.svg" alt="" width="24" height="24">shrooms</a>
+    <a href="index.html">what &amp; why</a>
+    <a href="start.html">quick start</a>
+    <a href="install.html">install</a>
+    <a href="guides.html">guides</a>
+    <a href="basecamp.html">desktop</a>
+    <a href="keycard.html">keycard</a>
+    <a href="agents.html">agents</a>
+    <a href="dev.html">dev notes</a>
+    <span class="spacer"></span>
+    <a href="https://github.com/vpavlin/shrooms">github</a>
+</nav>
+
+<header class="hero">
+    <img src="logo.svg" alt="" width="72" height="72">
+    <h1>shrooms, in one page</h1>
+    <p class="lede">
+        A private network between your own devices — laptop, phone, home server,
+        a VPS — that works from anywhere, and that <strong>nobody runs</strong>:
+        no coordination server, no account, no company that can see its shape
+        or switch it off.
+    </p>
+    <p class="print-only">shrooms.vpavlin.xyz · github.com/vpavlin/shrooms</p>
+</header>
+
+<h2 id="does">What it does for you</h2>
+
+<div class="grid">
+    <div class="card t1">
+        <h3>Reach home from anywhere</h3>
+        <p><code>ssh nas.mesh</code> from a café; open
+        <code>http://immich.nas.mesh</code> on mobile data. Same name, same
+        address, every network.</p>
+    </div>
+    <div class="card t2">
+        <h3>The phone is a peer</h3>
+        <p>Not a client of a server: the Android app runs the same core as the
+        daemon, roams between wifi and mobile data, and sits on several meshes.</p>
+    </div>
+    <div class="card t3">
+        <h3>Separate meshes</h3>
+        <p>Your machines on one, the family's on another, a project shared with
+        friends on a third — separate addresses, nothing leaking between them.</p>
+    </div>
+    <div class="card t4">
+        <h3>Desktop too</h3>
+        <p>A Logos Basecamp app with the graph, every peer and service, every
+        setting — and, with a Keycard, inviting and removing devices.</p>
+    </div>
+</div>
+
+<h2 id="how">How it works</h2>
+
+<div class="grid">
+    <div class="card t1">
+        <h3>Traffic: WireGuard</h3>
+        <p>Encrypted end to end between your devices, on the most direct path
+        that works — through a relay of yours only when it has to.</p>
+    </div>
+    <div class="card t2">
+        <h3>Finding each other: gossip</h3>
+        <p>Devices announce themselves, encrypted, on Logos Delivery, a public
+        gossip network nobody owns. It never carries your traffic, and if it is
+        down, existing tunnels keep working.</p>
+    </div>
+    <div class="card t3">
+        <h3>Membership: credentials</h3>
+        <p>An admin key — a file, or a Keycard — signs each device in for thirty
+        days. Lose a phone: revoke it, and every node drops it.</p>
+    </div>
+</div>
+
+<p>
+    Addresses are <strong>derived, not assigned</strong>: a device's address is
+    a hash of its key, inside a prefix that is a hash of the mesh's. Nothing
+    hands them out, so nothing has to be running to keep them.
+</p>
+
+<h2 id="start">Start in three steps</h2>
+
+<ol class="steps">
+<li><p><strong>Laptop or server (Linux):</strong>
+<code>sudo bash install.sh init --mesh home --name laptop</code> — one script,
+from the quick start.</p></li>
+<li><p><strong>Phone (Android):</strong> add
+<code>apps.vpavlin.xyz/fdroid/repo</code> to F-Droid, install Shrooms.</p></li>
+<li><p><strong>Join:</strong> <code>sudo shrooms invite</code> on the laptop,
+scan the QR on the phone. Done.</p></li>
+</ol>
+<p><a href="start.html">The five-minute quick start →</a></p>
+
+<h2 id="safe">What it protects, and what it does not</h2>
+
+<table>
+<tr><th>Protects</th><th>Does not</th></tr>
+<tr><td>Your traffic: WireGuard, end to end, between your own devices.</td>
+    <td>Your anonymity: a relay sees your IP; the gossip network sees that something publishes.</td></tr>
+<tr><td>Who is in: admin-signed credentials that expire and can be revoked.</td>
+    <td>A leaked network key: it still derives the rendezvous topics, so leaking it means rotating.</td></tr>
+<tr><td>Independence: no server of anyone's to depend on, no account, nothing phoning home.</td>
+    <td>Audits: it is an experiment, used daily, never independently audited.</td></tr>
+</table>
+
+<h2 id="faq">Questions people ask</h2>
+
+<details><summary>Is it free?</summary>
+<p>Yes, and open source (Apache-2.0 or MIT). There is no service to pay for
+because there is no service.</p></details>
+
+<details><summary>Do I need a server?</summary>
+<p>Not to start. Two devices where one can be reached — a home machine whose
+router grants a port mapping, or one on the same network — just work. When both
+are behind NAT (phone on mobile data, laptop in a café), a reachable member such
+as a small VPS relays for them, or a relay somebody else runs.</p></details>
+
+<details><summary>Which platforms?</summary>
+<p>Linux (any distribution with systemd and docker or podman), Android 8+, and
+the Logos Basecamp desktop app on Linux. No iOS, macOS or Windows yet —
+<a href="https://github.com/mmalmi/nostr-vpn">nostr-vpn</a> covers more
+platforms if you need them today.</p></details>
+
+<details><summary>How is this different from Tailscale?</summary>
+<p>Tailscale's coordination server knows every device you own and decides who
+connects. Here, discovery happens on a public gossip network and membership is
+signed by a key you hold. <a href="comparison.html">The honest comparison</a>
+covers Nebula, ZeroTier and Yggdrasil too, including where shrooms loses.</p></details>
+
+<details><summary>What is Logos?</summary>
+<p>An ecosystem of privacy-first infrastructure. shrooms uses its messaging
+layer, Logos Delivery, to let devices find each other, and ships as an app for
+its desktop, Basecamp.</p></details>
+
+<details><summary>And the coding agents?</summary>
+<p><a href="agents-in-one-page.html">Shrooms Agents</a> grows out of the mesh:
+the Claude Code sessions on your machines, from your phone, with the mesh as
+the access control.</p></details>
+
+<footer>
+    <p>
+        shrooms is built in the open at
+        <a href="https://github.com/vpavlin/shrooms">github.com/vpavlin/shrooms</a>,
+        dual licensed Apache-2.0 or MIT.
+        Part of the <a href="https://logos.co">Logos</a> ecosystem.
+    </p>
+</footer>
+</div>
+
+<script src="field.js"></script>
+<script src="copy.js"></script>
+</body>
+</html>

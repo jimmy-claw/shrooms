@@ -46,6 +46,27 @@ $ ping fd3b:ffe9:f81:6f18:41e:c574:c529:5bbf
 rtt min/avg/max/mdev = 31.883/63.188/94.992/25.589 ms
 ```
 
+## Get started
+
+| | |
+|---|---|
+| **[Quick start](https://shrooms.vpavlin.xyz/start.html)** | A Linux laptop and an Android phone on one mesh in five minutes: one command, one app, one invite. |
+| **[Shrooms in one page](https://shrooms.vpavlin.xyz/in-one-page.html)** | What it is, how it works, what it protects and what it does not — the page to send somebody. |
+| **[On the desktop](https://shrooms.vpavlin.xyz/basecamp.html)** | The Logos Basecamp app: graph, peers, services, settings, and Keycard-signed invites. |
+| **[Shrooms Agents](https://shrooms.vpavlin.xyz/agents-start.html)** | Your Claude Code (or pi) sessions on your own machines, from your phone, in ten minutes. [One page](https://shrooms.vpavlin.xyz/agents-in-one-page.html). |
+
+The short version:
+
+```console
+$ curl -fsSLO https://raw.githubusercontent.com/vpavlin/shrooms/master/scripts/install.sh
+$ sudo bash install.sh init --mesh home --name laptop    # the first machine
+$ sudo shrooms invite                                    # scan the QR with the Android app
+```
+
+Android: add `https://apps.vpavlin.xyz/fdroid/repo` to F-Droid and install
+**Shrooms** (and **Shrooms Agents**). Basecamp: add
+`https://apps.vpavlin.xyz/basecamp/logos-repo.json` and install **Shrooms**.
+
 ---
 
 ## What Shrooms is not
