@@ -56,7 +56,7 @@ rtt min/avg/max/mdev = 31.883/63.188/94.992/25.589 ms
 | **[Shrooms Agents](https://shrooms.vpavlin.xyz/agents-start.html)** | Your Claude Code (or pi) sessions on your own machines, from your phone, in ten minutes. [One page](https://shrooms.vpavlin.xyz/agents-in-one-page.html). |
 
 <p>
-<img src="site/shots/basecamp-mesh.png" alt="Shrooms in Logos Basecamp: the mesh as a graph, peers with traffic, services" width="49%">
+<img src="site/shots/window-basecamp-mesh.png" alt="Shrooms in Logos Basecamp: the mesh as a graph, peers with traffic, services" width="49%">
 <img src="site/shots/agents-session.png" alt="Shrooms Agents: sessions on three machines and a permission prompt" width="49%">
 </p>
 

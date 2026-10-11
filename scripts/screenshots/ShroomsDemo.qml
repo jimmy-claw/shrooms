@@ -5,7 +5,16 @@ import QtQuick
 // Run by scripts/screenshots/shots.sh.
 Item {
     id: top
-    width: 1500; height: 940
+    // "size=WxH" before the output directory renders at that size instead —
+    // for the framed shot, which puts this view inside a real Basecamp window.
+    readonly property var sizeArg: {
+        var a = Qt.application.arguments
+        for (var i = 0; i < a.length; i++) if (String(a[i]).indexOf("size=") === 0) return String(a[i]).slice(5).split("x")
+        return null
+    }
+    readonly property string prefix: sizeArg ? "framed-" : ""
+    width: sizeArg ? Number(sizeArg[0]) : 1500
+    height: sizeArg ? Number(sizeArg[1]) : 940
 
     property string outDir: Qt.application.arguments[Qt.application.arguments.length - 1]
     readonly property var qrRows: ["11111110011001110111001111111","10000010110101110011101000001","10111010011100000010101011101","10111010011100111000001011101","10111010110011110111001011101","10000010011001110011001000001","11111110101010101010101111111","00000000011011010101100000000","10101010000110111101100010010","00000101010110001010111001001","01101111110001001010110100111","10011101011000001100101010010","11011011010000011100011001011","01010000110011000010111001001","01000111001000101010010001011","11111001000011111111000101010","00110010010000100100111101011","01001101000110101010101001101","10101010110001001110101010011","01001100010110000101001111010","10001011101100000110111110000","00000000111011001000100010111","11111110011100100101101011011","10000010010001110110100011011","10111010100110101100111110011","10111010001101101111110110111","10111010100101101111100111001","10000010011110011110101010010","11111110100100100101100011011"]
@@ -77,7 +86,7 @@ Item {
     property int step: 0
     function shot(name, next) {
         top.grabToImage(function (r) {
-            r.saveToFile(top.outDir + "/" + name)
+            r.saveToFile(top.outDir + "/" + top.prefix + name)
             console.error("SHOT " + name)
             next()
         })
