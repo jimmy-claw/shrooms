@@ -54,7 +54,7 @@ func TestAnOutboxNeverCarriesWhatItPointsAt(t *testing.T) {
 	os.Symlink(secretDir, filepath.Join(out, "keys"))
 	syscall.Mkfifo(filepath.Join(out, "pipe"), 0o600)
 
-	p, err := packOutbox(out, time.Time{})
+	p, err := packOutbox(out, time.Time{}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,6 +75,35 @@ func TestAnOutboxNeverCarriesWhatItPointsAt(t *testing.T) {
 	}
 }
 
+// --only: one folder of the outbox, and never one reached through a link.
+func TestAnOutboxSendsOneFolder(t *testing.T) {
+	dir := t.TempDir()
+	secretDir := filepath.Join(t.TempDir(), "keys")
+	os.MkdirAll(secretDir, 0o700)
+	os.WriteFile(filepath.Join(secretDir, "token"), []byte("TOKEN"), 0o600)
+	out := filepath.Join(dir, "outbox")
+	os.MkdirAll(filepath.Join(out, "new-review", "shots"), 0o755)
+	os.MkdirAll(filepath.Join(out, "old-review"), 0o755)
+	os.WriteFile(filepath.Join(out, "new-review", "SUMMARY.md"), []byte("new"), 0o644)
+	os.WriteFile(filepath.Join(out, "new-review", "shots", "a.png"), []byte("png"), 0o644)
+	os.WriteFile(filepath.Join(out, "old-review", "SUMMARY.md"), []byte("old"), 0o644)
+	os.Symlink(secretDir, filepath.Join(out, "linked"))
+
+	p, err := packOutbox(out, time.Time{}, "new-review/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := unpack(t, p.Data)
+	if p.Files != 2 || got["new-review/SUMMARY.md"] != "new" || got["new-review/shots/a.png"] != "png" || got["old-review/SUMMARY.md"] != "" {
+		t.Errorf("one folder: %d files, %v", p.Files, packedNames(got))
+	}
+	for _, bad := range []string{"linked", "../outbox", "/etc", "new-review/../old-review/..", "missing"} {
+		if p, err := packOutbox(out, time.Time{}, bad); err == nil {
+			t.Errorf("--only %q was packed: %d files", bad, p.Files)
+		}
+	}
+}
+
 // For a task, only what it wrote while it ran; and within the limits.
 func TestAnOutboxSendsWhatIsNewWithinItsLimits(t *testing.T) {
 	out := t.TempDir()
@@ -82,22 +111,22 @@ func TestAnOutboxSendsWhatIsNewWithinItsLimits(t *testing.T) {
 	os.WriteFile(old, []byte("before"), 0o644)
 	os.Chtimes(old, time.Now().Add(-time.Hour), time.Now().Add(-time.Hour))
 	os.WriteFile(filepath.Join(out, "new.txt"), []byte("during"), 0o644)
-	p, _ := packOutbox(out, time.Now().Add(-time.Minute))
+	p, _ := packOutbox(out, time.Now().Add(-time.Minute), "")
 	if got := unpack(t, p.Data); got["new.txt"] != "during" || got["old.txt"] != "" || p.Files != 1 {
 		t.Errorf("since the task started: %v", packedNames(got))
 	}
-	if p, _ := packOutbox(out, time.Now().Add(time.Minute)); p.Files != 0 || p.Data != nil {
+	if p, _ := packOutbox(out, time.Now().Add(time.Minute), ""); p.Files != 0 || p.Data != nil {
 		t.Errorf("nothing new, yet packed %d", p.Files)
 	}
 
 	defer func(a int, b int64) { MaxOutboxFiles, MaxOutboxBytes = a, b }(MaxOutboxFiles, MaxOutboxBytes)
 	MaxOutboxFiles, MaxOutboxBytes = 1, 1<<20
-	p, _ = packOutbox(out, time.Time{})
+	p, _ = packOutbox(out, time.Time{}, "")
 	if p.Files != 1 || !strings.Contains(unpack(t, p.Data)["README-UNTRUSTED.txt"], "over the file limit") {
 		t.Errorf("the file limit: %d files", p.Files)
 	}
 	MaxOutboxFiles, MaxOutboxBytes = 10, 3
-	if p, _ := packOutbox(out, time.Time{}); p.Files != 0 {
+	if p, _ := packOutbox(out, time.Time{}, ""); p.Files != 0 {
 		t.Errorf("the size limit: %d files", p.Files)
 	}
 }

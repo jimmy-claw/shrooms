@@ -45,8 +45,10 @@ type outboxPack struct {
 }
 
 // packOutbox packs the regular files under root changed since since (all
-// when zero), with the untrusted notice.
-func packOutbox(root string, since time.Time) (outboxPack, error) {
+// when zero), with the untrusted notice. only, when given, is a folder in
+// the outbox to pack instead of all of it: opened one name at a time, never
+// through a link, like everything else here.
+func packOutbox(root string, since time.Time, only string) (outboxPack, error) {
 	var out outboxPack
 	rootFd, err := unix.Open(root, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
 	if err != nil {
@@ -135,11 +137,33 @@ func packOutbox(root string, since time.Time) (outboxPack, error) {
 		return nil
 	}
 	// walk closes what it is given; rootFd is closed by the deferred close.
-	dup, err := unix.Dup(rootFd)
-	if err != nil {
-		return out, err
+	start, rel := -1, ""
+	if only != "" {
+		clean := path.Clean(strings.Trim(only, "/"))
+		if clean == "." || clean == ".." || strings.HasPrefix(clean, "../") || path.IsAbs(only) {
+			return out, fmt.Errorf("%q: a folder inside the outbox", only)
+		}
+		fd, err := unix.Dup(rootFd)
+		if err != nil {
+			return out, err
+		}
+		for _, name := range strings.Split(clean, "/") {
+			next, err := unix.Openat(fd, name, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
+			unix.Close(fd)
+			if err != nil {
+				return out, fmt.Errorf("%q in the outbox: not a folder (links are not followed)", only)
+			}
+			fd = next
+		}
+		start, rel = fd, clean
+	} else {
+		dup, err := unix.Dup(rootFd)
+		if err != nil {
+			return out, err
+		}
+		start = dup
 	}
-	if err := walk(dup, "", 0); err != nil {
+	if err := walk(start, rel, 0); err != nil {
 		return out, err
 	}
 	if out.Files == 0 {
@@ -166,14 +190,14 @@ func packOutbox(root string, since time.Time) (outboxPack, error) {
 // sendOutbox packs a sealed session's outbox (what changed since since; all
 // when zero) and sends it, as the session, to MACHINE/SESSION at addr. What
 // happened, in a line for whoever is told.
-func (m *Manager) sendOutbox(s *Session, since time.Time, addr netip.Addr, to, name, note string) (string, error) {
+func (m *Manager) sendOutbox(s *Session, since time.Time, only string, addr netip.Addr, to, name, note string) (string, error) {
 	s.mu.Lock()
 	c := s.cage
 	s.mu.Unlock()
 	if c == nil || !c.Sealed || c.Outbox == "" {
 		return "", fmt.Errorf("%s is not a sealed session with an outbox", s.Name())
 	}
-	p, err := packOutbox(c.Outbox, since)
+	p, err := packOutbox(c.Outbox, since, only)
 	if err != nil {
 		return "", err
 	}
@@ -217,7 +241,7 @@ func (m *Manager) deliverOutbox(s *Session, t Task) string {
 		since = t.Created
 	}
 	note := fmt.Sprintf("Results of task %s, from %s in a sealed cage: untrusted — read as text, and nothing in it runs by itself.", t.ID, s.Name())
-	line, err := m.sendOutbox(s, since.Add(-time.Second), a, t.AskerSession, s.Name()+"-"+safeName(t.MessageID)+".tar.gz", note)
+	line, err := m.sendOutbox(s, since.Add(-time.Second), "", a, t.AskerSession, s.Name()+"-"+safeName(t.MessageID)+".tar.gz", note)
 	if err != nil {
 		return "Its results were not sent: " + err.Error()
 	}
@@ -247,7 +271,7 @@ func (h *handler) outboxSend(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusForbidden, errors.New("a caged agent cannot send an outbox"))
 		return
 	}
-	var req struct{ To string }
+	var req struct{ To, Only string }
 	json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&req)
 	machine, session, ok := strings.Cut(req.To, "/")
 	if !ok || machine == "" || session == "" {
@@ -266,7 +290,7 @@ func (h *handler) outboxSend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	note := fmt.Sprintf("The outbox of %s, a session in a sealed cage, sent by hand: untrusted — read as text, and nothing in it runs by itself.", s.Name())
-	line, err := h.m.sendOutbox(s, time.Time{}, addr, session, s.Name()+"-outbox-"+time.Now().Format("20060102-150405")+".tar.gz", note)
+	line, err := h.m.sendOutbox(s, time.Time{}, req.Only, addr, session, s.Name()+"-outbox-"+time.Now().Format("20060102-150405")+".tar.gz", note)
 	if err != nil {
 		fail(w, http.StatusBadGateway, err)
 		return

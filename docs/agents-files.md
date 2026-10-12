@@ -46,7 +46,13 @@ them out**, never the cage:
   they didn't.
 - **By hand:** `shrooms-agent outbox send reviewer jimmy-crib/vpavlin` on the
   sealed session's machine, or the outbox's **send to…** in the apps' files
-  dialog, sends the whole outbox.
+  dialog, sends the whole outbox; `--only FOLDER` sends one folder of it
+  (say, this review and not the last one), opened without following links.
+
+A caged session, sealed or not, reaches nothing local: not the machine's
+other services, not a LAN file drop by name or by address. Files it makes
+leave through the routes here, and a session outside the cage takes them on
+from there.
 
 The outbox is the cage's to fill, so nothing in it is trusted, including what
 it *points at*. A link in it could name this machine's keys. The packer opens

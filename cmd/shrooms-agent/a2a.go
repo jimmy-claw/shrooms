@@ -32,18 +32,25 @@ import (
 const a2aUsage = `usage:
   shrooms-agent a2a list                                 the agents on the mesh: MACHINE/SESSION, harness, state
   shrooms-agent a2a send [--wait] [--title T] MACHINE/SESSION TEXT
-                                                         ask a session; --wait prints its reply, --title
-                                                         names the task in lists
+                                                         ask a session: a new task. --wait prints its reply,
+                                                         --title names the task in lists
+  shrooms-agent a2a reply [--wait] TASK TEXT             more on a task you sent: the answer it asked for,
+                                                         or a correction. Not a new task
   shrooms-agent a2a send-file [--note N] MACHINE/SESSION FILE
                                                          push a file to a session that takes files from this one
-  shrooms-agent a2a get  MACHINE/TASK-ID                 where a task stands, and its reply
-  shrooms-agent a2a cancel MACHINE/TASK-ID               interrupt it
-  shrooms-agent a2a ack MACHINE/TASK-ID                  you have seen its result: it is closed for you
-  shrooms-agent a2a update TASK-ID done|blocked|failed SUMMARY
-                                                         (a worker) finish a task given to this session
+  shrooms-agent a2a get  TASK                            where a task stands, and its reply
+  shrooms-agent a2a cancel TASK                          interrupt it
+  shrooms-agent a2a ack TASK                             you have seen its result: it is closed for you
+  shrooms-agent a2a update TASK done|blocked|failed SUMMARY
+                                                         (the worker) finish a task given to this session
 
 MACHINE is a peer's name as "shrooms status" shows it, or its overlay address.
-A task id is what send printed: SESSION:MESSAGE-ID.`
+TASK is what send printed: MACHINE/SESSION:MESSAGE-ID. SESSION:MESSAGE-ID works
+too; the machine is then found by asking.
+
+A task's state: submitted (queued: the session is busy and has not read it
+yet), working, input-required (it asks you: answer with reply), completed,
+failed, rejected (refused, with why), canceled.`
 
 // a2aClient reaches agents: machines found through the daemon's socket.
 type a2aClient struct {
@@ -133,6 +140,10 @@ func a2aMain(args []string) error {
 		return nil
 	case args[0] == "send" && len(rest) >= 2:
 		t, err = c.send(rest[0], strings.Join(rest[1:], " "), *title, *wait)
+		// Printed as get, reply, ack and cancel take it: with its machine.
+		if machine, _, _ := strings.Cut(rest[0], "/"); err == nil && t.ID != "" && !strings.Contains(t.ID, "/") {
+			t.ID = machine + "/" + t.ID
+		}
 	case args[0] == "send-file" && len(rest) == 2:
 		at, err := c.sendFile(rest[0], rest[1], *note, true)
 		if err != nil {
@@ -140,6 +151,8 @@ func a2aMain(args []string) error {
 		}
 		fmt.Printf("sent %s to %s, kept there at %s\n", filepath.Base(rest[1]), rest[0], at)
 		return nil
+	case args[0] == "reply" && len(rest) >= 2:
+		t, err = c.answer(rest[0], strings.Join(rest[1:], " "), *wait)
 	case args[0] == "get" && len(rest) == 1:
 		t, err = c.task(rest[0], "GetTask")
 	case args[0] == "cancel" && len(rest) == 1:
@@ -218,12 +231,36 @@ func (c a2aClient) send(to, text, title string, wait bool) (cliTask, error) {
 // answer is more on a task already open — what it said it needs:
 // MACHINE/SESSION:MESSAGE-ID.
 func (c a2aClient) answer(ref, text string, wait bool) (cliTask, error) {
-	name, id, ok := strings.Cut(ref, "/")
-	session, _, _ := strings.Cut(id, ":")
-	if !ok || !strings.Contains(id, ":") {
-		return cliTask{}, fmt.Errorf("%q: want MACHINE/SESSION:MESSAGE-ID", ref)
+	name, id, err := c.taskRef(ref)
+	if err != nil {
+		return cliTask{}, err
 	}
+	session, _, _ := strings.Cut(id, ":")
 	return c.message(name+"/"+session, id, text, "", wait)
+}
+
+// taskRef reads a task as MACHINE/SESSION:MESSAGE-ID or SESSION:MESSAGE-ID;
+// for the second, the machine is the one whose agent knows the task.
+func (c a2aClient) taskRef(ref string) (machine, id string, err error) {
+	if name, rest, ok := strings.Cut(ref, "/"); ok {
+		if !strings.Contains(rest, ":") || name == "" {
+			return "", "", fmt.Errorf("%q: a task is MACHINE/SESSION:MESSAGE-ID (or SESSION:MESSAGE-ID), as send printed it", ref)
+		}
+		return name, rest, nil
+	}
+	if !strings.Contains(ref, ":") {
+		return "", "", fmt.Errorf("%q: a task is MACHINE/SESSION:MESSAGE-ID (or SESSION:MESSAGE-ID), as send printed it", ref)
+	}
+	ms, err := c.peers()
+	if err != nil {
+		return "", "", fmt.Errorf("finding the machine of %s: %w", ref, err)
+	}
+	for _, m := range ms {
+		if _, err := c.rpc(m.Addr, "/a2a", "GetTask", map[string]any{"id": ref}, false); err == nil {
+			return m.Name, ref, nil
+		}
+	}
+	return "", "", fmt.Errorf("no machine on the mesh knows task %s: give it as MACHINE/SESSION:MESSAGE-ID", ref)
 }
 
 func (c a2aClient) message(to, taskID, text, title string, wait bool) (cliTask, error) {
@@ -258,9 +295,9 @@ func (c a2aClient) message(to, taskID, text, title string, wait bool) (cliTask, 
 
 // task calls method (GetTask, CancelTask, AckTask) on MACHINE/SESSION:MESSAGE-ID.
 func (c a2aClient) task(ref, method string) (cliTask, error) {
-	name, id, ok := strings.Cut(ref, "/")
-	if !ok || !strings.Contains(id, ":") {
-		return cliTask{}, fmt.Errorf("%q: want MACHINE/SESSION:MESSAGE-ID", ref)
+	name, id, err := c.taskRef(ref)
+	if err != nil {
+		return cliTask{}, err
 	}
 	addr, err := c.resolve(name)
 	if err != nil {
@@ -276,6 +313,10 @@ func (c a2aClient) update(id, state, summary string) (cliTask, error) {
 	if err != nil || len(ms) == 0 {
 		return cliTask{}, fmt.Errorf("this machine's agent: %v", err)
 	}
+	// Its own machine's task: a MACHINE/ in front is this machine.
+	if _, rest, ok := strings.Cut(id, "/"); ok {
+		id = rest
+	}
 	body, _ := json.Marshal(map[string]string{"state": state, "summary": summary, "session": os.Getenv("SHROOMS_AGENT_SESSION")})
 	resp, err := c.http(30*time.Second).Post(c.base(ms[0].Addr)+"/v1/tasks/"+url.PathEscape(id),
 		"application/json", bytes.NewReader(body))
@@ -284,6 +325,10 @@ func (c a2aClient) update(id, state, summary string) (cliTask, error) {
 	}
 	defer resp.Body.Close()
 	b, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if resp.StatusCode == http.StatusNotFound {
+		return cliTask{}, fmt.Errorf("no task %s given to this session here: update is for the worker, the session a task was sent to. "+
+			"To answer or correct a task you sent, use: a2a reply MACHINE/SESSION:MESSAGE-ID TEXT", id)
+	}
 	if resp.StatusCode != http.StatusOK {
 		return cliTask{}, fmt.Errorf("task_update: %s: %.300s", resp.Status, b)
 	}

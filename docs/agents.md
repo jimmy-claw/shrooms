@@ -478,16 +478,22 @@ Run as root it warns: every session could do anything on the machine.
 `shrooms-agent a2a`, a client for agents and people (machines found through
 the daemon's socket; MACHINE is a peer's name as `shrooms status` shows it, or
 its overlay address; a task is `MACHINE/SESSION:MESSAGE-ID`, as `send`
-prints it):
+prints it — `SESSION:MESSAGE-ID` works too, the machine then found by asking):
 
 | Command | What it does |
 |---|---|
 | `a2a list` | the agents on the mesh: `MACHINE/SESSION`, harness, state, directory; machines without an agent, or away, left out |
 | `a2a send [--wait] MACHINE/SESSION TEXT` | ask a session (`SendMessage`); `--wait` waits for the task to settle and prints the reply |
-| `a2a get MACHINE/TASK-ID` | where a task stands, and its reply (`GetTask`) |
-| `a2a cancel MACHINE/TASK-ID` | interrupt it (`CancelTask`) |
-| `a2a ack MACHINE/TASK-ID` | you have seen its result: it is closed for you (`AckTask`) |
-| `a2a update TASK-ID done/blocked/failed SUMMARY` | a worker finishes a task given to its session on this machine (`POST /v1/tasks/{id}`, with `SHROOMS_AGENT_SESSION` as the session) |
+| `a2a reply [--wait] TASK TEXT` | more on a task you sent — the answer it asked for, or a correction — on the same task, not a new one (`SendMessage` with its `taskId`; what `ask_agent` with `task` does) |
+| `a2a get TASK` | where a task stands, and its reply (`GetTask`) |
+| `a2a cancel TASK` | interrupt it (`CancelTask`) |
+| `a2a ack TASK` | you have seen its result: it is closed for you (`AckTask`) |
+| `a2a update TASK done/blocked/failed SUMMARY` | the worker finishes a task given to its session on this machine (`POST /v1/tasks/{id}`, with `SHROOMS_AGENT_SESSION` as the session); the sender gets "use reply" instead of a bare not-found |
+
+A task's state, as `get` prints it: `submitted` (queued: the session is busy
+and has not read it yet), `working`, `input-required` (it asks you: answer
+with `reply`), `completed`, `failed`, `rejected` (refused, with why),
+`canceled`.
 
 `shrooms-agent mcp` speaks MCP over stdin and stdout, one JSON-RPC message per
 line, with the five tools above; `--socket PATH` names another daemon socket.

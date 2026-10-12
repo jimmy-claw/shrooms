@@ -25,7 +25,16 @@ const filesUsage = `usage:
   shrooms-agent files allow SESSION MACHINE/SESSION      take files from that session (MACHINE/* for all of a machine's)
   shrooms-agent files deny  SESSION MACHINE/SESSION      stop taking them
 
-  shrooms-agent outbox send SESSION MACHINE/SESSION      send a sealed session's whole outbox there, packed`
+  shrooms-agent outbox send [--only FOLDER] SESSION MACHINE/SESSION
+                                                         send a sealed session's outbox there, packed: all of
+                                                         it, or one folder in it
+
+A session in a sealed cage sends nothing itself: what it writes to /outbox in
+its cage (~/shrooms-outbox/SESSION on its machine) is carried out by this
+machine's agent, to the asker when a task finishes, or by hand with "outbox
+send" (docs/agents-files.md). Whether a session takes *tasks* from caged
+agents is its accept_caged setting, in the Agents apps or
+PATCH /v1/sessions/SESSION {"accept_caged": true}.`
 
 // sendFile pushes the file at path to MACHINE/SESSION. Where it was kept.
 func (c a2aClient) sendFile(to, path, note string, tell bool) (string, error) {
@@ -167,6 +176,7 @@ func orNone(s string) string {
 func outboxMain(args []string) error {
 	fs := flag.NewFlagSet("outbox", flag.ContinueOnError)
 	sock := fs.String("socket", "/run/shrooms/shrooms.sock", "the shrooms daemon's control socket")
+	only := fs.String("only", "", "send only this folder of the outbox")
 	if len(args) < 1 || args[0] != "send" {
 		return errors.New(filesUsage)
 	}
@@ -182,7 +192,7 @@ func outboxMain(args []string) error {
 	if err != nil || len(ms) == 0 {
 		return fmt.Errorf("this machine's agent: %v", err)
 	}
-	body, _ := json.Marshal(map[string]string{"to": rest[1]})
+	body, _ := json.Marshal(map[string]string{"to": rest[1], "only": *only})
 	resp, err := c.http(6*time.Minute).Post(c.base(ms[0].Addr)+"/v1/sessions/"+url.PathEscape(rest[0])+"/outbox/send",
 		"application/json", strings.NewReader(string(body)))
 	if err != nil {
