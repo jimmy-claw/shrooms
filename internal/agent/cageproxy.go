@@ -179,11 +179,13 @@ func (m *Manager) cageProxy(s *Session) http.Handler {
 		// own tasks, and a review poisoned by what it read cannot instruct
 		// the owner's other agents.
 		if sealed && !(r.Method == http.MethodPost && isTaskUpdate(path)) {
-			fail(w, http.StatusForbidden, fmt.Errorf("not from a sealed cage: %s %s %s", r.Method, path, rpc.Method))
+			// Said as what it is: a refusal, and the way that does exist.
+			fail(w, http.StatusForbidden, fmt.Errorf("a sealed cage cannot do this (%s %s %s): it finishes its own tasks and nothing else; "+
+				"its results leave through its outbox, /outbox in the cage, carried out by its machine's agent (docs/agents-files.md)", r.Method, path, rpc.Method))
 			return
 		}
 		if !proxyAllowed(r.Method, path, rpc.Method) {
-			fail(w, http.StatusForbidden, fmt.Errorf("not from a cage: %s %s %s", r.Method, path, rpc.Method))
+			fail(w, http.StatusForbidden, fmt.Errorf("a cage cannot do this: %s %s %s", r.Method, path, rpc.Method))
 			return
 		}
 		ms, err := m.machines()
