@@ -54,7 +54,7 @@ Read from its README and `docs/protocol.md` on 2026-08-20, not from summaries:
 ### Where they are ahead
 
 **iOS**, which we have declared out of scope
-([ADR-022](adr/022-keycard-for-the-admin-key.md)). The reason is worth understanding
+([Shrooms on iOS](shrooms-on-ios.md)). The reason is worth understanding
 rather than resenting: our blocker was never WireGuard, it was fitting a libp2p
 node inside a Network Extension's memory limit. Nostr signalling is websockets
 to a relay, which costs almost nothing, so the constraint that stopped us does
@@ -128,7 +128,7 @@ Worth stating plainly, since the point of this page is credibility.
 
 - **It is a prototype.** Tailscale, Nebula and ZeroTier are production systems
   with real operational history. This is not.
-- **No iOS.** The extension memory limit rules out the current design (ADR-022).
+- **No iOS.** The extension memory limit rules out the current design ([Shrooms on iOS](shrooms-on-ios.md)).
   The others all ship iOS clients.
 - **NAT traversal is good, not great.** Tailscale has spent years on this and it
   shows. See `m2-punch-deadlock.md` for a case Shrooms does not yet handle.

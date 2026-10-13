@@ -409,15 +409,11 @@ default  jellyfin  http://jellyfin.nas.mesh  <span class="a">(unreachable now)</
 </div>
 
 <div class="warn">
-    <p><strong>Honest gap.</strong> Both settings are documented as per mesh,
-    and the daemon does treat them per mesh — but the config parser accepts
-    <code>mesh.&lt;label&gt;.key</code>,
-    <code>.admin_keys</code>, <code>.relay</code>, <code>.services</code> and
-    <code>.enabled</code>, and nothing else. So the switches can only be written
-    at the top level, where they apply to the mesh a single-mesh config
-    describes. A second mesh added with prefixed keys announces nothing, which
-    is the safe direction, and there is currently no way to turn it on for that
-    mesh alone.</p>
+    <p><strong>Both settings are per mesh.</strong> At the top level they apply
+    to the mesh a single-mesh config describes. With several meshes, write them
+    with the mesh's prefix — <code>mesh.&lt;label&gt;.announce_services</code>,
+    <code>mesh.&lt;label&gt;.announce_bound</code> — and a mesh that does not
+    say so announces nothing, which is the safe direction.</p>
 </div>
 
 <h2 id="meshes">5. Several meshes</h2>
@@ -627,15 +623,19 @@ learns it from whoever is up.</code></pre>
 <div class="warn">
     <p><strong>Automatic renewal is not built</strong>, deliberately: it needs a
     signing key that is online, which is a different security posture and its
-    own decision. Somebody runs <code>admin renew</code>, or devices lapse at
-    thirty days.</p>
-    <p><strong>The renewal sweep is verified by unit tests only.</strong>
-    Issuance through the invite exchange has been run against the live mesh; the
-    sweep and the grant message it sends have not.</p>
-    <p><strong>Any member can still mint members</strong>, because any node can
-    issue invites, and anyone who has the token within its fifteen minutes can
-    join. Restricting that is what the admin key is for and is not how invites
-    work today.</p>
+    own decision. Somebody runs <code>admin renew</code> — or, when the admin
+    key is a <a href="keycard.html">Keycard</a>, renews from
+    <a href="basecamp.html">Basecamp</a> — or devices lapse at thirty days.</p>
+    <p><strong>The renewal sweep has run on a live mesh.</strong> On
+    2026-08-13 it reissued credentials on a three-member mesh, and a phone,
+    untouched, verified and stored its own. It travels over the rendezvous
+    plane, so a device that is off it when the sweep runs is not renewed: run
+    the sweep again.</p>
+    <p><strong>A token is a bearer secret for fifteen minutes.</strong> An
+    invite needs the admin key to issue, but anyone who has the token within
+    its fifteen minutes can join with it. On a mesh minted with
+    <code>--no-admin</code> there is no admin key, so any member can issue
+    invites.</p>
 </div>
 
 <h2 id="relays">7. Relays and reachability</h2>
@@ -899,7 +899,7 @@ mode = "Core"      <span class="c"># relay for the network (default)</span></cod
     Core where bandwidth is flat and the machine is always on. A VPS is the
     right place to contribute relay capacity; a phone is not — half a gigabyte a
     day of other people's traffic on a mobile plan is the whole argument. On
-    Android the setting is on the main screen rather than in a config file.
+    Android the setting is in the app's settings rather than in a config file.
 </p>
 
 <div class="note">
@@ -911,10 +911,11 @@ mode = "Core"      <span class="c"># relay for the network (default)</span></cod
     anonymity
     <a href="https://github.com/vpavlin/shrooms/blob/master/SECURITY.md">SECURITY.md</a>
     describes.</p>
-    <p><strong>It is still Core by default</strong>, including on Android.
-    Someone has to relay, and changing what a node contributes to a shared
-    network should be a decision rather than a default that quietly picks a
-    side.</p>
+    <p><strong>Core is the default on a server, Edge on a phone.</strong>
+    Someone has to relay, so a machine that is always on keeps contributing
+    unless you change it. A phone starts as Edge, because a phone that woke up
+    as Core spent mobile data and, behind a carrier NAT, often failed to hold
+    the gossip mesh at all.</p>
 </div>
 
 <h2 id="next">Where to go next</h2>

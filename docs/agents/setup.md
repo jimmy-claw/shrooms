@@ -234,7 +234,8 @@ the same as on the command line.
 Things to know about pi:
 
 - **The mesh's agents as tools.** pi reads MCP servers only from
-  `~/.pi/agent/mcp.json`. When the agent starts, it adds an entry called
+  `~/.pi/agent/mcp.json`, and only from pi 1.0 on: an older pi starts
+  without the shrooms tools and does not say so. When the agent starts, it adds an entry called
   `shrooms` there that runs `shrooms-agent mcp`. It leaves the rest of the
   file alone, and it also leaves alone any `shrooms` entry of your own that
   does not look like its own. `PI_CODING_AGENT_DIR`, if set, is used in place
@@ -287,6 +288,7 @@ Then restart with `systemctl --user restart shrooms-agent`.
 | `--mcp` | `true` | Give every session the mesh's agents as MCP tools and tell it how to use them ([Agents together](together.md)). |
 | `--cages` | `true` | Offer cages when podman is installed. |
 | `--cage-image` | the workbench | The image cages are made from, for the whole machine. |
+| `--sealed-token` | `sealed-claude-token` in the state directory | The file with the Claude Code token sealed cages run on ([Cages](cages.md)). |
 | `--stt-model` | `~/.local/share/whisper/ggml-parakeet-tdt-0.6b-v3-q4_k.bin` | The speech-to-text model for voice notes. |
 | `--stt-bin` | from the model | `parakeet-cli` for a Parakeet model, otherwise `whisper-cli`. |
 | `--stt-threads` | cores, up to 12 | Threads used for transcription. |
@@ -309,11 +311,15 @@ off, and the log at startup says which one was missing.
   `~/.local/bin`, and downloads the Parakeet v3 model (about 400 MB) into
   `~/.local/share/whisper`. The build is the user's own and stays after
   `--uninstall`.
-- **ffmpeg and ffprobe** must be on the service's `PATH`. Every note is
-  converted with them first.
+- **ffmpeg** must be on the service's `PATH`. Every note is converted with
+  it first. Only Whisper also uses ffprobe, which comes with ffmpeg.
 - **Speed.** Parakeet runs at 6–8 times real time on a recent laptop CPU and
-  about real time on a small four-core VPS. Set `--stt-threads` to the
-  machine's real core count when it shares the CPU with other work.
+  about real time on a small four-core VPS. A Parakeet note over 90 s is cut
+  at pauses into pieces of about a minute, and up to 4 are transcribed at
+  once (fewer on a machine with fewer than 16 threads): on a laptop, a 406 s
+  note took 40 s instead of 99 s. Set `--stt-threads` to the machine's real
+  core count when it shares the CPU with other work.
+  [speech-to-text](../speech-to-text.md) has the details.
 - **Whisper instead.** Point `--stt-model` at a Whisper ggml model (any file
   without "parakeet" in its name) and the agent runs it with `whisper-cli`.
   Parakeet detects the language itself. Whisper is slower but drops filler

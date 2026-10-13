@@ -41,13 +41,14 @@ A caged session **can still**:
   ([ADR-044](../adr/044-cages-reach-agents-through-their-own.md)). The agent
   port is closed inside every cage, by a rule its root cannot remove. The
   shrooms tools (`list_agents`, `ask_agent`, `task_status`, `task_update`,
-  `task_ack`) work through a socket to the cage's own agent, mounted at
-  `/run/shrooms-agent/proxy.sock`, which forwards only those. It cannot make,
-  delete or reconfigure a session, so a caged session cannot start an
-  uncaged one, here or anywhere. Its agent names it to the receiver itself,
-  and says it is caged; each session decides whether it takes tasks from
-  caged agents ("caged tasks" in the apps; by default caged sessions do and
-  the others do not).
+  `task_ack`, `send_file`) work through a socket to the cage's own agent,
+  mounted at `/run/shrooms-agent/proxy.sock`, which forwards only those. It
+  cannot make, delete or reconfigure a session, so a caged session cannot
+  start an uncaged one, here or anywhere. Its agent names it to the receiver
+  itself, and says it is caged; each session decides whether it takes tasks
+  from caged agents ("caged tasks" in the apps; by default caged sessions do
+  and the others do not), and files only from the sessions it allows. A
+  sealed cage gets only `task_update` (below).
 - **do anything inside its project.** The project is mounted read-write. That
   includes `.git/hooks`, a `Makefile`, a `package.json` script: anything you
   later run from that directory outside the cage runs as you.
@@ -105,7 +106,7 @@ sealed cage is an ordinary cage, and also:
   other conversations, none of the keys in the agent's environment. Claude
   Code only; GitHub and nix are not offered.
 - **asks nothing**: it can finish the tasks it is given, and cannot ask
-  another agent for anything.
+  another agent for anything or send it a file.
 - **no user namespaces**: a seccomp profile (podman's default, with
   `CLONE_NEWUSER` refused) closes the door most container escapes go
   through. Programs and threads run as usual; `bwrap`, rootless podman and
@@ -117,7 +118,10 @@ sealed cage is an ordinary cage, and also:
   inside, for its results. Read what is in it as untrusted text: a review of
   hostile code can carry instructions for whoever reads it. It can hold
   links that point anywhere on the machine; packing never follows them, and
-  neither should you.
+  neither should you. The machine's agent carries it out: to the asker when
+  a task finishes, if the asker takes files from the session, or by hand
+  with `shrooms-agent outbox send [--only FOLDER] SESSION MACHINE/SESSION`
+  ([Files between agents](../agents-files.md)).
 
 **After a sealed session: the directory is untrusted.** The code under review
 could write in its project, and leave something there that runs later,

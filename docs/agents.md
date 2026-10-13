@@ -423,11 +423,13 @@ guide):
 - **Tools.** shrooms-agent gives each session its own binary as an MCP server,
   `shrooms-agent mcp`, named `shrooms`: `list_agents` (every session on the
   mesh, as `MACHINE/SESSION`, harness, state, directory — machines by their
-  mesh names, each once), `ask_agent` (`to`, `text`, `wait` default true,
-  `task` to answer one that needs input: the reply, or the task to follow),
-  `task_status`, `task_ack` (the asker closes a task it has the result of)
-  and `task_update` (the worker finishes one: done, blocked or failed, with a
-  summary). Claude Code gets it by `--mcp-config`, with `list_agents` and
+  mesh names, each once), `ask_agent` (`to`, `text`, `title` naming a new
+  task in lists, `wait` default true, `task` to answer one that needs input:
+  the reply, or the task to follow), `task_status`, `task_ack` (the asker
+  closes a task it has the result of), `task_update` (the worker finishes
+  one: done, blocked or failed, with a summary) and `send_file` (`to`,
+  `path`, `note`: a file of at most 100 MB (`MaxDrop`) to a session that
+  takes files from this one; [Files between agents](agents-files.md)). Claude Code gets it by `--mcp-config`, with `list_agents` and
   `task_status` allowed and `ask_agent` asking first like any tool; pi reads
   MCP servers only from `~/.pi/agent/mcp.json`, where the agent adds a
   `shrooms` entry at start — one of the person's own under that name is left
@@ -450,6 +452,12 @@ guide):
 shrooms-agent [flags]                 serve this machine's sessions on its mesh addresses
 shrooms-agent mcp [--socket PATH]     the MCP server (stdio) given to every session
 shrooms-agent a2a COMMAND [--wait] [--socket PATH] ARGS
+shrooms-agent files list  SESSION                  who SESSION takes files from, and who was refused
+shrooms-agent files allow SESSION MACHINE/SESSION  take files from that session (MACHINE/* for all of a machine's)
+shrooms-agent files deny  SESSION MACHINE/SESSION  stop taking them
+shrooms-agent outbox send [--only FOLDER] SESSION MACHINE/SESSION
+                                                   send a sealed session's outbox there, packed: all of
+                                                   it, or one folder in it
 ```
 
 The flags of the server (the installed unit runs it with none; see
@@ -483,8 +491,9 @@ prints it — `SESSION:MESSAGE-ID` works too, the machine then found by asking):
 | Command | What it does |
 |---|---|
 | `a2a list` | the agents on the mesh: `MACHINE/SESSION`, harness, state, directory; machines without an agent, or away, left out |
-| `a2a send [--wait] MACHINE/SESSION TEXT` | ask a session (`SendMessage`); `--wait` waits for the task to settle and prints the reply |
+| `a2a send [--wait] [--title T] MACHINE/SESSION TEXT` | ask a session (`SendMessage`); `--wait` waits for the task to settle and prints the reply; `--title` names the task in lists |
 | `a2a reply [--wait] TASK TEXT` | more on a task you sent — the answer it asked for, or a correction — on the same task, not a new one (`SendMessage` with its `taskId`; what `ask_agent` with `task` does) |
+| `a2a send-file [--note N] MACHINE/SESSION FILE` | push a file to a session that takes files from this one |
 | `a2a get TASK` | where a task stands, and its reply (`GetTask`) |
 | `a2a cancel TASK` | interrupt it (`CancelTask`) |
 | `a2a ack TASK` | you have seen its result: it is closed for you (`AckTask`) |
@@ -496,7 +505,7 @@ with `reply`), `completed`, `failed`, `rejected` (refused, with why),
 `canceled`.
 
 `shrooms-agent mcp` speaks MCP over stdin and stdout, one JSON-RPC message per
-line, with the five tools above; `--socket PATH` names another daemon socket.
+line, with the six tools above; `--socket PATH` names another daemon socket.
 
 ## State on disk
 

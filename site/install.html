@@ -118,7 +118,7 @@
         It installs a container, writes a systemd unit and hands a network
         interface to a daemon — which is what you want, and is
         indistinguishable from what you would not want until you have read it.
-        It is 953 lines with nothing clever in it:
+        It is under a thousand lines with nothing clever in it:
         <a href="https://github.com/vpavlin/shrooms/blob/master/scripts/install.sh">scripts/install.sh</a>.
     </p>
 </div>
@@ -172,8 +172,8 @@ and back here:
 <summary>What the installer does</summary>
 
 <p>
-    Three verbs. <code>init</code> creates a mesh, <code>join &lt;NETWORK-KEY&gt;</code>
-    joins one you have the key for, and <code>prepare</code> installs and starts
+    Three verbs. <code>init</code> creates a mesh, <code>join &lt;TOKEN&gt;</code>
+    redeems an invite, and <code>prepare</code> installs and starts
     the daemon with no mesh at all. <code>prepare</code> is the one to pair with
     invites — a daemon without a mesh still holds its control socket and waits
     to be told which network it is on, which is exactly what
@@ -275,8 +275,8 @@ and back here:
 <li>
 <p>
     Open it and scan the QR from <code>shrooms invite</code>, or paste the
-    token into the single field — it takes an invite or a network key and tells
-    them apart itself.
+    token into the single field. It takes an invite and nothing else: a raw
+    network key no longer admits a device.
 </p>
 </li>
 </ol>
@@ -286,7 +286,7 @@ and back here:
 <ul>
     <li>an Android 8 or newer phone, arm64</li>
     <li>an F-Droid client installed</li>
-    <li>an invite from a machine already on the mesh, or its network key</li>
+    <li>an invite from a machine already on the mesh</li>
 </ul>
 </details>
 
@@ -566,7 +566,7 @@ A firewall is running here. Peers reach this node on UDP 51820, so open it:
     <code>./bin/shrooms</code> here.
 </p>
 
-<pre><code><span class="cmd">./scripts/deploy.sh root@VPS_IP --relay --name vps --key &lt;NETWORK-KEY&gt;</span>
+<pre><code><span class="cmd">./scripts/deploy.sh root@VPS_IP --relay --name vps   <span class="c"># then redeem an invite on it</span></span>
 <span class="cmd">./scripts/deploy.sh root@VPS_IP --init --relay --name vps   <span class="c"># or create the mesh</span></span></code></pre>
 
 <p>
@@ -716,16 +716,16 @@ Asking to join as "nas"...
 
 <p>
     <strong>The phone joins the same way.</strong> Scan the QR, or paste the
-    token into the one field on the join screen — it takes an invite or a
-    network key and tells them apart itself.
+    token into the one field on the join screen. It takes an invite only.
 </p>
 
 <p>
     Joining is by <strong>invite only</strong>. <code>shrooms join
     &lt;NETWORK-KEY&gt;</code> was removed on 2026-08-27: a raw network key no longer makes
     a device a member. A machine set up by someone who never sees the key still joins by
-    <code>shrooms invite</code>. Credentials expire in thirty days by default, so renewal
-    is another invite - and on a mesh minted with <code>--no-admin</code> the invite
+    <code>shrooms invite</code>. Credentials expire in thirty days by default and are
+    renewed with <code>shrooms admin renew</code>
+    (<a href="guides.html#membership">Invites and membership</a>) - and on a mesh minted with <code>--no-admin</code> the invite
     carries the network key instead of a credential.
 </p>
 
@@ -734,7 +734,7 @@ Asking to join as "nas"...
 <p>
     Somebody else — a colleague, a script, an agent — can install and configure
     a node without ever holding your network key. Prepare the machine without
-    it, and put the key in yourself afterwards.
+    it, and admit it with an invite yourself afterwards.
 </p>
 
 <p>
@@ -1011,10 +1011,10 @@ reflexive addresses (as peers observe us):
     fine</strong> — tunnels keep carrying traffic, the roster stops changing, and
     peers age out one at a time until the status page is a list of healthy
     devices marked offline. Both the daemon and the app watch for it now, and
-    recovery is a restart in both places. And <strong>renewal has never been
-    watched happen on a live mesh</strong>: the sweep is built and unit-tested,
-    but the clock on a credential is thirty days, and
-    <code>shrooms invite</code> again is the shortest way to reset it.
+    recovery is a restart in both places. And <strong>renewal travels over the
+    rendezvous plane</strong>: a device whose tunnel is healthy but whose
+    Delivery connection is not misses the sweep, and lapses at thirty days
+    unless the sweep is run again or it is invited again.
 </p>
 
 <h2 id="next">Where to go next</h2>

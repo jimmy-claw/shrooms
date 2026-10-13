@@ -38,8 +38,8 @@ Each session is a card with:
 - **"1 task" or "n tasks"** when other agents have given it tasks that are
   still open, and **"⚠ a task stalled — no progress after the reminders"**
   when one of them has stalled. See [Tasks from other agents](#tasks-from-other-agents).
-- **CAGED**, a violet tag, for a session that runs in a cage. See
-  [Cages](#cages).
+- **CAGED**, a violet tag, for a session that runs in a cage, or
+  **SEALED**, in amber, for one in a sealed cage. See [Cages](#cages).
 
 **Starring.** The mushroom beside a card stars it. Starred sessions are listed
 first, under "🍄 STARRED", across all machines, with the machine's name on
@@ -98,7 +98,8 @@ conversation. Esc first closes whatever is nearer: a dialog, or the search.
 Tap or click a session to open it. Its header has the name, the machine and
 mesh, harness, model and a thin bar for how full the context is. Under that,
 the session's switches and actions (each described below): auto-approve,
-auto-play, stop, search, cage, restart and delete.
+auto-play, stop, search, cage, caged tasks, files, meshes, restart and
+delete.
 
 **Replies stream** as they are written, with a cursor at the end, and
 "thinking…" or "writing…" while a turn is in progress. Replies are rendered as
@@ -145,6 +146,12 @@ conversation. It is for a session that stop does not reach, such as one hung
 on a dropped connection. What it was doing is lost; you are asked first.
 Other sessions on the machine are not touched.
 
+**Meshes.** "meshes" in the header picks which of its machine's meshes the
+session is there for ([ADR-049](../adr/049-sessions-per-mesh.md)). From a
+mesh not ticked, the session does not exist: not listed, opened, asked or
+sent files. None ticked is every mesh. With some ticked the link reads
+"on home, work".
+
 **Rename.** Tap or click the session's name in the header. Its history, its
 unread count, queued messages and what it is doing go with it.
 
@@ -187,8 +194,12 @@ this phone.
   files sent to it and the harness's settings. Its options: the image (the
   machine's own, the workbench, or the desktop one with Xvfb, xdotool and
   ffmpeg), **nix** (the machine's nix store and profile, when it has nix) and
-  **GitHub login** (your `gh` login, read-only). The first caged session on a
-  machine builds the image, which takes a few minutes. See [Cages](cages.md).
+  **GitHub login** (your `gh` login, read-only), and **sealed**, for code you
+  do not trust: the internet and nothing local, its own login, results in
+  `~/shrooms-outbox`. Sealed is offered only once the machine has a sealed
+  token; until then the form says how to make one. The first caged session
+  on a machine builds the image, which takes a few minutes. See
+  [Cages](cages.md).
 
 **Continue a conversation from a terminal.** Below the form, "OR CONTINUE A
 CONVERSATION" lists the Claude Code conversations that ran in a directory on
@@ -209,6 +220,13 @@ the conversation, or paste an image from the clipboard (that needs
 wl-clipboard or xclip). The file is kept on the agent's machine and named by
 its path in the message it goes with, so the model can read it. Attached files
 show above the message box until you send; × takes one back.
+
+**Files from other agents.** "files" in the header shows what other agents
+sent the session (RECEIVED, each with **delete**), and who it takes files
+from (TAKES FILES FROM: nobody until you add `machine/session`, or
+`machine/*` for all of a machine's). A session that was refused one asks:
+the link turns amber, "files · 1 asking", and the panel has **allow** and
+**ignore** for it. See [Files between agents](../agents-files.md).
 
 **Voice notes.** 🎤 starts recording; tap again to stop and send. The
 recording is sent to the agent's machine, transcribed there (by Parakeet,
@@ -323,7 +341,14 @@ line also shows all of them: turns, tokens out and in, cost, and hours busy.
 
 A session that runs in a cage carries the violet **CAGED** tag in the list
 and on the board (in Basecamp, hover over it for the image and options), and
-"in a cage (…)" in its header.
+"in a cage (…)" in its header. A sealed one carries **SEALED**, in amber,
+and its header says where its results go ("results in …"). Its "files"
+panel has an **OUTBOX** field: the outbox is sent to a task's asker when the
+task ends, and from there you can send it all to another session.
+
+**Caged tasks.** "caged tasks" in a session's header says whether it takes
+tasks from agents in cages; lit, "CAGED TASKS", it does. By default caged
+sessions do and the others do not. A refused task is answered at once.
 
 "cage" in an open session's header moves it in or out of a cage. For a
 session on the machine, it offers the same options as a new caged session and
@@ -353,15 +378,19 @@ board, the links between cards, each with a count of its open tasks.
 
 **Every task in one place:** the board's tasks panel in Basecamp, and the
 **tasks** link on the phone (amber, with a count, while one waits on you).
-Tasks are grouped as **Needs you**, **Working**, **Stalled** and **Done,
-unacked**. Each one shows what was asked, who asked whom and how long it has
-been quiet. A queued task, waiting for its session to be free, says
+Tasks are grouped as **Needs you** (a person asked, and the worker waits on
+them), **Blocked** (the worker waits on the agent that asked; it says whom,
+and its question), **Working**, **Stalled** and **Done, unacked**. Each one
+shows what was asked, who asked whom and how long it has been quiet. A queued task, waiting for its session to be free, says
 "queued". **ACK** (or **ACK all**) tells the worker's agent you have seen a
 result; acknowledged tasks leave the list. Tap a task to open the worker's
 session at the message where it arrived. In Basecamp, tap a link's count to
 see only the tasks between those two sessions.
 
-The apps cannot cancel a task yet; how to do it from a shell is in
+A task in Needs you or Blocked has **answer**, which sends your answer in
+the asker's place and moves it to Working, and **cancel**, after a confirm.
+A Blocked one also has **nudge**, which sends the asking agent its note
+again. A working or queued task is cancelled from a shell; how is in
 [Agents together](together.md).
 
 ## Where the phone and Basecamp differ

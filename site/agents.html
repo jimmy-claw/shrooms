@@ -125,11 +125,13 @@
     <a href="https://a2a-protocol.org">A2A</a> agent: one can ask another, on any
     of your machines, to do something — a task that stays open until the
     worker says it is done, with reminders if it goes quiet and the owner told
-    if it stalls. <a href="agents-together.html">Agents together</a></li>
+    if it stalls. Sessions can send each other files, too. <a href="agents-together.html">Agents together</a></li>
     <li><strong>Cages.</strong> A session can run in a rootless container of
     its own: root inside to install what it needs, your user outside, nothing
     of your home but its project. Auto-approve without handing over the
-    machine. <a href="agents-cages.html">Cages</a></li>
+    machine. A <em>sealed</em> cage, for code nobody vouches for, reaches the
+    internet and nothing local, runs on a login of its own, and only finishes
+    the tasks it is given. <a href="agents-cages.html">Cages</a></li>
     <li><strong>Your own machines, set up by you.</strong> One script per
     machine; Claude Code or pi logged in as in a terminal; voice notes
     transcribed on the machine, never by a speech service.
@@ -180,7 +182,8 @@
     you (<a href="https://github.com/vpavlin/shrooms/blob/master/docs/agents-harnesses.md">why, and what could</a>).</li>
     <li><strong>No terminal.</strong> It speaks to the agent, not to a shell;
     slash commands of the terminal UI do not exist here.</li>
-    <li><strong>Takeover is Claude Code's only</strong>, so far.</li>
+    <li><strong>Continuing a conversation started in a terminal</strong> works
+    for Claude Code only, so far.</li>
     <li><strong>One person's devices.</strong> As above: the mesh is the access
     control, so a shared mesh is the wrong place for it.</li>
 </ul>

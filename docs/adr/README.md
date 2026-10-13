@@ -31,10 +31,10 @@ number appears, its source is named.
 | [019](019-service-addresses.md) | An address per service | proposed; the name router is built |
 | [020](020-membership-is-a-seam.md) | Membership is a seam | accepted |
 | [021](021-synthetic-ipv4.md) | A synthetic IPv4 address per peer | accepted; translator built |
-| [022](022-keycard-for-the-admin-key.md) | A Keycard for the admin key | proposed; seam built, card blocked on a key-type decision |
+| [022](022-keycard-for-the-admin-key.md) | A Keycard for the admin key | accepted; built and proven against a physical card |
 | [023](023-announcing-services.md) | Announcing services | accepted; built |
 | [024](024-ask-the-router.md) | Ask the router for a way in | accepted; built and proven |
-| [025](025-control-from-a-desktop-app.md) | Control from a desktop app | accepted; settings built, admission deliberately not |
+| [025](025-control-from-a-desktop-app.md) | Control from a desktop app | accepted; settings, mesh on/off, joining and leaving built |
 | [026](026-announce-what-is-bound.md) | Announce what is bound to the mesh address | accepted; built, off by default |
 | [027](027-punching-through-the-relay.md) | Punch through the relay we already have | proposed; every part exists except the coordination |
 | [028](028-when-the-fleet-turns-on-rln.md) | When the fleet turns on RLN | proposed; nothing to build yet, two questions to ask |
@@ -42,7 +42,7 @@ number appears, its source is named.
 | [030](030-tailscale-shaped-not-tor-shaped.md) | Tailscale-shaped, not Tor-shaped | accepted; scopes four design notes |
 | [031](031-bootstrap-from-the-mesh-itself.md) | Bootstrap from the mesh itself | proposed; after five of six fleet entry nodes refused |
 | [032](032-a-suffix-that-cannot-be-taken-away.md) | A suffix that cannot be taken away | accepted; `.mesh` was never reserved and ICANN's 2026 round has closed |
-| [033](033-the-card-is-the-admin-not-the-uid.md) | The card is the admin, not the uid | proposed; tiers by what protects an operation, not by how it sounds |
+| [033](033-the-card-is-the-admin-not-the-uid.md) | The card is the admin, not the uid | accepted, built; tiers by what protects an operation |
 | [034](034-the-admin-names-the-blind-relays.md) | The admin names the blind relays | accepted; built |
 | [035](035-an-edge-port-is-nobodys-contract.md) | An Edge node's port is nobody's contract | accepted; built — a tethering phone stranded the old one |
 | [036](036-agents-grow-out-of-the-mesh.md) | Agents grow out of the mesh | accepted; built — Shrooms Agents, a separate app over the mesh |

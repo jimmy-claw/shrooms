@@ -37,15 +37,16 @@ same task, not a second one. A renamed session keeps its tasks.
 You do nothing to switch this on. Each session starts with:
 
 - **An MCP server called `shrooms`** (the agent's own binary, run as
-  `shrooms-agent mcp`), with five tools:
+  `shrooms-agent mcp`), with six tools:
 
 | Tool | Who uses it | What it does |
 |---|---|---|
 | `list_agents` | anyone | every session on the mesh: `MACHINE/SESSION`, harness, state (idle, working, waiting), directory |
-| `ask_agent` | the asker | sends a message to `MACHINE/SESSION`; waits for the reply (up to 10 minutes) unless `wait` is false; with `task` set, answers a task that is blocked |
+| `ask_agent` | the asker | sends a message to `MACHINE/SESSION`, with a short `title` that lists of tasks show; waits for the reply (up to 10 minutes) unless `wait` is false; with `task` set, answers a task that is blocked |
 | `task_status` | the asker | where a task stands, and the reply so far |
 | `task_update` | the worker | finishes a task: `done` with a summary, `blocked` with what it needs, or `failed` with why |
 | `task_ack` | the asker | says it has what it needed |
+| `send_file` | anyone | sends a file (`path`, with a `note`) to `MACHINE/SESSION`, at most 100 MB; kept only if that session takes files from this one ([Files between agents](../agents-files.md)) |
 
 - **A note in its system prompt**: which session and machine it is, where the
   tools are, how tasks work, and the manners. Say who you are, what you need
@@ -146,6 +147,7 @@ the session list, and in Basecamp's board a dashed line runs from
 | `input-required` | the worker said it is blocked, or a permission prompt is waiting on the worker's machine |
 | `completed` | the worker called `task_update` with `done`; the summary is the result |
 | `failed` | the worker said it failed, or the message could not be delivered |
+| `rejected` | refused, with why. A session that takes no tasks from caged agents refuses the message itself, with error `-32051`, so no task is made |
 | `canceled` | someone cancelled it, or it expired |
 
 **The queue.** A session works on one task at a time. A task sent to a session
@@ -217,9 +219,13 @@ it, and otherwise it expires at 24 hours.
 - **Look at a stalled task.** Open the session, read what it was doing, and
   write to it, as you would to any session. A stalled task is not reminded
   about again, so whatever happens next is up to you and the worker.
+- **Answer or nudge a waiting task.** In the apps' task lists, a task in
+  Needs you or Blocked has **answer** (sent in the asker's place) and
+  **cancel**; a Blocked one also has **nudge**, which sends the asking
+  agent its note again.
 - **Cancel a task.** A queued task never starts; a working one is
-  interrupted. The apps have no button for it yet; from any machine on the
-  mesh:
+  interrupted. The apps cancel only tasks in Needs you or Blocked, after a
+  confirm; any task, from any machine on the mesh:
 
 ```
 shrooms-agent a2a cancel homeserver/review:cli-20261008T091502-3f9a1c2e
@@ -236,6 +242,9 @@ agent that would rather run a command:
 ```
 shrooms-agent a2a list
 shrooms-agent a2a send --wait homeserver/review "Is the nightly build green?"
+shrooms-agent a2a send --title "Nightly build" homeserver/review "Is it green?"
+shrooms-agent a2a reply --wait homeserver/review:cli-20261008T091502-3f9a1c2e "Yes, main."
+shrooms-agent a2a send-file --note "Last night's log" homeserver/review build.log
 shrooms-agent a2a get    homeserver/review:cli-20261008T091502-3f9a1c2e
 shrooms-agent a2a cancel homeserver/review:cli-20261008T091502-3f9a1c2e
 shrooms-agent a2a ack    homeserver/review:cli-20261008T091502-3f9a1c2e
@@ -243,7 +252,12 @@ shrooms-agent a2a update review:cli-20261008T091502-3f9a1c2e done "Two problems:
 ```
 
 - `send` without `--wait` prints the task id and returns; with it, the reply
-  (or the task as it stands after 10 minutes).
+  (or the task as it stands after 10 minutes). `--title` names the task in
+  lists.
+- `reply` is more on a task you sent: the answer it asked for, or a
+  correction. It is the same task, not a new one.
+- `send-file` pushes a file to a session that takes files from this one;
+  `--note` says what it is.
 - `MACHINE` is the device's mesh name or its overlay address. Names are
   looked up through the shrooms daemon's socket (`--socket`, default
   `/run/shrooms/shrooms.sock`).

@@ -272,6 +272,8 @@ addr   = prefix : SHA256("mesh/v1/addr" || device_pub)[0:10]  <span class="c">�
 <tr><td><code>service</code></td><td>Publishes local ports under their own names, forwarding from the overlay address to loopback. A forwarder, not a proxy: bytes are copied, TLS is not terminated.</td></tr>
 <tr><td><code>listeners</code></td><td>Finds what is already bound to this device's mesh addresses, so it can be announced. Only sockets on exactly a mesh address count.</td></tr>
 <tr><td><code>v4</code></td><td>A synthetic IPv4 address per peer, translated before WireGuard sees it. Purely local; no peer has to agree to it.</td></tr>
+<tr><td><code>keycard</code></td><td>Drives a Keycard: pairing, the secure channel, the PIN, and signing a digest on the card (<a href="adr/022-keycard-for-the-admin-key.html">ADR-022</a>). Shared by the CLI and the phone.</td></tr>
+<tr><td><code>agent</code></td><td>Runs coding-agent sessions and serves them to the owner's other devices over the mesh — the core of <a href="agents.html">Shrooms Agents</a>.</td></tr>
 <tr><td><code>state</code></td><td>On-disk config and device state, separated by who writes them: <code>config.toml</code> is human-edited, <code>state.json</code> is daemon-owned.</td></tr>
 </table>
 
@@ -314,14 +316,36 @@ addr   = prefix : SHA256("mesh/v1/addr" || device_pub)[0:10]  <span class="c">�
 <tr><td>019</td><td><a href="adr/019-service-addresses.html">An address per service</a></td><td>proposed; the name router is built</td></tr>
 <tr><td>020</td><td><a href="adr/020-membership-is-a-seam.html">Membership is a seam</a></td><td>accepted</td></tr>
 <tr><td>021</td><td><a href="adr/021-synthetic-ipv4.html">A synthetic IPv4 address per peer</a></td><td>accepted; translator built</td></tr>
-<tr><td>022</td><td><a href="adr/022-keycard-for-the-admin-key.html">A Keycard for the admin key</a></td><td>proposed; seam built, card blocked on a key-type decision</td></tr>
+<tr><td>022</td><td><a href="adr/022-keycard-for-the-admin-key.html">A Keycard for the admin key</a></td><td>accepted; built, proven against a physical card</td></tr>
 <tr><td>023</td><td><a href="adr/023-announcing-services.html">Announcing services</a></td><td>accepted; built</td></tr>
 <tr><td>024</td><td><a href="adr/024-ask-the-router.html">Ask the router for a way in</a></td><td>accepted; built and proven</td></tr>
-<tr><td>025</td><td><a href="adr/025-control-from-a-desktop-app.html">Control from a desktop app</a></td><td>accepted; settings built, admission deliberately not</td></tr>
+<tr><td>025</td><td><a href="adr/025-control-from-a-desktop-app.html">Control from a desktop app</a></td><td>accepted; settings built, and on a card-only mesh what the card signed</td></tr>
 <tr><td>026</td><td><a href="adr/026-announce-what-is-bound.html">Announce what is bound to the mesh address</a></td><td>accepted; built, off by default</td></tr>
-<tr><td>027</td><td><a href="adr/027-punching-through-the-relay.html">Punch through the relay we already have</a></td><td>proposed</td></tr>
-<tr><td>028</td><td><a href="adr/028-when-the-fleet-turns-on-rln.html">When the fleet turns on RLN</a></td><td>proposed</td></tr>
-<tr><td>029</td><td><a href="adr/029-disco-proves-the-device.html">Disco proves the device, not just the mesh</a></td><td>accepted</td></tr>
+<tr><td>027</td><td><a href="adr/027-punching-through-the-relay.html">Punch through the relay we already have</a></td><td>proposed; every part exists except the coordination</td></tr>
+<tr><td>028</td><td><a href="adr/028-when-the-fleet-turns-on-rln.html">When the fleet turns on RLN</a></td><td>proposed; nothing to build yet, two questions to ask</td></tr>
+<tr><td>029</td><td><a href="adr/029-disco-proves-the-device.html">Disco proves the device, not just the mesh</a></td><td>accepted; the first half of Phase 4</td></tr>
+<tr><td>030</td><td><a href="adr/030-tailscale-shaped-not-tor-shaped.html">Tailscale-shaped, not Tor-shaped</a></td><td>accepted; scopes four design notes</td></tr>
+<tr><td>031</td><td><a href="adr/031-bootstrap-from-the-mesh-itself.html">Bootstrap from the mesh itself</a></td><td>proposed; after five of six fleet entry nodes refused</td></tr>
+<tr><td>032</td><td><a href="adr/032-a-suffix-that-cannot-be-taken-away.html">A suffix that cannot be taken away</a></td><td>accepted; <code>.mesh</code> was never reserved and ICANN's 2026 round has closed</td></tr>
+<tr><td>033</td><td><a href="adr/033-the-card-is-the-admin-not-the-uid.html">The card is the admin, not the uid</a></td><td>accepted; built</td></tr>
+<tr><td>034</td><td><a href="adr/034-the-admin-names-the-blind-relays.html">The admin names the blind relays</a></td><td>accepted; built</td></tr>
+<tr><td>035</td><td><a href="adr/035-an-edge-port-is-nobodys-contract.html">An Edge node's port is nobody's contract</a></td><td>accepted; built — a tethering phone stranded the old one</td></tr>
+<tr><td>036</td><td><a href="adr/036-agents-grow-out-of-the-mesh.html">Agents grow out of the mesh</a></td><td>accepted; built — Shrooms Agents, a separate app over the mesh</td></tr>
+<tr><td>037</td><td><a href="adr/037-agents-in-cages.html">Agents in cages, and off the machine</a></td><td>accepted; cages on the agent's machine built 2026-10-08 (rootless podman, a container per session); krun, Akash and spawning not yet</td></tr>
+<tr><td>038</td><td><a href="adr/038-usage-is-counted-by-the-mesh-address.html">Usage is counted by the mesh address</a></td><td>accepted; built — who asked, where it ran, which model</td></tr>
+<tr><td>039</td><td><a href="adr/039-the-phone-tells-the-core-what-it-cannot-see.html">On a phone, the app tells the core what it cannot see</a></td><td>accepted; built — its addresses, and when its node is deaf</td></tr>
+<tr><td>040</td><td><a href="adr/040-voices-come-from-the-system.html">Read-aloud uses the system's voice, set up rather than bundled</a></td><td>accepted; built</td></tr>
+<tr><td>041</td><td><a href="adr/041-agents-talk-a2a-over-the-mesh.html">Agents talk A2A, and the mesh is the authentication</a></td><td>accepted; built — every session an A2A agent, its tools in every session; "a task is a turn" amended by 042</td></tr>
+<tr><td>042</td><td><a href="adr/042-a-task-is-open-until-the-worker-finishes-it.html">A task is open until the worker finishes it</a></td><td>accepted; built — supervised by a watchdog, queued, acknowledged</td></tr>
+<tr><td>043</td><td><a href="adr/043-peers-are-probed-on-evidence-not-only-announces.html">Peers are probed on evidence, not only on announces</a></td><td>accepted; built — remembered, answering, after a move, or probing us; roaming without the bus</td></tr>
+<tr><td>044</td><td><a href="adr/044-cages-reach-agents-through-their-own.html">Cages reach agents only through their own, which says so</a></td><td>accepted; built — agent port closed in cages, a socket to their own agent, receivers choose (accept_caged)</td></tr>
+<tr><td>045</td><td><a href="adr/045-sealed-cages-for-code-nobody-vouches-for.html">Sealed cages, for code nobody vouches for</a></td><td>accepted; built — internet only (nothing local, DNS included: amended 2026-10-13), its own token, asks nothing, results in an outbox</td></tr>
+<tr><td>046</td><td><a href="adr/046-metrics-on-the-mesh-addresses.html">Metrics on the mesh addresses</a></td><td>accepted; built — tunnels, delivery and interfaces per node; Prometheus + Grafana via deploy/metrics</td></tr>
+<tr><td>047</td><td><a href="adr/047-the-tasks-board-is-read-from-the-agents.html">The tasks board lives in the agents' own view, read from the agents</a></td><td>accepted; being built — links carry their tasks, cards carry their load, a panel grouped as a person needs it, ACK to the worker's agent</td></tr>
+<tr><td>048</td><td><a href="adr/048-files-between-agents.html">Files between agents</a></td><td>accepted; built — push into per-sender folders, allow list empty by default, sealed cages receive only</td></tr>
+<tr><td>049</td><td><a href="adr/049-sessions-per-mesh.html">Sessions per mesh</a></td><td>accepted; built — a session limited to some of its machine's meshes is absent from the others; an unnamed caller is no one</td></tr>
+<tr><td>050</td><td><a href="adr/050-basecamp-at-parity-with-the-phone.html">Basecamp at parity with the phone</a></td><td>accepted; built — services per mesh, joins off the view's thread, a first join by invite open to the socket group, blind relays with the token never read back; Keycard invites through keycard-basecamp (a real-card run still owed)</td></tr>
+<tr><td>051</td><td><a href="adr/051-a-card-lets-the-socket-group-renew-and-revoke.html">A card lets the socket group renew and revoke</a></td><td>accepted; built — drafts the card signs, finished and verified by the daemon; card-only meshes only; members carry sealing keys</td></tr>
 </table>
 
 <p>
@@ -412,13 +436,13 @@ addr   = prefix : SHA256("mesh/v1/addr" || device_pub)[0:10]  <span class="c">�
 <tr><td><span class="dot mid"></span><strong>M2</strong> NAT traversal</td><td>reflexive discovery proven on real NAT; punching between two NATed nodes still unproven</td></tr>
 <tr><td><span class="dot on"></span><strong>M3</strong> relay fallback</td><td>carrying real traffic: a phone on carrier NAT reached its peers through a VPS relay it discovered itself</td></tr>
 <tr><td><span class="dot mid"></span><strong>M4</strong> seamless operation</td><td>roaming survives and the mesh repairs itself after a rendezvous outage; switching networks is still rough on the phone</td></tr>
-<tr><td><span class="dot on"></span><strong>M5</strong> credentials</td><td>issued, carried, verified, revoked and renewed by a sweep — though no credential has yet been watched roll over on live devices</td></tr>
+<tr><td><span class="dot on"></span><strong>M5</strong> credentials</td><td>issued, carried, verified, revoked and renewed by a sweep — a sweep reissued to a remote device on live hardware, 2026-08-13</td></tr>
 <tr><td><span class="dot on"></span><strong>M6</strong> name resolution</td><td>resolver registered with the host, on Linux and Android, including <code>&lt;service&gt;.&lt;device&gt;.mesh</code></td></tr>
 <tr><td><span class="dot on"></span>services</td><td>local ports and LAN devices published by name, including things that never joined the mesh</td></tr>
 <tr><td><span class="dot on"></span>Android</td><td>a full participant, in daily use — tunnels, names, roaming between wifi and mobile data</td></tr>
 <tr><td><span class="dot on"></span>multi-mesh</td><td>several meshes in one daemon and one app, each with its own identity, addresses, relay and services</td></tr>
 <tr><td><span class="dot on"></span>invites</td><td>one device at a time, fifteen minutes, no key pasted</td></tr>
-<tr><td><span class="dot on"></span>Basecamp module</td><td>published: reads the mesh and changes what the daemon can change alone — settings, services, meshes, joining, leaving, restarting — through <code>shrooms_core</code>, which reaches the control socket from outside the QML sandbox. Never admission, which needs the admin key</td></tr>
+<tr><td><span class="dot on"></span>Basecamp module</td><td>published: reads the mesh and changes what the daemon can change alone — settings, services, meshes, joining, leaving, restarting — through <code>shrooms_core</code>, which reaches the control socket from outside the QML sandbox. Admission, renewal and revocation only on a mesh whose admin key is a Keycard, which signs them</td></tr>
 <tr><td><span class="dot off"></span><strong>S2</strong> fleet Store retention</td><td>never run. Android shipped without depending on it, so it left the critical path unmeasured</td></tr>
 <tr><td><span class="dot off"></span><strong>S4</strong> WireGuard throughput baseline</td><td>never run, minor</td></tr>
 </table>

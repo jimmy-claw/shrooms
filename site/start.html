@@ -133,8 +133,8 @@ phone   fd48:d107:3fce:9d1c:7b2e:41a:cc90:1f22   online    up 31s  192.168.1.23:
         <strong>When both ends are behind NAT</strong> — the phone on mobile
         data, the laptop on café wifi — they need one reachable member to meet
         through. A cheap VPS is the usual answer: install it with
-        <code>sudo bash install.sh prepare --name vps</code>, invite it like the
-        phone, and set it to relay. <a href="guides.html#relays">Relays and
+        <code>sudo bash install.sh prepare --name vps --relay</code> and invite it
+        like the phone. <a href="guides.html#relays">Relays and
         reachability</a> has the details, including relays somebody else runs.
     </p>
 </div>
@@ -172,7 +172,7 @@ phone   fd48:d107:3fce:9d1c:7b2e:41a:cc90:1f22   online    up 31s  192.168.1.23:
     minutes) or the laptop's <code>shrooms invite</code> was closed before the
     phone answered. Run it again.</li>
     <li><strong>Both show online, no tunnel.</strong> Almost always the
-    firewall: step 1.3. Then <code>shrooms status</code> again.</li>
+    firewall: open the port as in <a href="#laptop">step 1</a>. Then <code>sudo shrooms status</code> again.</li>
     <li><strong>Works at home, not outside.</strong> Two devices behind NAT
     need a reachable member: the VPS in the note above.</li>
     <li>Everything else: <a href="install.html#trouble">when it does not
