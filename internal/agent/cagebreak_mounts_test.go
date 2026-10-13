@@ -11,6 +11,7 @@ package agent
 //	  go test ./internal/agent/ -run TestSealedCageMounts -v
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -170,9 +171,13 @@ func TestSealedCageMounts(t *testing.T) {
 // TestSealedCageMountsFollowTheSessionDir is the same list with the session's
 // directory set to the home. Nothing about sealing constrains s.dir, so this is
 // what "sealed" means when a session is made with ~ as its directory.
-func TestSealedCageMountsFollowTheSessionDir(t *testing.T) {
+func TestSealedCageRefusesAHomeAsTheSessionDir(t *testing.T) {
 	// The home as a sealed session's directory would be mounted read-write and
 	// still called sealed. Refused since e5b2ddd (canSeal, sealableDir).
+	//
+	// The last case matters as much as the others: a rule that refused EVERY
+	// directory would satisfy every refusal here and make sealing useless, so
+	// one ordinary project directory must still be allowed.
 	state := t.TempDir()
 	m := newTestManager(t, state)
 	if m.Cages = NewCages(""); m.Cages == nil {
@@ -185,10 +190,45 @@ func TestSealedCageMountsFollowTheSessionDir(t *testing.T) {
 	if err != nil {
 		t.Skip("no home to test with")
 	}
-	if _, err := m.CreateCaged("homedir", home, "claude", &Cage{Sealed: true}); err == nil {
-		m.Remove("homedir")
-		t.Fatalf("a sealed session was made in %s: it would get the whole home, read-write", home)
-	} else {
-		t.Logf("refused, as it should be: %v", err)
+	if r, err := filepath.EvalSymlinks(home); err == nil {
+		home = r // what sealableDir compares, and what a link would resolve to
+	}
+	// A directory holding something private, wherever it is.
+	private := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(private, ".ssh"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	// The home reached through a link, since a link is how one arrives there by accident.
+	link := filepath.Join(t.TempDir(), "shortcut")
+	if err := os.Symlink(home, link); err != nil {
+		t.Fatal(err)
+	}
+
+	for i, tc := range []struct {
+		name, dir string
+		refused   bool
+	}{
+		{"the home", home, true},
+		{"the root", "/", true},
+		{"an ancestor of the home", filepath.Dir(home), true},
+		{"a directory holding .ssh", private, true},
+		{"the home through a symlink", link, true},
+		{"an ordinary project directory", t.TempDir(), false},
+	} {
+		// A name per case: one shared name turns a mutation into "already exists".
+		in, err := m.CreateCaged(fmt.Sprintf("dircheck%d", i), tc.dir, "claude", &Cage{Sealed: true})
+		if refused := err != nil; refused != tc.refused {
+			t.Errorf("a sealed session in %s: refused=%v, wanted %v (%v)", tc.name, refused, tc.refused, err)
+		} else if refused {
+			t.Logf("refused, as it should be: %s (%v)", tc.name, err)
+		} else {
+			t.Logf("allowed, as it should be: %s", tc.name)
+			if s, ok := m.Get(in.Name); ok {
+				m.Remove(in.Name)
+				if s.cage != nil && s.cage.Outbox != "" {
+					os.RemoveAll(s.cage.Outbox)
+				}
+			}
+		}
 	}
 }
