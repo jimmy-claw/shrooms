@@ -78,3 +78,25 @@ on 2026-10-09, an ordinary cage still:
   no search domains, so DNS needs no local exception, and mesh names do not
   resolve. Sealed cages are made again (sealed generation 2). The cost: on a
   network that blocks public DNS, a sealed cage has no DNS.
+- **Amended 2026-10-13, round two of the same test** (pi5/jimmy, mounting the
+  list `sealedMounts` builds and probing through it):
+  - the cage's socket directory, inside the agent's state, was mounted
+    read-write, so the cage could write there and unlink its own socket. It
+    is read-only now: `connect()` works through a read-only mount, and
+    nothing else is needed;
+  - a sealed session could be given the home, or anything above it, as its
+    directory, mounted read-write and still called sealed. That is refused
+    now, as is a directory holding `.ssh`, `.gnupg`, `.aws`, `.config/gh`
+    or `.claude`: a sealed session works in a project of its own;
+  - the outbox can hold links, which can point anywhere on the machine.
+    Packing never follows them; its notice now says not to open them by hand.
+- **What sealing does not cover: after the cage.** The project directory is
+  mounted read-write, so the code under review can leave things in it that
+  run later, outside the cage, as the owner: a `.git/hooks` script, a
+  Makefile target, an `.envrc`, an npm `postinstall`, an editor's workspace
+  settings. pi5/jimmy planted a `post-checkout` hook that way. No mount stops
+  this without taking away what a review needs, so it is a rule: **once a
+  sealed session has worked in a directory, treat the directory as
+  untrusted.** Run nothing from it outside a cage — no git command that runs
+  hooks, no build, no `direnv allow`. Read it, then delete it, or clone again
+  to keep working.

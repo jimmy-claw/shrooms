@@ -473,7 +473,7 @@ func (m *Manager) CreateCaged(name, dir, harness string, cage *Cage) (Info, erro
 			return Info{}, errors.New("this machine has no podman to cage sessions with")
 		}
 		if cage.Sealed {
-			if err := m.canSeal(harness); err != nil {
+			if err := m.canSeal(harness, dir); err != nil {
 				return Info{}, err
 			}
 		}

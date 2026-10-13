@@ -297,7 +297,7 @@ func (m *Manager) cageMounts(s *Session, harness string) []mount {
 	// restarts is the one the cage sees.
 	pd := m.proxyDir(s.cage.Container)
 	os.MkdirAll(pd, 0o700)
-	ms = append(ms, mount{path: pd, at: CageProxyDir})
+	ms = append(ms, mount{path: pd, at: CageProxyDir, ro: true})
 	if s.cage.GitHub {
 		ms = append(ms, mount{path: filepath.Join(home, ".config", "gh"), ro: true})
 	}
@@ -666,7 +666,7 @@ func (m *Manager) SetCage(name string, cage *Cage, by string) (Info, error) {
 		return Info{}, errors.New("this machine has no podman to cage sessions with")
 	}
 	if cage != nil && cage.Sealed {
-		if err := m.canSeal(s.harness.Name()); err != nil {
+		if err := m.canSeal(s.harness.Name(), s.dir); err != nil {
 			return Info{}, err
 		}
 	}

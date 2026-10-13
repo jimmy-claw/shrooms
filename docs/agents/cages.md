@@ -92,9 +92,14 @@ application a stranger built — tick **sealed** beside "in a cage"
 sealed cage is an ordinary cage, and also:
 
 - **the internet and nothing local**: no LAN (your router, your NAS, the
-  machines beside it), no mesh over IPv6 or IPv4, no link-local. DNS, the
+  machines beside it), no mesh over IPv6 or IPv4, no link-local, on any
+  port. DNS goes to public resolvers (1.1.1.1, 9.9.9.9), so mesh names do
+  not resolve, and a network that blocks public DNS leaves it without. The
   cage's own loopback (an app it starts to test) and the internet work. Set
   from outside, like the agent-port rule; root inside cannot remove it.
+- **a project, not a home**: its directory is mounted read-write, so it
+  cannot be your home, anything above it, or a directory holding `.ssh`,
+  `.gnupg`, `.aws`, `.config/gh` or `.claude`.
 - **its own login**: Claude Code runs on the machine's *sealed token*, not
   on your `~/.claude`. The cage has none of your settings, none of your
   other conversations, none of the keys in the agent's environment. Claude
@@ -110,7 +115,17 @@ sealed cage is an ordinary cage, and also:
   review could read it. For a review, a new session is the clean start.
 - **an outbox**: `~/shrooms-outbox/<session>` on the machine, `/outbox`
   inside, for its results. Read what is in it as untrusted text: a review of
-  hostile code can carry instructions for whoever reads it.
+  hostile code can carry instructions for whoever reads it. It can hold
+  links that point anywhere on the machine; packing never follows them, and
+  neither should you.
+
+**After a sealed session: the directory is untrusted.** The code under review
+could write in its project, and leave something there that runs later,
+outside the cage, as you: a `.git/hooks` script, a Makefile target, an
+`.envrc`, an npm `postinstall`, an editor's workspace settings. No mount
+prevents that without breaking the review. So run nothing from that directory
+outside a cage — no git command that runs hooks, no build, no `direnv allow`.
+Read it, then delete it, or clone again to go on.
 
 **Giving a machine its sealed token, once:**
 

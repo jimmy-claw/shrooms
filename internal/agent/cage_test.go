@@ -131,8 +131,9 @@ func TestACagedSessionRunsInItsOwnContainer(t *testing.T) {
 	if exec < 0 || indexOf(cs, `^start `+name[1]+`$`) > exec {
 		t.Fatalf("the harness is not run in the started cage, in the project: %q", cs)
 	}
-	if !strings.Contains(cs[create], ".d:"+CageProxyDir+" ") {
-		t.Errorf("the cage's socket is not mounted at %s: %s", CageProxyDir, cs[create])
+	// Read-only: a socket to talk to, not a directory of the agent's to write in.
+	if !strings.Contains(cs[create], ".d:"+CageProxyDir+":ro ") {
+		t.Errorf("the cage's socket is not mounted, read-only, at %s: %s", CageProxyDir, cs[create])
 	}
 	// The agent port closed inside it, after it started and before the
 	// harness runs in it.

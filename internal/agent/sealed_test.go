@@ -129,6 +129,7 @@ func TestASealedCageHasNothingOfTheOwners(t *testing.T) {
 		"-v " + filepath.Join(state, "uploads", "review") + ":" + filepath.Join(state, "uploads", "review") + ":ro",
 		".claude:" + sealedHome + "/.claude ",
 		"-v " + in.Cage.Outbox + ":" + SealedOutboxIn + " ",
+		":" + CageProxyDir + ":ro ",
 	} {
 		if !strings.Contains(c, want) {
 			t.Errorf("the sealed cage is made without %q: %s", want, c)
@@ -310,5 +311,33 @@ func TestASealedCageCarriesItsConversationOnly(t *testing.T) {
 	carryConversation("conv-1", cfg)
 	if b, _ := os.ReadFile(filepath.Join(cfg, "projects", "-p-review", "conv-1.jsonl")); string(b) != "newer" {
 		t.Error("the cage's own copy was overwritten")
+	}
+}
+
+// A sealed session's directory is mounted read-write, so it is a project of
+// its own: not the home, nothing above it, nothing holding the shapes of
+// secrets (pi5/jimmy, 2026-10-13).
+func TestASealedSessionGetsAProjectNotAHome(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	project := filepath.Join(home, "src", "review")
+	os.MkdirAll(project, 0o755)
+	if err := sealableDir(project); err != nil {
+		t.Fatalf("a project was refused: %v", err)
+	}
+	for _, bad := range []string{home, filepath.Dir(home), "/"} {
+		if err := sealableDir(bad); err == nil {
+			t.Errorf("%s was allowed", bad)
+		}
+	}
+	other := filepath.Join(t.TempDir(), "elsewhere")
+	os.MkdirAll(filepath.Join(other, ".ssh"), 0o700)
+	if err := sealableDir(other); err == nil || !strings.Contains(err.Error(), ".ssh") {
+		t.Errorf("a directory holding .ssh was allowed: %v", err)
+	}
+	link := filepath.Join(t.TempDir(), "to-home")
+	os.Symlink(home, link)
+	if err := sealableDir(link); err == nil {
+		t.Error("the home reached through a link was allowed")
 	}
 }

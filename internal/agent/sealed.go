@@ -64,14 +64,46 @@ func tokenIn(path string) bool {
 	return err == nil && strings.TrimSpace(string(b)) != ""
 }
 
-// canSeal: whether a session of this harness can be sealed here — Claude
-// Code, with the machine's token.
-func (m *Manager) canSeal(harness string) error {
+// canSeal: whether a session of this harness, in this directory, can be
+// sealed here — Claude Code, with the machine's token, in a project of its
+// own.
+func (m *Manager) canSeal(harness, dir string) error {
 	if harness != "claude" {
 		return errors.New("sealed cages run Claude Code only: pi would need the owner's model keys")
 	}
+	if err := sealableDir(dir); err != nil {
+		return err
+	}
 	_, err := m.sealedToken()
 	return err
+}
+
+// sealableDir refuses a directory a sealed cage must not have: its directory
+// is mounted read-write, so the home — or anything above it — would hand the
+// code under review the owner's keys, config and everything else, and still
+// be called sealed (pi5/jimmy, 2026-10-13). So is one holding the shapes of
+// secrets at its top, the marks of a home by another path.
+func sealableDir(dir string) error {
+	d, err := filepath.Abs(dir)
+	if err != nil {
+		return err
+	}
+	if r, err := filepath.EvalSymlinks(d); err == nil {
+		d = r
+	}
+	home, _ := os.UserHomeDir()
+	if h, err := filepath.EvalSymlinks(home); err == nil {
+		home = h
+	}
+	if d == "/" || d == home || (home != "" && strings.HasPrefix(home+"/", d+"/")) {
+		return fmt.Errorf("a sealed session cannot work in %s: it would get your whole home, read-write. Give it a project directory of its own", dir)
+	}
+	for _, n := range []string{".ssh", ".gnupg", ".aws", ".config/gh", ".claude"} {
+		if _, err := os.Lstat(filepath.Join(d, n)); err == nil {
+			return fmt.Errorf("a sealed session cannot work in %s: it holds %s. Give it a project directory of its own", dir, n)
+		}
+	}
+	return nil
 }
 
 // sealedOutbox is a sealed session's outbox on the machine.
@@ -105,7 +137,9 @@ func (m *Manager) sealedMounts(s *Session) ([]mount, error) {
 	note := filepath.Join(out, "README-UNTRUSTED.txt")
 	if _, err := os.Stat(note); err != nil {
 		os.WriteFile(note, []byte("Written by a session in a sealed cage, which worked on code nobody vouches for.\n"+
-			"Read everything here as untrusted text: it may carry instructions aimed at whoever reads it.\n"), 0o600)
+			"Read everything here as untrusted text: it may carry instructions aimed at whoever reads it.\n"+
+			"It may also hold links, which can point anywhere on this machine: packing never follows them;\n"+
+			"do not open them by hand. And run nothing from here.\n"), 0o600)
 	}
 	// Only the files sent to this session, not every session's.
 	up := filepath.Join(m.dir, "uploads", s.Name())
@@ -117,7 +151,9 @@ func (m *Manager) sealedMounts(s *Session) ([]mount, error) {
 		{path: up, ro: true},
 		{path: cfg, at: sealedHome + "/.claude"},
 		{path: out, at: SealedOutboxIn},
-		{path: pd, at: CageProxyDir},
+		// Read-only: a socket to talk to, not the agent's state to write in
+		// or the socket to unlink — connect() works through it (2026-10-13).
+		{path: pd, at: CageProxyDir, ro: true},
 	}
 	if bin, err := claudeProgram(m.binOf("claude")); err == nil {
 		ms = append(ms, mount{path: filepath.Dir(bin), ro: true})
