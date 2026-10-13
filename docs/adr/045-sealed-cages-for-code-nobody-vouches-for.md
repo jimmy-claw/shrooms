@@ -100,3 +100,17 @@ on 2026-10-09, an ordinary cage still:
   untrusted.** Run nothing from it outside a cage — no git command that runs
   hooks, no build, no `direnv allow`. Read it, then delete it, or clone again
   to keep working.
+- **Amended 2026-10-13: the boundary is a test that can fail** (pi5/jimmy,
+  #25-#27). `internal/agent/cagebreak_*_test.go` makes a sealed cage with the
+  agent's own code (`sealedSeccomp`, `createArgs`, `sealedDNSArgs`,
+  `closeAgentPort`, and the list `sealedMounts` builds) and probes from inside
+  it: no user namespaces, nothing local by any address form, none of the
+  owner's files, sockets or secrets, read-only mounts that refuse writes, the
+  socket directory read-only, a home refused as the session's directory and an
+  ordinary project allowed. Each check was mutation-tested: without
+  `closeAgentPort` the LAN and the mesh become reachable, with podman's default
+  seccomp profile `unshare -U` works, and both fail the suite. It writes
+  nothing into the machine's own installs: what is mounted beside the claude
+  binary is shown by listing it. It runs only with `SHROOMS_REAL_CAGE=1`
+  and an image already on the machine, so CI does not run it. The outbox links
+  and the planted hook stay notes: they are the rule above, not code.

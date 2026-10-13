@@ -41,11 +41,11 @@ number appears, its source is named.
 | [029](029-disco-proves-the-device.md) | Disco proves the device, not just the mesh | accepted; the first half of Phase 4 |
 | [030](030-tailscale-shaped-not-tor-shaped.md) | Tailscale-shaped, not Tor-shaped | accepted; scopes four design notes |
 | [031](031-bootstrap-from-the-mesh-itself.md) | Bootstrap from the mesh itself | proposed; after five of six fleet entry nodes refused |
-| [032](032-a-suffix-that-cannot-be-taken-away.md) | A suffix that cannot be taken away | accepted; `.mesh` was never reserved and ICANN's 2026 round has closed |
+| [032](032-a-suffix-that-cannot-be-taken-away.md) | A suffix that cannot be taken away | accepted; `.mesh` was never reserved and ICANN's 2026 round has closed; the CLI's hosts file and status follow the daemon's suffix (amended 2026-10-13) |
 | [033](033-the-card-is-the-admin-not-the-uid.md) | The card is the admin, not the uid | accepted, built; tiers by what protects an operation |
 | [034](034-the-admin-names-the-blind-relays.md) | The admin names the blind relays | accepted; built |
 | [035](035-an-edge-port-is-nobodys-contract.md) | An Edge node's port is nobody's contract | accepted; built — a tethering phone stranded the old one |
-| [036](036-agents-grow-out-of-the-mesh.md) | Agents grow out of the mesh | accepted; built — Shrooms Agents, a separate app over the mesh |
+| [036](036-agents-grow-out-of-the-mesh.md) | Agents grow out of the mesh | accepted; built — Shrooms Agents, a separate app over the mesh; voice by ADR-053, harnesses by ADR-054 |
 | [037](037-agents-in-cages.md) | Agents in cages, and off the machine | accepted; cages on the agent's machine built 2026-10-08 (rootless podman, a container per session); krun, Akash and spawning not yet |
 | [038](038-usage-is-counted-by-the-mesh-address.md) | Usage is counted by the mesh address | accepted; built — who asked, where it ran, which model |
 | [039](039-the-phone-tells-the-core-what-it-cannot-see.md) | On a phone, the app tells the core what it cannot see | accepted; built — its addresses, and when its node is deaf |
@@ -53,11 +53,15 @@ number appears, its source is named.
 | [041](041-agents-talk-a2a-over-the-mesh.md) | Agents talk A2A, and the mesh is the authentication | accepted; built — every session an A2A agent, its tools in every session; "a task is a turn" amended by 042 |
 | [042](042-a-task-is-open-until-the-worker-finishes-it.md) | A task is open until the worker finishes it | accepted; built — supervised by a watchdog, queued, acknowledged |
 | [043](043-peers-are-probed-on-evidence-not-only-announces.md) | Peers are probed on evidence, not only on announces | accepted; built — remembered, answering, after a move, or probing us; roaming without the bus |
-| [044](044-cages-reach-agents-through-their-own.md) | Cages reach agents only through their own, which says so | accepted; built — agent port closed in cages, a socket to their own agent, receivers choose (accept_caged) |
-| [045](045-sealed-cages-for-code-nobody-vouches-for.md) | Sealed cages, for code nobody vouches for | accepted; built — internet only (nothing local, DNS included: amended 2026-10-13), its own token, asks nothing, results in an outbox |
+| [044](044-cages-reach-agents-through-their-own.md) | Cages reach agents only through their own, which says so | accepted; built — agent port closed in cages, a socket to their own agent, receivers choose (accept_caged); no shrooms control socket in a cage (amended 2026-10-09) |
+| [045](045-sealed-cages-for-code-nobody-vouches-for.md) | Sealed cages, for code nobody vouches for | accepted; built — internet only (nothing local, DNS included: amended 2026-10-13), its own token, asks nothing, results in an outbox; the boundary a test that can fail (amended 2026-10-13) |
 | [046](046-metrics-on-the-mesh-addresses.md) | Metrics on the mesh addresses | accepted; built — tunnels, delivery and interfaces per node; Prometheus + Grafana via deploy/metrics |
-| [047](047-the-tasks-board-is-read-from-the-agents.md) | The tasks board lives in the agents' own view, read from the agents | accepted; being built — links carry their tasks, cards carry their load, a panel grouped as a person needs it, ACK to the worker's agent |
+| [047](047-the-tasks-board-is-read-from-the-agents.md) | The tasks board lives in the agents' own view, read from the agents | accepted; built 2026-10-10 — links carry their tasks, cards carry their load, a panel grouped as a person needs it, ACK to the worker's agent |
 | [048](048-files-between-agents.md) | Files between agents | accepted; built — push into per-sender folders, allow list empty by default, sealed cages receive only |
 | [049](049-sessions-per-mesh.md) | Sessions per mesh | accepted; built — a session limited to some of its machine's meshes is absent from the others; an unnamed caller is no one |
 | [050](050-basecamp-at-parity-with-the-phone.md) | Basecamp at parity with the phone | accepted; built — services per mesh, joins off the view's thread, a first join by invite open to the socket group, blind relays with the token never read back; Keycard invites through keycard-basecamp (a real-card run still owed) |
 | [051](051-a-card-lets-the-socket-group-renew-and-revoke.md) | A card lets the socket group renew and revoke | accepted; built — drafts the card signs, finished and verified by the daemon; card-only meshes only; members carry sealing keys |
+| [052](052-backups-on-our-own-storage-nodes.md) | Backups on our own Logos Storage nodes, encrypted to a Keycard | proposed — VPS, proteus and scribe on the office mesh, twice a day, age to a key the card derives; public storage with dispersal when it exists |
+| [053](053-voice-notes-by-parakeet-in-pieces.md) | Voice notes by Parakeet, a long one in pieces at its pauses | accepted; built — Parakeet v3 at 6-8× real time, no language to pick; over 90 s cut at pauses into minute pieces run at once (406 s in 40 s, not 99 s) |
+| [054](054-harnesses-speak-claude-codes-events.md) | Harnesses are pluggable, and speak Claude Code's events | accepted; built — pi the second, by its RPC mode and its own mcp.json; pinned at 1.1.0 in cages |
+| [055](055-releases-go-through-the-publisher.md) | Releases go through the publisher, and public ones wait for the owner | accepted; in use — LAN repos first, public ones on a code from the owner's phone, the publisher never signs, Basecamp packages amd64 + arm64 |

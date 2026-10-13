@@ -103,6 +103,13 @@ in an ssh config, a bookmark, and somebody's fingers.
 - If Reveal Day shows `.mesh` was applied for, nothing further is needed. If it
   shows nobody wanted it, this was still right: the guarantee is what matters,
   not the outcome of one round.
+- **Amended 2026-10-13: the CLI takes the suffix from the daemon.** `shrooms
+  hosts` wrote `.internal`, the default, beside a daemon still answering for
+  the `.mesh` an older config kept, and `shrooms status` checked the hosts
+  file against a hard-coded `mesh`. So the fix status recommended wrote names
+  the resolver did not give, and status went on calling them stale. Both now
+  use the suffix in the daemon's status; `--suffix` still overrides. One
+  source for the suffix: the daemon's config.
 
 ## What would change our mind
 

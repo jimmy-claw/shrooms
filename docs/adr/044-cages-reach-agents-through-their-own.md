@@ -53,3 +53,10 @@ settle locally.
   takes the task; the protection is complete only once every agent has it.
 - The machine's own processes outside cages are trusted as before: they are
   the owner's.
+- **Amended 2026-10-09: no shrooms control socket in a cage.** The daemon's
+  socket was mounted so the shrooms tools could find the machines. The agent
+  user's tier on it can leave or join a mesh, change the relay, the services
+  and the announces, and restart the daemon: the machine, from a cage. The
+  tools find the machines through the cage's socket to its agent, so the
+  daemon's is no longer mounted. Cages made with it were made again
+  (generation 2).

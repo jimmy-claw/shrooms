@@ -1,6 +1,7 @@
 # 047. The tasks board lives in the agents' own view, read from the agents
 
-**Status:** accepted 2026-10-09, being built — the first slices are in
+**Status:** accepted 2026-10-09, built 2026-10-10 (#23, Shrooms Agents view
+0.43.0; the phone's tasks screen the same day) — in
 `basecamp-agents/Main.qml`; reviewed by laptop/shrooms
 
 ## Context

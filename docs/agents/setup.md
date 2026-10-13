@@ -315,8 +315,9 @@ off, and the log at startup says which one was missing.
   it first. Only Whisper also uses ffprobe, which comes with ffmpeg.
 - **Speed.** Parakeet runs at 6–8 times real time on a recent laptop CPU and
   about real time on a small four-core VPS. A Parakeet note over 90 s is cut
-  at pauses into pieces of about a minute, and up to 4 are transcribed at
-  once (fewer on a machine with fewer than 16 threads): on a laptop, a 406 s
+  at pauses into pieces of about a minute, and one is transcribed at
+  once for every four threads (three with the default of 12, four from
+  `--stt-threads 16`): on a laptop, a 406 s
   note took 40 s instead of 99 s. Set `--stt-threads` to the machine's real
   core count when it shares the CPU with other work.
   [speech-to-text](../speech-to-text.md) has the details.

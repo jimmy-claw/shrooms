@@ -68,7 +68,7 @@ than the clip. On this laptop (i7-13700H, 12 threads), with q4_k:
 | Note | One pass | Pieces of about a minute, cut at pauses |
 |---|---|---|
 | 115 s | 15 s | 11 s |
-| 406 s | 99 s, 4.9 GB | 40 s (up to 4 pieces at a time), under 1.5 GB each |
+| 406 s | 99 s, 4.9 GB | 40 s (in pieces, run at once), under 1.5 GB each |
 
 The text did not suffer: 96-97% the same words as the one pass, and where
 they differed the pieces were mostly right ("Piper", "Czech", "would be
@@ -77,9 +77,10 @@ pieces at pauses lost or doubled nothing at the seams checked.
 
 So a Parakeet note over 90 s is cut at the pause nearest each minute
 (`silencedetect`, within 40% of a piece; where it falls when there is none,
-and the last piece is never a sliver) and the pieces run at once: up to four,
-fewer on a machine with fewer than 16 threads, the threads shared between
-them. More than four did not pay (30 s with seven). Whisper is unchanged: it
+and the last piece is never a sliver) and the pieces run at once: one for every four
+transcription threads, up to four, the threads shared between them. The
+agent uses at most 12 threads unless `--stt-threads` says more, so three
+run at once by default. More than four did not pay (30 s with seven). Whisper is unchanged: it
 works in 30-second windows of its own.
 
 ## Faster still, not tried

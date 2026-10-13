@@ -1,6 +1,8 @@
 # 036. Agents grow out of the mesh
 
-**Status:** accepted, built 2026-10-03 — details in [docs/agents.md](../agents.md)
+**Status:** accepted, built 2026-10-03 — details in [docs/agents.md](../agents.md).
+Amended: voice notes by Parakeet, not Whisper ([ADR-053](053-voice-notes-by-parakeet-in-pieces.md));
+harnesses other than `claude -p` ([ADR-054](054-harnesses-speak-claude-codes-events.md))
 
 ## Context
 
