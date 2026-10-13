@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -131,5 +132,64 @@ func TestTheTranscribeEndpoint(t *testing.T) {
 	json.NewDecoder(r.Body).Decode(&out)
 	if r.StatusCode != http.StatusOK || out.Text != "ahoj, tady Vašek" || !strings.HasSuffix(out.Path, "-note.m4a") {
 		t.Errorf("%s: %+v", r.Status, out)
+	}
+}
+
+// A long note is cut into pieces about a minute long, at pauses where there
+// are some, transcribed several at a time, and joined in order.
+func TestALongNoteGoesInPieces(t *testing.T) {
+	tr, calls := fakeTools(t, "200.0")
+	tr.Model = "/models/ggml-parakeet-tdt-0.6b-v3-q4_k.bin"
+	// The conversion makes a wav 200 s long: 44 bytes of header and 32000 a second.
+	conv := filepath.Join(filepath.Dir(tr.FFmpeg), "ffmpeg")
+	os.WriteFile(conv, []byte("#!/bin/sh\necho \"ffmpeg $*\" >> "+calls+"\nfor a; do out=$a; done\n"+
+		"case \"$*\" in *16000*) head -c 6400044 /dev/zero > \"$out\";; *silencedetect*) ;; *) : > \"$out\";; esac\n"), 0o755)
+	tr.Threads = 12
+	// The engine answers with the piece it was given, so the order shows.
+	dir := filepath.Dir(tr.Bin)
+	tr.Bin = filepath.Join(dir, "parakeet")
+	os.WriteFile(tr.Bin, []byte("#!/bin/sh\necho \"parakeet $*\" >> "+calls+"\nfor a; do case $a in *.wav) f=$a;; esac; done\necho \"piece-${f##*.16k.}\"\n"), 0o755)
+	audio := filepath.Join(t.TempDir(), "note.m4a")
+	os.WriteFile(audio, []byte("aac"), 0o600)
+
+	text, err := tr.Transcribe(context.Background(), audio, "auto")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if text != "piece-00.wav piece-01.wav piece-02.wav" {
+		t.Errorf("the pieces came back as %q", text)
+	}
+	b, _ := os.ReadFile(calls)
+	log := string(b)
+	for _, want := range []string{"-ss 0.000 -to 60.000", "-ss 60.000 -to 120.000", "-ss 120.000 -to 200.000", "silencedetect", "-t 4"} {
+		if !strings.Contains(log, want) {
+			t.Errorf("no %q in the calls:\n%s", want, log)
+		}
+	}
+	left, _ := filepath.Glob(strings.TrimSuffix(audio, ".m4a") + ".16k*")
+	if len(left) > 0 {
+		t.Errorf("left behind: %v", left)
+	}
+}
+
+// Cuts fall at the pause nearest a minute, never leave a sliver at the end,
+// and fall where they are when there is no pause near.
+func TestCutsFallAtPauses(t *testing.T) {
+	got := cutPoints(200, []float64{10, 57.5, 66, 130, 199})
+	want := []float64{0, 57.5, 130, 200}
+	if len(got) != len(want) {
+		t.Fatalf("cuts %v, want %v", got, want)
+	}
+	for i := range want {
+		if math.Abs(got[i]-want[i]) > 0.001 {
+			t.Errorf("cuts %v, want %v", got, want)
+		}
+	}
+	if c := cutPoints(130, nil); len(c) != 3 || c[1] != 60 || c[2] != 130 {
+		t.Errorf("no pauses: %v", c)
+	}
+	// Not cut into a minute and a sliver: one piece.
+	if c := cutPoints(75, nil); len(c) != 2 || c[1] != 75 {
+		t.Errorf("75 s: %v", c)
 	}
 }
