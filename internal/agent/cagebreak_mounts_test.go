@@ -124,7 +124,12 @@ func TestSealedCageMounts(t *testing.T) {
 				t.Errorf("the cage sees %d entries of %s, the host has %d: the mount is narrower than it looks",
 					len(got), claudeDir, len(want))
 			} else {
-				t.Logf("the cage sees all %d entries of %s (the directory holding the claude binary, mounted read-only) — wider than the binary, and harmless: it is claude's own versions directory",
+				// Say what this MEASURES. In this test the claude binary is the fake one the test
+				// manager registers, so the directory is a go-build directory — an earlier version
+				// of this line asserted "it is claude's own versions directory", which is true on a
+				// real machine and false here. The real-machine fact belongs in the comment above,
+				// not in a log line that claims to have observed it.
+				t.Logf("the cage sees all %d entries of %s: the whole directory holding the claude binary is mounted read-only, so everything in it comes along, not just the binary",
 					len(got), claudeDir)
 			}
 		}
