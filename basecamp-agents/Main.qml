@@ -897,7 +897,8 @@ Item {
         var d = new Date(ms)
         return (new Date().toDateString() === d.toDateString() ? "" : Qt.formatDate(d, "d MMM") + " ") + Qt.formatTime(d, "HH:mm")
     }
-    function epoch(s) { var t = Date.parse(s || ""); return isNaN(t) ? 0 : t }
+    // Go's zero time (year 1), a session with nothing yet, is no time at all.
+    function epoch(s) { var t = Date.parse(s || ""); return isNaN(t) || t <= 0 ? 0 : t }
     function clock(ms) {
         if (!ms) return ""
         var d = new Date(ms), now = new Date()
