@@ -120,15 +120,19 @@ func TestSealedCageMounts(t *testing.T) {
 	// 2. The socket directory: read-write or read-only? It is inside the agent's
 	//    own state directory, so a write there is a write into the agent's world.
 	pd := m.proxyDir(s.cage.Container)
+	// Read-only since e5b2ddd: a socket to talk to, not the agent's state.
 	if got := sh("touch /run/shrooms-agent/canary 2>&1 && echo WRITABLE || echo refused"); strings.Contains(got, "WRITABLE") {
-		t.Logf("NOTE: /run/shrooms-agent is mounted READ-WRITE (%s) — a cage can create and delete files inside the agent's own state directory", pd)
+		t.Errorf("/run/shrooms-agent is mounted READ-WRITE (%s) — a cage can create and delete files inside the agent's own state directory", pd)
 		_ = sh("rm -f /run/shrooms-agent/canary")
 	} else {
 		t.Logf("/run/shrooms-agent refused a write (%s)", got)
 	}
 	// And the thing that actually matters there: can it remove its own socket?
-	if got := sh("rm -f /run/shrooms-agent/proxy.sock 2>&1 && echo REMOVED || echo refused"); strings.Contains(got, "REMOVED") {
-		t.Logf("NOTE: the cage can unlink its own proxy socket")
+	// Only asked of a socket that is there: rm -f succeeds on nothing.
+	if got := sh("[ -e /run/shrooms-agent/proxy.sock ] || { echo ABSENT; exit 0; }; rm /run/shrooms-agent/proxy.sock 2>&1 && echo REMOVED || echo refused"); strings.Contains(got, "REMOVED") {
+		t.Errorf("the cage can unlink its own proxy socket")
+	} else if strings.Contains(got, "ABSENT") {
+		t.Logf("no proxy socket in this cage to try unlinking (the test starts none)")
 	}
 
 	// 3. The project: read-write is the deal.
@@ -167,6 +171,8 @@ func TestSealedCageMounts(t *testing.T) {
 // directory set to the home. Nothing about sealing constrains s.dir, so this is
 // what "sealed" means when a session is made with ~ as its directory.
 func TestSealedCageMountsFollowTheSessionDir(t *testing.T) {
+	// The home as a sealed session's directory would be mounted read-write and
+	// still called sealed. Refused since e5b2ddd (canSeal, sealableDir).
 	state := t.TempDir()
 	m := newTestManager(t, state)
 	if m.Cages = NewCages(""); m.Cages == nil {
@@ -179,31 +185,10 @@ func TestSealedCageMountsFollowTheSessionDir(t *testing.T) {
 	if err != nil {
 		t.Skip("no home to test with")
 	}
-	if _, err := m.CreateCaged("homedir", home, "claude", &Cage{Sealed: true}); err != nil {
-		t.Fatal(err)
+	if _, err := m.CreateCaged("homedir", home, "claude", &Cage{Sealed: true}); err == nil {
+		m.Remove("homedir")
+		t.Fatalf("a sealed session was made in %s: it would get the whole home, read-write", home)
+	} else {
+		t.Logf("refused, as it should be: %v", err)
 	}
-	s, ok := m.Get("homedir")
-	if !ok {
-		t.Fatal("no session homedir")
-	}
-	defer m.Remove("homedir")
-	if s.cage.Outbox != "" {
-		defer os.RemoveAll(s.cage.Outbox)
-	}
-	ms, err := m.sealedMounts(s)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, x := range ms {
-		if x.path == home {
-			if x.ro {
-				t.Fatalf("the home was mounted read-only; expected the project mount to be read-write")
-			}
-			t.Logf("a session whose directory is %s gets it mounted READ-WRITE in a SEALED cage: "+
-				"sealing constrains the credential, the namespaces and the network, but not what the "+
-				"session was told to work on", home)
-			return
-		}
-	}
-	t.Fatalf("the home is not among the sealed mounts at all: %+v", ms)
 }
