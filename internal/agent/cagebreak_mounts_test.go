@@ -58,15 +58,19 @@ func TestSealedCageMounts(t *testing.T) {
 		defer os.RemoveAll(s.cage.Outbox)
 	}
 
-	// A decoy standing in for whatever else lives beside the claude binary. The
-	// agent mounts filepath.Dir(claude) read-only, so everything in that
-	// directory comes along — this is what that means, made visible.
-	decoy := ""
+	// The agent mounts filepath.Dir(claude) read-only, so everything in that
+	// directory comes along — wider than the binary. claudeProgram resolves the
+	// symlink first, so it is claude's own versions directory, and the width is
+	// harmless.
+	//
+	// This is checked by READING, not by planting a file: the directory in
+	// question is the real claude installation on a machine someone cares
+	// about, and a test should not write into it even to clean up after
+	// itself. An earlier version of this test planted a decoy there.
+	claudeDir := ""
 	if s.harness != nil {
 		if bin, err := claudeProgram(m.binOf("claude")); err == nil {
-			decoy = filepath.Join(filepath.Dir(bin), "beside-claude-decoy.txt")
-			_ = os.WriteFile(decoy, []byte("a file the owner never meant to hand over\n"), 0o600)
-			defer os.Remove(decoy)
+			claudeDir = filepath.Dir(bin)
 		}
 	}
 
@@ -110,11 +114,19 @@ func TestSealedCageMounts(t *testing.T) {
 
 	// 1. The directory holding the claude binary is mounted, so anything beside
 	//    it is readable. Not a bug in the mount — a fact about its width.
-	if decoy != "" {
-		if got := sh("cat " + decoy); strings.Contains(got, "hand over") {
-			t.Logf("NOTE: the cage can read anything beside the claude binary: %s was readable", decoy)
+	if claudeDir != "" {
+		want, err := os.ReadDir(claudeDir)
+		if err != nil {
+			t.Logf("cannot read %s from the host either: %v", claudeDir, err)
 		} else {
-			t.Logf("the decoy beside the claude binary was NOT readable (%q)", got)
+			got := strings.Fields(sh("ls " + claudeDir))
+			if len(got) != len(want) {
+				t.Errorf("the cage sees %d entries of %s, the host has %d: the mount is narrower than it looks",
+					len(got), claudeDir, len(want))
+			} else {
+				t.Logf("the cage sees all %d entries of %s (the directory holding the claude binary, mounted read-only) — wider than the binary, and harmless: it is claude's own versions directory",
+					len(got), claudeDir)
+			}
 		}
 	}
 
