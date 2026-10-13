@@ -64,6 +64,10 @@ Item {
             root.st = d
             root.peers = d.peers || []
             root.problem = ""
+            // The machines to look on changed — the first status, a peer come
+            // or gone: look now rather than at the next round. A round that ran
+            // before the first status looked on nobody (2026-10-13).
+            if (root.agentsOpen && agentPeers() !== root.lookedOn) refreshAgents()
         } else if (d && d.error) {
             root.problem = d.error + (d.detail ? " — " + d.detail : "")
         }
@@ -336,6 +340,24 @@ Item {
     property var agentEventsList: []      // the agent's events, partials left out
     property var agentEarlier: []         // from the transcript, before the events
     property string agentStreaming: ""
+    // The reply as it streams, re-rendered at most every 150 ms rather than on
+    // every piece: its markdown is converted whole each time, and on a busy
+    // UI thread — Basecamp shares one between its apps — converting it per
+    // piece is what made the conversation jump.
+    property string streamingShown: ""
+    onAgentStreamingChanged: {
+        if (agentStreaming === "") { streamTimer.stop(); streamingShown = ""; return }
+        if (!streamTimer.running) streamTimer.start()
+    }
+    Timer { id: streamTimer; interval: 150; onTriggered: root.streamingShown = root.agentStreaming }
+    // Following the end, at most every 80 ms and only when not there already:
+    // asked on every new piece and every height change, a list whose rows are
+    // still measuring themselves was scrolled, re-measured and scrolled again.
+    function followEnd() { if (!endTimer.running) endTimer.start() }
+    Timer {
+        id: endTimer; interval: 80
+        onTriggered: if (root.followingEnd(root.chatStick) && !chatList.atYEnd) chatList.positionViewAtEnd()
+    }
     property int agentNext: 0
     property bool agentConnected: false
     // When the events shown are the copy kept here, for a machine that cannot
@@ -389,6 +411,8 @@ Item {
     // "name|mesh|address;..." of where agents may be: this device first — an
     // agent on the machine Basecamp runs on is not a peer of it, and was
     // missed — then the peers that can be reached now.
+    // The machines the last search looked on, as agentPeers says them.
+    property string lookedOn: ""
     function agentPeers() {
         var out = []
         var ms = (root.st && root.st.meshes) ? root.st.meshes : []
@@ -403,7 +427,8 @@ Item {
     }
 
     function refreshAgents() {
-        var r = unwrap(callCore("agentsFind", [agentPeers()]))
+        root.lookedOn = agentPeers()
+        var r = unwrap(callCore("agentsFind", [root.lookedOn]))
         if (!Array.isArray(r)) return
         var hosts = [], seen = {}
         for (var i = 0; i < r.length; i++) {
@@ -984,10 +1009,9 @@ Item {
             var same = chatModel.get(i).blob === JSON.stringify(items[i])
             if (!same) chatModel.set(i, row(items[i]))
         }
-        if (i < chatModel.count) {
-            chatModel.clear()
-            i = 0
-        }
+        // Only what changed goes: clearing all of it threw the reader's place away
+        // for a change at the end.
+        if (i < chatModel.count) chatModel.remove(i, chatModel.count - i)
         for (; i < items.length; i++) chatModel.append(row(items[i]))
         // A jump is not DONE until the session has caught up. The core replays a widened
         // tail in batches, and a rebuild during the replay either clears and re-appends the
@@ -1058,8 +1082,7 @@ Item {
         }
         // Never follow the end while a jump is still settling: THAT is what put the reader
         // at the bottom during the replay.
-        if (root.followingEnd(root.chatStick))
-            Qt.callLater(function() { chatList.positionViewAtEnd() })
+        if (root.followingEnd(root.chatStick)) root.followEnd()
     }
 
     // Search: the whole conversation, on the agent's machine; the core does it
@@ -4380,7 +4403,7 @@ Item {
                     // Messages measure themselves after they are added, so
                     // the height keeps growing after a scroll to the end: it
                     // is followed for as long as the reader is down there.
-                    onContentHeightChanged: if (root.followingEnd(root.chatStick)) Qt.callLater(chatList.positionViewAtEnd)
+                    onContentHeightChanged: if (root.followingEnd(root.chatStick)) root.followEnd()
                     onMovementEnded: root.chatStick = root.followingEnd(chatList.atYEnd)
                     onAtYEndChanged: if (atYEnd && root.followingEnd(root.chatStick)) root.chatStick = true
                     // Scrolling up by any means — the wheel included, which
@@ -4480,7 +4503,7 @@ Item {
                                     x: root.sz(10); y: root.sz(10); width: parent.width - root.sz(20)
                                     readOnly: true; selectByMouse: true; wrapMode: TextEdit.Wrap
                                     textFormat: TextEdit.RichText
-                                    text: root.mdHtml(root.agentStreaming) + "<span style=\"color:" + cPhosphor + ";\">▍</span>"
+                                    text: root.mdHtml(root.streamingShown) + "<span style=\"color:" + cPhosphor + ";\">▍</span>"
                                     onLinkActivated: function(link) { root.activateLink(link) }
                                     LinkCursor {}
                                     color: cBone; font.family: "monospace"; font.pixelSize: root.fs(12)
