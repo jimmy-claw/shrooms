@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>shrooms — guides</title>
-<meta name="description" content="Worked examples: names and services, binding a service to the mesh, announcing what a device offers, several meshes, invites and renewals, relays and port mapping, and what a node costs in bandwidth.">
+<meta name="description" content="Worked examples: names and services, binding a service to the mesh, announcing what a device offers, several meshes, invites and renewals, relays and port mapping, what a node costs in bandwidth, and metrics.">
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="style.css">
 <meta property="og:title" content="shrooms — guides">
@@ -37,7 +37,7 @@
 <header class="hero">
     <h1>Guides</h1>
     <p class="lede">
-        Eight things you will want once the mesh is up, each with the commands
+        Nine things you will want once the mesh is up, each with the commands
         and the config that do it — and, where something is fiddly or unproven,
         the sentence that says so. Including how to use a relay somebody else
         runs, which cannot read what it carries.
@@ -57,6 +57,7 @@
     <li><a href="#membership">Invites and membership</a> — admitting a device, renewing, revoking</li>
     <li><a href="#relays">Relays and reachability</a> — when a relay is needed and what asks your router</li>
     <li><a href="#bandwidth">Bandwidth and node mode</a> — what a node carries for other people</li>
+    <li><a href="#metrics">Metrics</a> — Prometheus on the mesh address, and a Grafana dashboard</li>
     <li><a href="keycard.html">Keycard</a> — putting the admin key on a card, where it never leaves it</li>
 </ul>
 
@@ -916,6 +917,62 @@ mode = "Core"      <span class="c"># relay for the network (default)</span></cod
     unless you change it. A phone starts as Edge, because a phone that woke up
     as Core spent mobile data and, behind a carrier NAT, often failed to hold
     the gossip mesh at all.</p>
+</div>
+
+<h2 id="metrics">9. Metrics</h2>
+
+<p>
+    Every daemon serves Prometheus metrics on its own mesh addresses, port
+    9180. Members of the mesh can scrape them. Nobody else can reach them,
+    because the listener binds only overlay addresses. Phones do not serve
+    them.
+</p>
+
+<pre><code><span class="cmd">curl http://[fd3b:ffe9:f81:81a7:18bc:69b1:9bb:7e69]:9180/metrics</span>   <span class="c"># this node's overlay address</span>
+<span class="cmd">curl http://[fd3b:ffe9:f81:81a7:18bc:69b1:9bb:7e69]:9180/targets</span>   <span class="c"># this node and every peer, for Prometheus</span></code></pre>
+
+<pre><code><span class="c"># /etc/shrooms/config.toml; restart after changing it</span>
+metrics_port = 9180   <span class="c"># the default</span>
+metrics_port = 0      <span class="c"># off</span></code></pre>
+
+<p>What is exported, in three groups:</p>
+
+<ul>
+    <li><strong>Tunnels:</strong> <code>shrooms_peer_receive_bytes_total</code>,
+    <code>shrooms_peer_transmit_bytes_total</code>, <code>shrooms_peer_up</code>,
+    <code>shrooms_peer_relayed</code>, <code>shrooms_peer_rtt_seconds</code>,
+    per mesh and peer; <code>shrooms_mesh_peers</code> per mesh.</li>
+    <li><strong>Delivery:</strong> <code>shrooms_delivery_bytes_total</code>,
+    <code>shrooms_delivery_peers</code>, <code>shrooms_delivery_messages_total</code>.
+    A Core node carries the whole cluster, so this is often the biggest number.</li>
+    <li><strong>Interfaces:</strong> <code>shrooms_host_receive_bytes_total</code>,
+    <code>shrooms_host_transmit_bytes_total</code>, every interface except
+    <code>lo</code>. This is what your router sees, shrooms or not.</li>
+</ul>
+
+<p>
+    For dashboards, run this on one node, ideally one that is on every mesh:
+</p>
+
+<pre><code><span class="cmd">sudo bash deploy/metrics/install.sh</span>
+<span class="cmd">sudo bash deploy/metrics/install.sh --uninstall</span>   <span class="c"># keeps the data</span></code></pre>
+
+<p>
+    It runs Prometheus (90 days kept) and Grafana as podman or docker
+    containers under systemd. Prometheus finds every node through this node's
+    <code>/targets</code>. Grafana is published as the service
+    <code>grafana</code> on each mesh, so it is
+    <code>http://grafana.&lt;node&gt;.&lt;mesh&gt;.mesh</code>. Anyone on the
+    mesh can view it; editing needs the admin password the script prints once.
+    The dashboard shows machines, delivery, and tunnels, direct or relayed.
+</p>
+
+<div class="note">
+    <p>If a firewall runs on the node, open the metrics port on the mesh
+    interface. The details, and what the first look found, are in
+    <a href="https://github.com/vpavlin/shrooms/blob/master/docs/metrics.md">docs/metrics.md</a>.
+    Why it is built this way:
+    <a href="adr/046-metrics-on-the-mesh-addresses.html">ADR-046</a>.</p>
 </div>
 
 <h2 id="next">Where to go next</h2>
