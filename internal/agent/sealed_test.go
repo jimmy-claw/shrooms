@@ -153,8 +153,23 @@ func TestASealedCageHasNothingOfTheOwners(t *testing.T) {
 			t.Errorf("a sealed cage's rules do not refuse %s:\n%s", want, rules)
 		}
 	}
-	if strings.Index(string(rules), "udp dport 53 accept") > strings.Index(string(rules), "192.168.0.0/16") {
-		t.Errorf("DNS is refused before it is let through:\n%s", rules)
+	// Nothing local is let through ahead of the refusals: no port is an
+	// exception (DNS was, and reached the LAN's router — 2026-10-13), and
+	// ICMPv6 only as neighbour discovery.
+	if strings.Contains(string(rules), "dport 53") || strings.Contains(string(rules), "l4proto ipv6-icmp accept") {
+		t.Errorf("a sealed cage's rules let something local through:\n%s", rules)
+	}
+	refuse := strings.Index(string(rules), "192.168.0.0/16")
+	for i, line := range strings.Split(string(rules), "\n") {
+		if strings.HasSuffix(strings.TrimSpace(line), " accept") && !strings.Contains(line, "oifname \"lo\"") && !strings.Contains(line, "icmpv6 type {") {
+			t.Errorf("line %d accepts ahead of nothing it should: %s", i, line)
+		}
+	}
+	if refuse < 0 || !strings.Contains(string(rules), "::ffff:0:0/96") {
+		t.Errorf("a sealed cage's rules miss a refusal:\n%s", rules)
+	}
+	if !strings.Contains(c, "--dns 1.1.1.1") || !strings.Contains(c, "--dns-search .") {
+		t.Errorf("a sealed cage is made with the machine's resolver: %s", c)
 	}
 	if _, err := os.Stat(filepath.Join(in.Cage.Outbox, "README-UNTRUSTED.txt")); err != nil {
 		t.Error("the outbox does not say what it holds is untrusted")
@@ -162,6 +177,10 @@ func TestASealedCageHasNothingOfTheOwners(t *testing.T) {
 	// A cage that is not sealed keeps the LAN, as before.
 	if strings.Contains(cageRules(false), "192.168") {
 		t.Error("an ordinary cage's rules refuse the LAN")
+	}
+	// Applied on every start: what an earlier start left is replaced, not added to.
+	if !strings.HasPrefix(cageRules(true), "table inet shrooms_cage\ndelete table inet shrooms_cage\n") {
+		t.Error("the rules are added to what a cage already has, start after start")
 	}
 	if _, err := m.CreateCaged("pi-sealed", t.TempDir(), "pi", &Cage{Sealed: true}); err == nil {
 		t.Error("a sealed pi session was made, which would need the owner's model keys")

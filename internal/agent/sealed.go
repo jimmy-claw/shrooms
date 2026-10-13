@@ -214,24 +214,51 @@ func (m *Manager) sealedEnv(s *Session) (map[string]string, error) {
 
 // cageRules is the nftables ruleset set inside a cage from outside. Every
 // cage: no agent port. A sealed one also: nothing local — private, mesh,
-// link-local, multicast and loopback-range addresses refused — except DNS,
-// its own loopback (an app it runs to test), and the ICMPv6 that IPv6 needs.
+// link-local, multicast and loopback-range addresses refused, whatever the
+// port — except its own loopback (an app it runs to test) and the neighbour
+// discovery IPv6 needs to reach its gateway.
+//
+// Refused before anything is let through (2026-10-13). DNS was accepted to
+// any address ahead of the refusals, so a sealed cage could reach every local
+// host on port 53 — the LAN's router answered — and resolve mesh names
+// through the machine's resolver; ICMPv6 likewise went anywhere. Found by
+// pi5/jimmy breaking out of a real cage on purpose. A sealed cage now asks
+// public resolvers (sealedResolvers, given at create), so DNS needs no local
+// exception at all.
+//
+// Replaces what an earlier start left in the namespace rather than adding to
+// it: applied on every start the agent makes.
 func cageRules(sealed bool) string {
 	var b strings.Builder
+	b.WriteString("table inet shrooms_cage\ndelete table inet shrooms_cage\n")
 	b.WriteString("table inet shrooms_cage {\n\tchain out {\n\t\ttype filter hook output priority 0; policy accept;\n")
 	if sealed {
 		b.WriteString("\t\toifname \"lo\" accept\n")
-		b.WriteString("\t\tudp dport 53 accept\n\t\ttcp dport 53 accept\n")
-		b.WriteString("\t\tmeta l4proto ipv6-icmp accept\n")
+		b.WriteString("\t\ticmpv6 type { nd-neighbor-solicit, nd-neighbor-advert, nd-router-solicit, mld2-listener-report } accept\n")
 	}
 	fmt.Fprintf(&b, "\t\ttcp dport %d reject with tcp reset\n", Port)
 	if sealed {
 		b.WriteString("\t\tip daddr { 0.0.0.0/8, 10.0.0.0/8, 100.64.0.0/10, 127.0.0.0/8, 169.254.0.0/16, 172.16.0.0/12, " +
 			"192.168.0.0/16, 198.18.0.0/15, 224.0.0.0/4, 240.0.0.0/4 } reject\n")
-		b.WriteString("\t\tip6 daddr { ::1/128, fc00::/7, fe80::/10, ff00::/8 } reject\n")
+		b.WriteString("\t\tip6 daddr { ::1/128, ::ffff:0:0/96, fc00::/7, fe80::/10, ff00::/8 } reject\n")
 	}
 	b.WriteString("\t}\n}\n")
 	return b.String()
+}
+
+// sealedResolvers are the DNS servers a sealed cage asks: public ones, so its
+// lookups need no local address (cageRules) and nothing of the machine's own
+// resolver — mesh names, the LAN's search domains — reaches it.
+var sealedResolvers = []string{"1.1.1.1", "9.9.9.9"}
+
+// sealedDNSArgs are podman's flags for them: these resolvers only, no search
+// domains.
+func sealedDNSArgs() []string {
+	var out []string
+	for _, r := range sealedResolvers {
+		out = append(out, "--dns", r)
+	}
+	return append(out, "--dns-search", ".")
 }
 
 // No user namespaces in a sealed cage (2026-10-09). The reviewer, asked to

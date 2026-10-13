@@ -484,7 +484,7 @@ func (m *Manager) prepareCage(s *Session, bin string) (*cageRun, error) {
 			if err != nil {
 				return nil, err
 			}
-			extra = []string{"--security-opt", "seccomp=" + prof, "--label", sealedLabel + "=" + sealedGeneration}
+			extra = append([]string{"--security-opt", "seccomp=" + prof, "--label", sealedLabel + "=" + sealedGeneration}, sealedDNSArgs()...)
 		}
 		if _, err := c.run(ctx, c.createArgs(name, s.Name(), image, ms, extra...)...); err != nil {
 			return nil, err

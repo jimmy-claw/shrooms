@@ -42,9 +42,9 @@ const (
 	proxyLabel     = "xyz.vpavlin.shrooms.proxy"
 	cageGeneration = "2"
 	// sealedLabel marks a sealed cage with how it was sealed; 1: without
-	// user namespaces (seccomp).
+	// user namespaces (seccomp); 2: public resolvers only (sealedDNSArgs).
 	sealedLabel      = "xyz.vpavlin.shrooms.sealed"
-	sealedGeneration = "1"
+	sealedGeneration = "2"
 )
 
 // Machine is one machine on the mesh with an agent's address: this one
