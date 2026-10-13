@@ -838,10 +838,10 @@ func dnsRegisterFix(st statusPayload, containerised bool) string {
 // against a second source that could itself be wrong.
 func staleHosts(st statusPayload) []hosts.Disagreement {
 	entries := hostsEntriesFrom(st)
-	// The suffix the daemon would use. A block written under a different one
+	// The suffix the daemon answers for. A block written under a different one
 	// shows up as unknown names, which is still worth reporting: it is the same
 	// file answering for names this mesh does not serve.
-	return hosts.Stale(hosts.DefaultFile, entries, "mesh")
+	return hosts.Stale(hosts.DefaultFile, entries, hostsSuffix(st))
 }
 
 func plural(n int, one, many string) string {

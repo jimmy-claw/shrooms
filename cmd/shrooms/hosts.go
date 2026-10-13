@@ -12,7 +12,7 @@ import (
 func cmdHosts(args []string) error {
 	fs := flag.NewFlagSet("hosts", flag.ExitOnError)
 	sock := fs.String("socket", DefaultSocket, "control socket path")
-	suffix := fs.String("suffix", dnssrv.DefaultSuffix, "domain suffix")
+	suffix := fs.String("suffix", "", "domain suffix (default: the one the daemon answers for)")
 	write := fs.Bool("write", false, "update "+hosts.DefaultFile+" instead of printing")
 	file := fs.String("file", hosts.DefaultFile, "hosts file to update")
 	if err := fs.Parse(args); err != nil {
@@ -24,6 +24,9 @@ func cmdHosts(args []string) error {
 		return err
 	}
 
+	if *suffix == "" {
+		*suffix = hostsSuffix(st)
+	}
 	entries := hostsEntriesFrom(st)
 	block := hosts.Render(entries, *suffix)
 	if !*write {
@@ -46,6 +49,18 @@ func cmdHosts(args []string) error {
 	fmt.Printf("\nTo keep it current automatically, set in your config:\n")
 	fmt.Printf("  manage_hosts = \"true\"\n")
 	return nil
+}
+
+// hostsSuffix is the domain the daemon answers for, so that the names the file
+// holds are the names the resolver gives. Defaulting to dnssrv.DefaultSuffix
+// instead wrote .internal beside a daemon answering .mesh, and `shrooms
+// status` — which checks against the daemon's — then called the block it had
+// just recommended writing stale.
+func hostsSuffix(st statusPayload) string {
+	if st.DNS.Suffix != "" {
+		return st.DNS.Suffix
+	}
+	return dnssrv.DefaultSuffix
 }
 
 // hostsEntriesFrom is what the managed block should hold, from the daemon's
