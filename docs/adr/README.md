@@ -54,7 +54,7 @@ number appears, its source is named.
 | [042](042-a-task-is-open-until-the-worker-finishes-it.md) | A task is open until the worker finishes it | accepted; built — supervised by a watchdog, queued, acknowledged |
 | [043](043-peers-are-probed-on-evidence-not-only-announces.md) | Peers are probed on evidence, not only on announces | accepted; built — remembered, answering, after a move, or probing us; roaming without the bus |
 | [044](044-cages-reach-agents-through-their-own.md) | Cages reach agents only through their own, which says so | accepted; built — agent port closed in cages, a socket to their own agent, receivers choose (accept_caged) |
-| [045](045-sealed-cages-for-code-nobody-vouches-for.md) | Sealed cages, for code nobody vouches for | accepted; built — internet only, its own token, asks nothing, results in an outbox |
+| [045](045-sealed-cages-for-code-nobody-vouches-for.md) | Sealed cages, for code nobody vouches for | accepted; built — internet only (nothing local, DNS included: amended 2026-10-13), its own token, asks nothing, results in an outbox |
 | [046](046-metrics-on-the-mesh-addresses.md) | Metrics on the mesh addresses | accepted; built — tunnels, delivery and interfaces per node; Prometheus + Grafana via deploy/metrics |
 | [047](047-the-tasks-board-is-read-from-the-agents.md) | The tasks board lives in the agents' own view, read from the agents | accepted; being built — links carry their tasks, cards carry their load, a panel grouped as a person needs it, ACK to the worker's agent |
 | [048](048-files-between-agents.md) | Files between agents | accepted; built — push into per-sender folders, allow list empty by default, sealed cages receive only |

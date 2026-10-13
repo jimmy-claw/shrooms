@@ -68,3 +68,13 @@ on 2026-10-09, an ordinary cage still:
   From then on the cage's copy is the conversation, and history the agent
   reads from `~/.claude` stops at the move; its own events are complete.
 - The machine needs a token: until one is saved, the apps say how.
+- **Amended 2026-10-13: nothing local, DNS included.** An authorised breakout
+  test by pi5/jimmy, probing from inside a real sealed cage, found that DNS
+  was accepted to any address ahead of the private-range refusals: the LAN's
+  router answered on port 53, and mesh names resolved through the machine's
+  resolver. ICMPv6 was let through the same way. Now the refusals come first:
+  only the cage's own loopback and IPv6 neighbour discovery are allowed to a
+  local address. A sealed cage asks public resolvers (1.1.1.1, 9.9.9.9) with
+  no search domains, so DNS needs no local exception, and mesh names do not
+  resolve. Sealed cages are made again (sealed generation 2). The cost: on a
+  network that blocks public DNS, a sealed cage has no DNS.
