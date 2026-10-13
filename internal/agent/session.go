@@ -217,6 +217,9 @@ type Manager struct {
 	agentAt  func(netip.Addr) string // tests: where an agent is
 	// Meshes are this machine's meshes, by label and address (meshes.go).
 	Meshes func() []MeshInfo
+	// Socket is this agent's own unix socket (local.go): how LocalAddr, this
+	// machine without a mesh, is reached.
+	Socket string
 	// Tasks an asker is waiting on right now (a blocking send), by id: it gets
 	// the result as the reply, and is not sent a note of it too (asker.go).
 	waiting sync.Map

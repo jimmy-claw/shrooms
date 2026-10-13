@@ -257,7 +257,7 @@ func (m *Manager) forward(w http.ResponseWriter, r *http.Request, addr netip.Add
 	req.Header.Set("Content-Type", r.Header.Get("Content-Type"))
 	req.Header.Set("Accept", r.Header.Get("Accept"))
 	req.Header.Set(cagedHeader, session)
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := m.client(addr, 0).Do(req)
 	if err != nil {
 		fail(w, http.StatusBadGateway, err)
 		return

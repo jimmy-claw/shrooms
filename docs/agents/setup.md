@@ -1,7 +1,7 @@
 # Setting up Shrooms Agents
 
-This page takes a machine that already runs shrooms to one that serves its
-coding agents to your phone and to Basecamp. It covers the agent on each
+This page takes a machine to one that serves its coding agents to Basecamp
+and, once it is in a shrooms mesh, to your phone and your other machines. It covers the agent on each
 machine, Claude Code and pi as the agent runs them, voice notes, cages, and
 getting the two apps. The last part is what to check when something does not
 connect.
@@ -25,10 +25,14 @@ is attributed to the device it came from. The reasoning is in
 
 On each machine that will run agents:
 
-- **shrooms is installed, running, and in a mesh.** The agent asks the
-  daemon, over `/run/shrooms/shrooms.sock`, for this machine's mesh addresses.
-  Without a mesh it has nowhere to listen. `shrooms status` should list at
-  least one mesh.
+- **shrooms, for more than this machine.** Without it the agent serves this
+  machine alone, on its own socket
+  (`$XDG_RUNTIME_DIR/shrooms-agent/agent.sock`, its user's only), and
+  Basecamp's Shrooms Agents finds it there (ADR-056). For your phone and your
+  other machines, the machine has to be in a mesh: `shrooms status` lists at
+  least one. Install shrooms later and run the installer again; it lets the
+  agent read the daemon's socket, and the agent starts serving on the mesh
+  within half a minute, without a restart.
 - **Linux with systemd.** The agent runs as a systemd *user* service.
 - **docker or podman**, whichever shrooms already uses. The installer gets
   the binary out of an image. Without either, give it a binary with
@@ -67,9 +71,16 @@ the agent, but its sessions have nothing to run.
 
    ```
    ==> checking
-     serving on port 7387: Claude Code,pi
+     serving on its socket: Claude Code,pi
+     and on the mesh, port 7387
      voice notes off (--voice to build them here)
    done: the Shrooms Agents app and Basecamp module find it on the mesh.
+   ```
+
+   Without a mesh, the second line is `this machine only: Basecamp's Shrooms
+   Agents finds it here`, and so is the last.
+
+   ```
    ```
 
    It also tells you if Claude Code is missing or not logged in for that

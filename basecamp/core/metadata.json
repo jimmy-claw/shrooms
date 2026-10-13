@@ -1,7 +1,7 @@
 {
   "name": "shrooms_core",
   "display_name": "Shrooms Core",
-  "version": "0.24.0",
+  "version": "0.25.0",
   "type": "core",
   "interface": "universal",
   "category": "network",

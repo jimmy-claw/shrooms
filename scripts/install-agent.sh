@@ -6,8 +6,11 @@
 #   sudo bash install-agent.sh            # for the user running sudo
 #   sudo bash install-agent.sh --voice    # and voice notes (Parakeet), built here
 #
-# Needs shrooms installed and running here (scripts/install.sh): the agent
-# serves only on this machine's mesh addresses, which it asks the daemon for.
+# Shrooms is optional (ADR-056). Without it, the agent serves this machine
+# alone, on its own socket, which Basecamp finds. With shrooms installed and
+# in a mesh (scripts/install.sh), it also serves on the mesh addresses, to your
+# other machines and your phone. Added later? Run this again: it lets the agent
+# read the daemon's socket, and the agent takes the mesh up by itself.
 #
 # What it does, each step the one that was done by hand on the first machines:
 #   - takes shrooms-agent out of its image, ghcr.io/vpavlin/shrooms-agent (a
@@ -163,9 +166,18 @@ if [ $UNINSTALL -eq 1 ]; then
 fi
 
 echo "==> checking this machine"
-[ -S "$SOCK" ] || { echo "no shrooms daemon here ($SOCK): install shrooms first (scripts/install.sh)"; exit 1; }
-[ -n "$(overlays)" ] || { echo "the shrooms daemon reports no mesh yet: join one first"; exit 1; }
-echo "  for $USER_NAME, on $(overlays | tr '\n' ' ')"
+MESH=1
+if [ ! -S "$SOCK" ]; then
+    MESH=0
+    echo "  no shrooms daemon here: the agent will serve this machine only, on its own socket."
+    echo "  For your other machines and your phone, install shrooms (scripts/install.sh), then run this again."
+elif [ -z "$(overlays)" ]; then
+    MESH=0
+    echo "  the shrooms daemon is in no mesh yet: this machine only, until it joins one; then run this again."
+else
+    echo "  for $USER_NAME, on $(overlays | tr '\n' ' ')"
+fi
+AGENT_SOCK=/run/user/$UID_N/shrooms-agent/agent.sock
 
 # --- the binary --------------------------------------------------------------
 if [ -n "$BINARY" ]; then
@@ -192,8 +204,9 @@ fi
 command -v restorecon >/dev/null && restorecon /usr/local/bin/shrooms-agent 2>/dev/null || true
 
 # --- the socket ----------------------------------------------------------------
-echo "==> letting $USER_NAME read the shrooms socket"
-if as_user test -r "$SOCK" -a -w "$SOCK" && as_user test -x /run/shrooms; then
+if [ $MESH -eq 0 ]; then
+    : # no daemon's socket to read, and no mesh address to open a port on
+elif echo "==> letting $USER_NAME read the shrooms socket"; as_user test -r "$SOCK" -a -w "$SOCK" && as_user test -x /run/shrooms; then
     echo "  it can already"
 else
     command -v setfacl >/dev/null || {
@@ -233,8 +246,10 @@ DROPIN
     echo "  by ACL ($TMPFILES)"
 fi
 
-echo "==> the firewall"
-firewall add
+if [ $MESH -eq 1 ]; then
+    echo "==> the firewall"
+    firewall add
+fi
 
 # --- the service ---------------------------------------------------------------
 echo "==> the service"
@@ -322,17 +337,26 @@ user_systemctl restart shrooms-agent
 
 # --- what there is ----------------------------------------------------------------
 echo "==> checking"
+# The agent's own socket, with or without a mesh; then the mesh, if any.
+ask() { as_user curl -s -m 3 --unix-socket "$AGENT_SOCK" "http://agent$1"; }
 ok=0
 for _ in $(seq 1 20); do
-    for a in $(overlays); do
-        curl -s -m 2 -o /dev/null "http://[$a]:$PORT/v1/harnesses" && ok=1 && break 2
-    done
+    ask /v1/harnesses >/dev/null 2>&1 && ok=1 && break
     sleep 1
 done
-[ $ok -eq 1 ] || { echo "  the agent does not answer; see: journalctl --user -u shrooms-agent (as $USER_NAME)"; exit 1; }
-a=$(overlays | head -1)
-titles=$(curl -s -m 3 "http://[$a]:$PORT/v1/harnesses" | grep -o '"title": *"[^"]*"' | cut -d'"' -f4 | paste -sd, - || true)
-echo "  serving on port $PORT: ${titles:-?}"
+[ $ok -eq 1 ] || { echo "  the agent does not answer on $AGENT_SOCK; see: journalctl --user -u shrooms-agent (as $USER_NAME)"; exit 1; }
+titles=$(ask /v1/harnesses | grep -o '"title": *"[^"]*"' | cut -d'"' -f4 | paste -sd, - || true)
+echo "  serving on its socket: ${titles:-?}"
+if [ $MESH -eq 1 ]; then
+    for _ in $(seq 1 20); do
+        for a in $(overlays); do
+            curl -s -m 2 -o /dev/null "http://[$a]:$PORT/v1/harnesses" && echo "  and on the mesh, port $PORT" && break 2
+        done
+        sleep 1
+    done
+else
+    echo "  this machine only: Basecamp's Shrooms Agents finds it here"
+fi
 if ! as_user bash -lc 'command -v claude' >/dev/null 2>&1; then
     echo "  no Claude Code for $USER_NAME: https://docs.claude.com/en/docs/claude-code"
 elif [ ! -f "$HOME_DIR/.claude/.credentials.json" ] && [ -z "$(as_user bash -lc 'echo ${CLAUDE_CODE_OAUTH_TOKEN:-}${ANTHROPIC_API_KEY:-}')" ]; then
@@ -358,4 +382,8 @@ if [ -n "$ADOPT" ]; then
             echo "  could not make session $ADOPT ($code)"
     fi
 fi
-echo "done: the Shrooms Agents app and Basecamp module find it on the mesh."
+if [ $MESH -eq 1 ]; then
+    echo "done: the Shrooms Agents app and Basecamp module find it on the mesh."
+else
+    echo "done: Basecamp's Shrooms Agents finds it on this machine. For your phone and other machines, add Shrooms and run this again."
+fi

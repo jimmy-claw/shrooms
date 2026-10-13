@@ -33,6 +33,9 @@ func (m *Manager) meshes() []MeshInfo {
 // its own mesh addresses), or a peer on a mesh, by the label this machine
 // gives that mesh ("" when the caller is not a peer this agent knows).
 func (h *handler) from(r *http.Request) (mesh string, local bool) {
+	if overSocket(r) {
+		return "", true // only this machine's user can open the socket (ADR-056)
+	}
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
 		return "", false

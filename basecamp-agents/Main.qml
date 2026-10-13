@@ -58,6 +58,10 @@ Item {
     property string cancelArm: ""
     property var peers: []
     property string problem: ""
+    // No mesh on this machine: its own agent alone, on the agent's socket
+    // (ADR-056). Not a fault — a mesh is what adds the other machines.
+    readonly property bool noMesh: !(root.st && root.st.meshes && root.st.meshes.length > 0)
+    readonly property string noMeshNote: "No Shrooms mesh here: the agents on this machine only. Your other machines and your phone join through Shrooms — shrooms.vpavlin.xyz/start.html"
     function reload() {
         var d = unwrap(callCore("status", []))
         if (d && typeof d === "object" && !d.error) {
@@ -69,7 +73,11 @@ Item {
             // before the first status looked on nobody (2026-10-13).
             if (root.agentsOpen && agentPeers() !== root.lookedOn) refreshAgents()
         } else if (d && d.error) {
-            root.problem = d.error + (d.detail ? " — " + d.detail : "")
+            // No daemon: the agents still work on this machine alone.
+            root.st = null
+            root.peers = []
+            root.problem = ""
+            if (root.agentsOpen && agentPeers() !== root.lookedOn) refreshAgents()
         }
     }
     Timer { interval: 5000; running: root.haveCore; repeat: true; triggeredOnStart: true; onTriggered: root.reload() }
@@ -320,8 +328,8 @@ Item {
         anchors.margins: root.sz(6)
         z: 60
         visible: text !== ""
-        text: root.said !== "" ? root.said : root.problem
-        color: (root.saidBad || root.said === "") ? cRust : cAsh
+        text: root.said !== "" ? root.said : (root.problem !== "" ? root.problem : (root.haveCore && root.noMesh ? root.noMeshNote : ""))
+        color: (root.saidBad || (root.said === "" && root.problem !== "")) ? cRust : cAsh
         elide: Text.ElideRight
         font.family: "monospace"; font.pixelSize: root.fs(10)
     }
@@ -414,6 +422,8 @@ Item {
     // The machines the last search looked on, as agentPeers says them.
     property string lookedOn: ""
     function agentPeers() {
+        // Without a mesh, this machine's own agent, on its socket.
+        if (root.noMesh) return "this device||local"
         var out = []
         var ms = (root.st && root.st.meshes) ? root.st.meshes : []
         for (var m = 0; m < ms.length; m++) {
@@ -3970,7 +3980,9 @@ Item {
                     Layout.fillWidth: true
                     visible: root.haveCore && root.agentHosts.length === 0
                     wrapMode: Text.Wrap
-                    text: "Looking for agents among the reachable peers… An agent is shrooms-agent on one of your machines, on its mesh address, port 7387."
+                    text: root.noMesh
+                          ? "Looking for the agent on this machine… Install shrooms-agent and it serves here on its own socket, no mesh needed. With Shrooms, your other machines and your phone join in."
+                          : "Looking for agents among the reachable peers… An agent is shrooms-agent on one of your machines, on its mesh address, port 7387."
                     color: cAsh; font.family: "monospace"; font.pixelSize: root.fs(11)
                 }
 

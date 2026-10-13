@@ -78,12 +78,30 @@ func newA2AClient(sock string) a2aClient {
 	c := a2aClient{sock: sock, base: func(a netip.Addr) string {
 		return "http://" + net.JoinHostPort(a.String(), fmt.Sprint(agent.Port))
 	}}
+	// This machine without a mesh is agent.LocalAddr, reached through the
+	// agent's own socket; every other address over the mesh (ADR-056).
+	local := agent.SocketPath()
+	c.dial = func(ctx context.Context, network, addr string) (net.Conn, error) {
+		if host, _, err := net.SplitHostPort(addr); err == nil {
+			if a, err := netip.ParseAddr(host); err == nil && a == agent.LocalAddr {
+				return (&net.Dialer{}).DialContext(ctx, "unix", local)
+			}
+		}
+		return (&net.Dialer{}).DialContext(ctx, network, addr)
+	}
 	c.peers = func() ([]machine, error) {
 		st, err := fetchStatus(sock)
-		if err != nil {
-			return nil, err
+		if err == nil && len(st.Meshes) > 0 {
+			return st.machines(), nil
 		}
-		return st.machines(), nil
+		if agent.SocketUp(local) {
+			host, _ := os.Hostname()
+			return []machine{{host, agent.LocalAddr}}, nil
+		}
+		if err == nil {
+			err = errors.New("this machine is in no mesh, and no agent answers on " + local)
+		}
+		return nil, err
 	}
 	return c
 }
@@ -374,6 +392,9 @@ func (c a2aClient) list() (string, error) {
 	wg.Wait()
 	sort.Strings(lines)
 	if len(lines) == 0 {
+		if len(ms) == 1 && ms[0].Addr == agent.LocalAddr {
+			return "no sessions on this machine yet (no mesh: this machine only)\n", nil
+		}
 		return "no agents found on the mesh\n", nil
 	}
 	return strings.Join(lines, "\n") + "\n", nil

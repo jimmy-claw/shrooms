@@ -67,6 +67,7 @@ func run() error {
 	sttThreads := flag.Int("stt-threads", 0, "threads for transcription (default: this machine's cores, up to 12)")
 	piBin := flag.String("pi", "pi", "pi (pi.dev), offered for new sessions when found; \"\" to leave it out")
 	piArgs := flag.String("pi-args", "", "extra arguments for every pi session, e.g. \"--provider ollama --model qwen3\"")
+	agentSock := flag.String("agent-socket", agent.SocketPath(), "this agent's own unix socket, for this machine's user only (ADR-056)")
 	mcp := flag.Bool("mcp", true, "give every session the mesh's agents as MCP tools (shrooms-agent mcp) and tell it how to use them")
 	flag.Parse()
 
@@ -84,32 +85,18 @@ func run() error {
 			"fix", "run it as the user whose Claude Code it should be")
 	}
 
-	// The daemon may still be starting; wait for it rather than fail, so a
-	// unit ordered after it does not race it.
-	var st status
-	for {
-		var err error
-		if st, err = fetchStatus(*sock); err == nil && len(st.Meshes) > 0 {
-			break
-		} else if err == nil {
-			err = errors.New("the daemon reports no meshes yet")
-		} else if ctx.Err() != nil {
-			return ctx.Err()
+	// Without a daemon, this machine alone, on the socket (ADR-056); a mesh
+	// that appears later is served when it does, with no restart.
+	st, err := fetchStatus(*sock)
+	if err != nil || len(st.Meshes) == 0 {
+		why := "the daemon reports no meshes"
+		if err != nil {
+			why = err.Error()
 		}
 		// With why: "permission denied" is a socket this user may not read
-		// (docs/agents.md, On a server), not a daemon still starting — and
-		// the two looked the same in the log after jimmy-crib rebooted.
-		log.Info("waiting for the shrooms daemon", "socket", *sock, "why", err)
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(5 * time.Second):
-		}
-	}
-
-	addrs, err := st.addresses(*meshes)
-	if err != nil {
-		return err
+		// (docs/agents.md, On a server), not a missing daemon.
+		log.Info("no mesh yet: serving this machine only, on its socket", "socket", *sock, "why", why,
+			"for your other machines and your phone", "https://shrooms.vpavlin.xyz/start.html")
 	}
 
 	m, err := agent.NewManager(ctx, log, *stateDir, *claude)
@@ -128,14 +115,19 @@ func run() error {
 	// (ADR-044), and the name a note to a task's asker gives this machine
 	// (asker.go) — on every agent, caged or not: without it the notes named
 	// tasks with no machine, which task_ack cannot take (2026-10-10).
+	m.Socket = *agentSock
+	// Sessions, and the tools they start, find this agent where it is.
+	os.Setenv("SHROOMS_AGENT_SOCKET", *agentSock)
 	m.Machines = func() ([]agent.Machine, error) {
 		st, err := fetchStatus(*sock)
-		if err != nil {
-			return nil, err
-		}
 		var out []agent.Machine
 		for _, x := range st.machines() {
 			out = append(out, agent.Machine{Name: x.Name, Addr: x.Addr})
+		}
+		if err != nil || len(out) == 0 {
+			// No mesh: this machine alone, reached through its socket.
+			host, _ := os.Hostname()
+			return []agent.Machine{{Name: host, Addr: agent.LocalAddr}}, nil
 		}
 		return out, nil
 	}
@@ -209,18 +201,6 @@ func run() error {
 
 	names := &peerNames{}
 	names.update(st)
-	go func() {
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-time.After(time.Minute):
-				if st, err := fetchStatus(*sock); err == nil {
-					names.update(st)
-				}
-			}
-		}
-	}()
 
 	mux := http.NewServeMux()
 	mux.Handle("/", agent.Handler(log, m, names.who))
@@ -231,22 +211,81 @@ func run() error {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]any{"peers": names.list()})
 	})
-	srv := &http.Server{Handler: mux, ReadHeaderTimeout: 10 * time.Second}
+	srv := &http.Server{Handler: mux, ReadHeaderTimeout: 10 * time.Second, ConnContext: agent.MarkLocal}
 	var wg sync.WaitGroup
-	for label, a := range addrs {
-		ln, err := net.Listen("tcp", net.JoinHostPort(a.String(), strconv.Itoa(*port)))
-		if err != nil {
-			return fmt.Errorf("mesh %s: %w", label, err)
-		}
-		log.Info("serving agents", "mesh", label, "at", ln.Addr().String())
+	serve := func(ln net.Listener, what string) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
-				log.Error("stopped serving", "mesh", label, "err", err)
+				log.Error("stopped serving", "on", what, "err", err)
 			}
 		}()
 	}
+
+	// The socket, always: this machine's user, and Basecamp, reach the agent
+	// on it with or without a mesh.
+	served := 0
+	if ln, err := agent.ListenSocket(*agentSock); err != nil {
+		if len(st.Meshes) == 0 {
+			return fmt.Errorf("the agent's socket: %w", err)
+		}
+		log.Warn("not serving on the agent's socket", "socket", *agentSock, "err", err)
+	} else {
+		log.Info("serving agents", "socket", *agentSock)
+		serve(ln, *agentSock)
+		served++
+	}
+
+	// Each mesh address once it is there: at start, or when the daemon
+	// appears, or this machine joins another mesh. An address not up yet is
+	// tried again next round.
+	onMesh := map[netip.Addr]bool{}
+	serveMeshes := func(st status) {
+		if len(st.Meshes) == 0 {
+			return
+		}
+		addrs, err := st.addresses(*meshes)
+		if err != nil {
+			log.Warn("not serving on the meshes asked for", "err", err)
+			return
+		}
+		for label, a := range addrs {
+			if onMesh[a] {
+				continue
+			}
+			ln, err := net.Listen("tcp", net.JoinHostPort(a.String(), strconv.Itoa(*port)))
+			if err != nil {
+				log.Warn("cannot serve on a mesh yet", "mesh", label, "err", err)
+				continue
+			}
+			onMesh[a] = true
+			log.Info("serving agents", "mesh", label, "at", ln.Addr().String())
+			serve(ln, label)
+		}
+	}
+	serveMeshes(st)
+	if served == 0 && len(onMesh) == 0 {
+		return errors.New("nothing to serve on: no socket and no mesh address")
+	}
+	go func() {
+		for {
+			// Sooner while there is no mesh: that is when one is expected.
+			wait := time.Minute
+			if len(onMesh) == 0 {
+				wait = 30 * time.Second
+			}
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(wait):
+				if st, err := fetchStatus(*sock); err == nil {
+					names.update(st)
+					serveMeshes(st)
+				}
+			}
+		}
+	}()
 	<-ctx.Done()
 	shut, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

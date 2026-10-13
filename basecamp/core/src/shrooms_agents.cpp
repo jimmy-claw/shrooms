@@ -21,6 +21,7 @@
 #include <sys/wait.h>
 #include <sys/utsname.h>
 #include <sys/socket.h>
+#include <sys/un.h>
 #include <sys/time.h>
 #include <unistd.h>
 
@@ -106,6 +107,32 @@ std::string jsonEscape(const std::string& s)
 int dial(const std::string& address, int timeoutSec, std::string& err,
          const std::function<bool()>& cancelled = {}, int connectSec = 0)
 {
+    if (address == kLocal) {
+        // This machine's agent, on its socket: a local connect, at once.
+        std::string path = agentSocketPath();
+        sockaddr_un un{};
+        un.sun_family = AF_UNIX;
+        if (path.size() >= sizeof un.sun_path) {
+            err = "the agent's socket path is too long: " + path;
+            return -1;
+        }
+        std::memcpy(un.sun_path, path.c_str(), path.size() + 1);
+        int fd = ::socket(AF_UNIX, SOCK_STREAM, 0);
+        if (fd < 0) {
+            err = std::string("socket: ") + std::strerror(errno);
+            return -1;
+        }
+        if (::connect(fd, reinterpret_cast<sockaddr*>(&un), sizeof un) < 0) {
+            err = "no agent on this machine (" + path + "): " + std::strerror(errno);
+            ::close(fd);
+            return -1;
+        }
+        timeval tv{};
+        tv.tv_sec = timeoutSec;
+        ::setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof tv);
+        ::setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof tv);
+        return fd;
+    }
     if (!isMeshAddress(address)) {
         err = address + " is not a mesh address";
         return -1;
@@ -268,6 +295,19 @@ bool makeDirs(const std::string& path, unsigned mode)
     return errno == EEXIST && ::stat(path.c_str(), &st) == 0 && S_ISDIR(st.st_mode);
 }
 
+std::string agentSocketPath()
+{
+    if (const char* p = std::getenv("SHROOMS_AGENT_SOCKET"); p && *p) return p;
+    if (const char* d = std::getenv("XDG_RUNTIME_DIR"); d && *d) return std::string(d) + "/shrooms-agent/agent.sock";
+    const char* h = std::getenv("HOME");
+    return std::string(h ? h : "") + "/.local/state/shrooms-agent/agent.sock";
+}
+
+bool isAgentAddress(const std::string& address)
+{
+    return address == kLocal || isMeshAddress(address);
+}
+
 bool isMeshAddress(const std::string& address)
 {
     unsigned char b[16];
@@ -359,7 +399,7 @@ void Hub::find(const std::string& peers)
             if (bar == std::string::npos) break;
             j = bar + 1;
         }
-        if (f.size() == 3 && isMeshAddress(f[2])) list.push_back(f);
+        if (f.size() == 3 && isAgentAddress(f[2])) list.push_back(f);
         if (end == std::string::npos) break;
         i = end + 1;
     }

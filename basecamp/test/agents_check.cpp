@@ -22,7 +22,9 @@ int main(int argc, char** argv)
     if (argc < 3) { std::printf("usage: agents_check <address> <session>\n"); return 2; }
     std::string addr = argv[1], session = argv[2];
 
-    CHECK(isMeshAddress(addr), "%s", addr.c_str());
+    CHECK(isAgentAddress(addr), "%s", addr.c_str());
+    CHECK(isAgentAddress("local") && !isMeshAddress("local"), "local is an agent, not a mesh, address");
+    CHECK(!isAgentAddress("127.0.0.1") && !isAgentAddress("::1"), "loopback over TCP accepted");
     CHECK(!isMeshAddress("128.140.55.128"), "public address accepted");
     CHECK(!isMeshAddress("laptop.office.mesh"), "a name accepted");
     CHECK(isMeshAddress("198.19.245.139"), "alias refused");

@@ -57,8 +57,10 @@
 <h2 id="need">What you need</h2>
 
 <ul>
-    <li><strong>A shrooms mesh</strong> with the machine and the phone on it.
-    No mesh yet? <a href="start.html">Five minutes</a>.</li>
+    <li><strong>For the phone, a shrooms mesh</strong> with the machine and
+    the phone on it. No mesh yet? <a href="start.html">Five minutes</a>. To
+    try the agents on one machine first, from Basecamp, you need no mesh: the
+    agent serves that machine alone until you add one.</li>
     <li><strong>Claude Code or pi working in a terminal</strong> on that
     machine, as your own user: installed, logged in, paid for. The agent runs
     what is there; it does not install or log in either.</li>
@@ -79,9 +81,12 @@ It works out from <code>sudo</code> whose agents it serves:</p>
 <li>
 <p>It should end like this:</p>
 <pre><code>==&gt; checking
-  serving on port 7387: Claude Code,pi
+  serving on its socket: Claude Code,pi
+  and on the mesh, port 7387
   voice notes off (--voice to build them here)
 done: the Shrooms Agents app and Basecamp module find it on the mesh.</code></pre>
+<p>Without a mesh it says <em>this machine only</em> instead: Basecamp finds it,
+the phone cannot yet. Add shrooms and run the installer again.</p>
 <p>If it says Claude Code is missing or not logged in, fix that in a terminal
 first — <code>claude</code> has to work for your user.</p>
 </li>

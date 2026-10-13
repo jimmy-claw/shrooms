@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"net"
 	"net/http"
 	"net/netip"
 	"strings"
@@ -24,17 +23,13 @@ import (
 func (m *Manager) noteAsker(t Task, r *http.Request, md map[string]any) Task {
 	from, _ := md["shrooms/from"].(string)
 	_, session, ok := strings.Cut(from, "/")
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	a, err := remoteAddr(r)
 	if !ok || session == "" || err != nil {
-		return t
-	}
-	a, err := netip.ParseAddr(host)
-	if err != nil {
 		return t
 	}
 	got, err := m.tasks.change(t.ID, func(t *Task) error {
 		if t.AskerAddr == "" {
-			t.AskerAddr, t.AskerSession = a.Unmap().String(), session
+			t.AskerAddr, t.AskerSession = a.String(), session
 		}
 		return nil
 	})
@@ -96,7 +91,7 @@ func (m *Manager) tellAskerWith(t Task, extra string) error {
 		// One note per change of the task; a nudge is a new one.
 		"id": fmt.Sprintf("tasknote-%s-%s-%d", t.ID, stateWord(t.State), time.Now().UnixNano()),
 	})
-	c := &http.Client{Timeout: 10 * time.Second}
+	c := m.client(a, 10*time.Second)
 	resp, err := c.Post(m.agentURL(a)+"/v1/sessions/"+t.AskerSession+"/messages", "application/json", bytes.NewReader(body))
 	if err != nil {
 		return err

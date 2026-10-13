@@ -29,6 +29,18 @@ namespace agents {
 constexpr int kPort = 7387;
 
 /**
+ * The address of the agent on this machine without a mesh (ADR-056): reached
+ * on its own unix socket, which only this user can open, never over TCP.
+ */
+constexpr const char* kLocal = "local";
+
+/** The agent's socket: $SHROOMS_AGENT_SOCKET, or in $XDG_RUNTIME_DIR. */
+std::string agentSocketPath();
+
+/** Whether an agent may be asked at an address: a mesh address, or kLocal. */
+bool isAgentAddress(const std::string& address);
+
+/**
  * Whether a path may be sent to an agent: its API only, printable, no spaces
  * and no way to step out of it.
  */

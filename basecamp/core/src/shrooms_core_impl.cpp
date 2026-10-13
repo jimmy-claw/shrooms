@@ -1172,7 +1172,7 @@ std::string ShroomsCoreImpl::agentsFind(const std::string& peers)
 
 std::string ShroomsCoreImpl::agentWatch(const std::string& address, const std::string& session, const std::string& tail)
 {
-    if (!agents::isMeshAddress(address)) return errorJson("not a mesh address", address);
+    if (!agents::isAgentAddress(address)) return errorJson("not an agent address", address);
     if (!safeSession(session)) return errorJson("not a session name", session);
     hub().watch(address, session, std::atoi(tail.c_str()));
     return "{\"ok\":true}";
@@ -1201,7 +1201,7 @@ std::string ShroomsCoreImpl::agentPost(const std::string& address, const std::st
 
 std::string ShroomsCoreImpl::agentUpload(const std::string& address, const std::string& session, const std::string& localPath)
 {
-    if (!agents::isMeshAddress(address)) return errorJson("not a mesh address", address);
+    if (!agents::isAgentAddress(address)) return errorJson("not an agent address", address);
     if (!safeSession(session)) return errorJson("not a session name", session);
     return "{\"job\":" + std::to_string(hub().upload(address, session, localPath)) + "}";
 }
@@ -1244,7 +1244,7 @@ std::string ShroomsCoreImpl::agentRecord(const std::string& action, const std::s
     if (action == "send") {
         // The recording as a voice note: queued, sent, transcribed on the
         // agent's machine and sent as the turn — nothing comes back here.
-        if (!agents::isMeshAddress(address)) return errorJson("not a mesh address", address);
+        if (!agents::isAgentAddress(address)) return errorJson("not an agent address", address);
         if (!safeSession(session)) return errorJson("not a session name", session);
         std::string err;
         std::string id = hub().recordSend(address, session, err);
@@ -1252,7 +1252,7 @@ std::string ShroomsCoreImpl::agentRecord(const std::string& action, const std::s
         return "{\"id\":\"" + id + "\"}";
     }
     if (action != "stop") return errorJson("unknown action", action);
-    if (!agents::isMeshAddress(address)) return errorJson("not a mesh address", address);
+    if (!agents::isAgentAddress(address)) return errorJson("not an agent address", address);
     if (!safeSession(session)) return errorJson("not a session name", session);
     std::string err;
     long id = hub().recordStop(address, session, lang.empty() ? "auto" : lang, err);
@@ -1267,7 +1267,7 @@ std::string ShroomsCoreImpl::agentJobs()
 
 std::string ShroomsCoreImpl::agentQueue(const std::string& address, const std::string& session, const std::string& text)
 {
-    if (!agents::isMeshAddress(address)) return errorJson("not a mesh address", address);
+    if (!agents::isAgentAddress(address)) return errorJson("not an agent address", address);
     if (!safeSession(session)) return errorJson("not a session name", session);
     if (text.find_first_not_of(" \t\r\n") == std::string::npos) return errorJson("an empty message", "");
     return "{\"id\":\"" + hub().queueText(address, session, text) + "\"}";
@@ -1288,7 +1288,7 @@ std::vector<std::string> lines(const std::string& s)
 std::string ShroomsCoreImpl::agentQueueFiles(const std::string& address, const std::string& session,
                                              const std::string& text, const std::string& files)
 {
-    if (!agents::isMeshAddress(address)) return errorJson("not a mesh address", address);
+    if (!agents::isAgentAddress(address)) return errorJson("not an agent address", address);
     if (!safeSession(session)) return errorJson("not a session name", session);
     auto fs = lines(files);
     if (fs.empty() && text.find_first_not_of(" \t\r\n") == std::string::npos) return errorJson("an empty message", "");
@@ -1312,7 +1312,7 @@ std::string ShroomsCoreImpl::agentGather(const std::string& addresses, const std
     if (!agents::safePath(path)) return errorJson("not an agent path", path);
     auto as = lines(addresses);
     for (const auto& a : as)
-        if (!agents::isMeshAddress(a)) return errorJson("not a mesh address", a);
+        if (!agents::isAgentAddress(a)) return errorJson("not an agent address", a);
     return "{\"gather\":" + std::to_string(hub().gather(as, path)) + "}";
 }
 
@@ -1333,7 +1333,7 @@ std::string ShroomsCoreImpl::agentUnqueue(const std::string& id)
 
 std::string ShroomsCoreImpl::agentSearch(const std::string& address, const std::string& session, const std::string& query)
 {
-    if (!agents::isMeshAddress(address)) return errorJson("not a mesh address", address);
+    if (!agents::isAgentAddress(address)) return errorJson("not an agent address", address);
     if (!safeSession(session)) return errorJson("not a session name", session);
     return "{\"search\":" + std::to_string(hub().search(address, session, query)) + "}";
 }
@@ -1361,7 +1361,7 @@ std::string ShroomsCoreImpl::agentPaste(const std::string&, const std::string&)
 
 std::string ShroomsCoreImpl::agentMoveKept(const std::string& address, const std::string& from, const std::string& to)
 {
-    if (!agents::isMeshAddress(address)) return errorJson("not a mesh address", address);
+    if (!agents::isAgentAddress(address)) return errorJson("not an agent address", address);
     if (!safeSession(from) || !safeSession(to)) return errorJson("not a session name", from + " → " + to);
     hub().renamed(address, from, to);
     return "{\"ok\":true}";

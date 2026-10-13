@@ -212,7 +212,7 @@ func (m *Manager) sendOutbox(s *Session, since time.Time, only string, addr neti
 	req, _ := http.NewRequest(http.MethodPost, m.agentURL(addr)+"/v1/sessions/"+url.PathEscape(to)+"/drop?"+q.Encode(), bytes.NewReader(p.Data))
 	req.Header.Set("Content-Type", "application/gzip")
 	req.Header.Set(FromSessionHeader, s.Name())
-	resp, err := (&http.Client{Timeout: 5 * time.Minute}).Do(req)
+	resp, err := m.client(addr, 5*time.Minute).Do(req)
 	if err != nil {
 		return "", err
 	}
