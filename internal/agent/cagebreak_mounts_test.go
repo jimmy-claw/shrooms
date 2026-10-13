@@ -1,0 +1,240 @@
+package agent
+
+// cagebreak_mounts_test.go — what a SEALED cage can actually reach on the host.
+//
+// The first test (cagebreak_test.go) used mounts of my own choosing, which is
+// how a boundary test lies to you: it measures the mounts you thought of. This
+// one calls the agent's OWN sealedMounts(), so the list under test is the list
+// the agent would build, and then mounts it for real and probes through it.
+//
+//	SHROOMS_REAL_CAGE=1 SHROOMS_CAGE_TEST_IMAGE=<a local image> \
+//	  go test ./internal/agent/ -run TestSealedCageMounts -v
+
+import (
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func TestSealedCageMounts(t *testing.T) {
+	if os.Getenv("SHROOMS_REAL_CAGE") != "1" {
+		t.Skip("SHROOMS_REAL_CAGE=1 runs it")
+	}
+	image := os.Getenv("SHROOMS_CAGE_TEST_IMAGE")
+	if image == "" {
+		t.Skip("SHROOMS_CAGE_TEST_IMAGE=<a local image> runs it")
+	}
+
+	state := t.TempDir()
+	m := newTestManager(t, state)
+	if m.Cages = NewCages(""); m.Cages == nil {
+		t.Fatal("no podman")
+	}
+	c := m.Cages
+	c.Memory, c.CPUs, c.Pids = "", "", 0
+	// A sealed cage wants a token before it will be made; it need not be real for
+	// anything here, which is what makes this test runnable without a credential.
+	if err := os.WriteFile(filepath.Join(state, SealedTokenFile), []byte("not-a-real-token\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	prof, err := m.sealedSeccomp()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	proj := t.TempDir()
+	if _, err := m.CreateCaged("mountprobe", proj, "claude", &Cage{Sealed: true}); err != nil {
+		t.Fatal(err)
+	}
+	s, ok := m.Get("mountprobe") // CreateCaged answers with an Info; sealedMounts wants the Session.
+	if !ok {
+		t.Fatal("no session mountprobe")
+	}
+	defer m.Remove("mountprobe")
+	if s.cage.Outbox != "" {
+		defer os.RemoveAll(s.cage.Outbox)
+	}
+
+	// A decoy standing in for whatever else lives beside the claude binary. The
+	// agent mounts filepath.Dir(claude) read-only, so everything in that
+	// directory comes along — this is what that means, made visible.
+	decoy := ""
+	if s.harness != nil {
+		if bin, err := claudeProgram(m.binOf("claude")); err == nil {
+			decoy = filepath.Join(filepath.Dir(bin), "beside-claude-decoy.txt")
+			_ = os.WriteFile(decoy, []byte("a file the owner never meant to hand over\n"), 0o600)
+			defer os.Remove(decoy)
+		}
+	}
+
+	ms, err := m.sealedMounts(s)
+	if err != nil {
+		t.Fatalf("the agent's own sealedMounts(): %v", err)
+	}
+	t.Log("the agent's own mount list for a sealed cage:")
+	for _, x := range ms {
+		at := x.path
+		if x.at != "" {
+			at = x.at
+		}
+		mode := "rw"
+		if x.ro {
+			mode = "ro"
+		}
+		t.Logf("  %-6s %s  ->  %s", mode, x.path, at)
+	}
+
+	name := "shrooms-mountprobe"
+	_ = exec.Command(c.Podman, "rm", "-f", name).Run()
+	t.Cleanup(func() { _ = exec.Command(c.Podman, "rm", "-f", name).Run() })
+	extra := append([]string{"--security-opt", "seccomp=" + prof, "--label", sealedLabel + "=" + sealedGeneration},
+		sealedDNSArgs()...)
+	args := c.createArgs(name, "mountprobe", image, ms, extra...)
+	if out, err := exec.Command(c.Podman, args...).CombinedOutput(); err != nil {
+		t.Fatalf("creating the cage: %v: %s", err, strings.TrimSpace(string(out)))
+	}
+	if out, err := exec.Command(c.Podman, "start", name).CombinedOutput(); err != nil {
+		t.Fatalf("starting the cage: %v: %s", err, strings.TrimSpace(string(out)))
+	}
+	if err := c.closeAgentPort(t.Context(), name, true); err != nil {
+		t.Fatalf("the agent's own closeAgentPort(): %v", err)
+	}
+
+	sh := func(script string) string {
+		out, _ := exec.Command(c.Podman, "exec", name, "sh", "-c", script).CombinedOutput()
+		return strings.TrimSpace(string(out))
+	}
+
+	// 1. The directory holding the claude binary is mounted, so anything beside
+	//    it is readable. Not a bug in the mount — a fact about its width.
+	if decoy != "" {
+		if got := sh("cat " + decoy); strings.Contains(got, "hand over") {
+			t.Logf("the cage reads anything beside the claude binary (%s) — benign: claudeProgram resolves the symlink, so this is the install directory, not ~/.local/bin", decoy)
+		} else {
+			t.Logf("the decoy beside the claude binary was NOT readable (%q)", got)
+		}
+	}
+
+	// 2. The socket directory: read-write or read-only? It is inside the agent's
+	//    own state directory, so a write there is a write into the agent's world.
+	pd := m.proxyDir(s.cage.Container)
+	// Read-only now: a socket to talk to, not the agent's state to write in. Both halves matter —
+	// creating a file there and unlinking the socket are both writes to the agent's state directory.
+	if got := sh("touch /run/shrooms-agent/canary 2>&1 && echo WRITABLE || echo refused"); strings.Contains(got, "WRITABLE") {
+		t.Errorf("the socket directory is writable (%s): a cage can create files in the agent's state directory", pd)
+	} else {
+		t.Logf("/run/shrooms-agent refused a file (%s)", got)
+	}
+	// Deleting needs a file that EXISTS: `rm -f` on a missing path succeeds, so the first version of
+	// this reported "the cage unlinked its socket" when there was no socket to unlink — a check that
+	// could not fail. The host puts one there, and the cage must not be able to remove it.
+	if err := os.WriteFile(filepath.Join(pd, "canary"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := sh("rm -f /run/shrooms-agent/canary 2>&1 && echo REMOVED || echo refused"); strings.Contains(got, "REMOVED") {
+		t.Errorf("the cage removed a file from the agent's state directory (%s)", pd)
+	} else {
+		t.Logf("the cage cannot remove a file the host put in the socket directory (%s)", got)
+	}
+	if _, err := os.Stat(filepath.Join(pd, "canary")); err != nil {
+		t.Errorf("the canary is gone from the host's view too: %v", err)
+	}
+
+	// 3. The project: read-write is the deal.
+	if got := sh("touch " + proj + "/canary 2>&1 && echo WRITABLE || echo refused"); !strings.Contains(got, "WRITABLE") {
+		t.Errorf("the project is not writable in a sealed cage: %s", got)
+	}
+
+	// 4. The outbox: writable by design. The question is WHAT can be written —
+	//    the README says "untrusted text", and a symlink is not text.
+	if got := sh("ln -sf /etc/hostname /outbox/canary-link 2>&1 && echo SYMLINK || echo refused"); strings.Contains(got, "SYMLINK") {
+		t.Logf("NOTE: the cage can place a SYMLINK in the outbox, which the README describes as untrusted text (%s)", s.cage.Outbox)
+		_ = sh("rm -f /outbox/canary-link")
+	}
+
+	// 5. The channel that needs no bug at all. The project is mounted read-write, so the cage can
+	//    leave an EXECUTABLE file in it — and anything the owner's machine later runs out of that
+	//    directory runs it OUTSIDE the cage. .git/hooks is the sharp case: the next git commit in
+	//    that checkout runs the reviewed code on the host, as the owner.
+	if got := sh("mkdir -p " + proj + "/.git/hooks && printf '#!/bin/sh\n' > " + proj + "/.git/hooks/post-checkout && chmod 755 " + proj + "/.git/hooks/post-checkout && echo PLANTED || echo refused"); strings.Contains(got, "PLANTED") {
+		if st, err := os.Stat(filepath.Join(proj, ".git", "hooks", "post-checkout")); err == nil {
+			t.Logf("NOTE: the cage planted an executable in the project: %s (mode %v). The project is "+
+				"mounted read-write, so anything the machine later RUNS from that directory — a git hook, "+
+				"a make target, direnv, an editor plugin, an npm postinstall — runs the reviewed code "+
+				"outside the cage, as the owner. Sealing does not cover what happens after the cage exits.",
+				filepath.Join(proj, ".git", "hooks", "post-checkout"), st.Mode())
+		}
+	}
+
+	// 6. A mount meant to be read-only must refuse a write.
+	if got := sh("touch " + filepath.Join(m.dir, "uploads", "mountprobe") + "/canary 2>&1 && echo WRITABLE || echo refused"); strings.Contains(got, "WRITABLE") {
+		t.Errorf("the uploads mount is writable, but it is mounted read-only")
+	}
+}
+
+// TestSealedCageRefusesAHomeAsTheSessionDir: sealing constrains what a session
+// was told to work on, not only its credential, namespaces and network. A
+// sealed session whose directory is the home would get the whole home
+// read-write while the UI still said "sealed", so the directory is checked.
+func TestSealedCageRefusesAHomeAsTheSessionDir(t *testing.T) {
+	state := t.TempDir()
+	m := newTestManager(t, state)
+	if m.Cages = NewCages(""); m.Cages == nil {
+		t.Skip("no podman")
+	}
+	if err := os.WriteFile(filepath.Join(state, SealedTokenFile), []byte("not-a-real-token\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skip("no home to test with")
+	}
+	// Resolved, since that is what sealableDir compares.
+	if r, err := filepath.EvalSymlinks(home); err == nil {
+		home = r
+	}
+	if r, err := filepath.EvalSymlinks(filepath.Dir(home)); err == nil {
+		_ = r
+	}
+
+	// A directory holding something private is refused too, wherever it is.
+	private := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(private, ".ssh"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	// The home reached through a link, since a link is how one arrives there by accident.
+	link := filepath.Join(t.TempDir(), "shortcut")
+	if err := os.Symlink(home, link); err != nil {
+		t.Fatal(err)
+	}
+
+	for i, tc := range []struct {
+		name, dir string
+		refused   bool
+	}{
+		{"the home", home, true},
+		{"the root", "/", true},
+		{"an ancestor of the home", filepath.Dir(home), true},
+		{"a directory holding .ssh", private, true},
+		{"the home through a symlink", link, true},
+		{"a project directory", t.TempDir(), false},
+	} {
+		// A name per case: one shared name makes a mutation look like "already exists" instead.
+		s, err := m.CreateCaged(fmt.Sprintf("dircheck%d", i), tc.dir, "claude", &Cage{Sealed: true})
+		refused := err != nil
+		if refused != tc.refused {
+			t.Errorf("sealed session in %s: refused=%v, wanted %v (%v)", tc.name, refused, tc.refused, err)
+		} else if refused {
+			t.Logf("refused, as it should be: %s (%v)", tc.name, err)
+		} else {
+			t.Logf("allowed, as it should be: %s", tc.name)
+			m.Remove(s.Name) // Info.Name is a field
+			if c, ok := m.Get(s.Name); ok && c.cage != nil && c.cage.Outbox != "" {
+				os.RemoveAll(c.cage.Outbox)
+			}
+		}
+	}
+}
