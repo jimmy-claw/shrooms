@@ -130,10 +130,16 @@ type CageStatus struct {
 	// Nix: the machine has nix to give a cage.
 	Nix bool `json:"nix,omitempty"`
 	// Sealed: the machine has a token for sealed cages (sealed.go).
-	Sealed   bool   `json:"sealed,omitempty"`
-	Ready    bool   `json:"ready"`              // the image is there
-	Building bool   `json:"building,omitempty"` // it is being built
-	Error    string `json:"error,omitempty"`    // why the last build failed
+	Sealed bool `json:"sealed,omitempty"`
+	// Shared: the folder every cage sees the same copy of (ADR-052). SharedIn
+	// is where a cage sees it; SharedHost is where the owner does, so the app
+	// can offer to open it rather than making someone find a volume by hand.
+	Shared     bool   `json:"shared,omitempty"`
+	SharedIn   string `json:"shared_in,omitempty"`
+	SharedHost string `json:"shared_host,omitempty"`
+	Ready      bool   `json:"ready"`              // the image is there
+	Building   bool   `json:"building,omitempty"` // it is being built
+	Error      string `json:"error,omitempty"`    // why the last build failed
 }
 
 // NewCages finds podman; nil when the machine has none.
@@ -208,7 +214,24 @@ func (c *Cages) Status() CageStatus {
 		}
 	}
 	st.Ready = !st.Building && c.imageExists(c.Image)
+	st.Shared, st.SharedIn, st.SharedHost = true, CageSharedDir, c.sharedHostPath()
 	return st
+}
+
+// sharedHostPath is where the owner finds the shared folder on this machine:
+// the directory behind the podman volume, so an app can open it and a person
+// can put something in it without knowing what a volume is.
+func (c *Cages) sharedHostPath() string {
+	if c == nil || c.Podman == "" {
+		return ""
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, c.Podman, "volume", "inspect", sharedVolume, "--format", "{{.Mountpoint}}").Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
 }
 
 // Prepare builds an image of ours, in the background, if it is the one a
@@ -570,7 +593,10 @@ func (m *Manager) cageEnv(s *Session) (string, error) {
 		"SHROOMS_AGENT_SESSION": s.Name(),
 		// The shrooms tools reach agents through this (ADR-044).
 		"SHROOMS_AGENT_PROXY": CageProxyDir + "/proxy.sock",
-		"PATH":                cagePath(home, s.cage.Nix),
+		// Where the folder cages share is mounted (ADR-052). Told, not
+		// discovered: a folder nobody is told about is a folder nobody uses.
+		"SHROOMS_SHARED": CageSharedDir,
+		"PATH":           cagePath(home, s.cage.Nix),
 	}
 	if s.cage.Nix {
 		if _, err := os.Stat(nixDaemonSocket); err == nil {

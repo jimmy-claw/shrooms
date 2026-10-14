@@ -244,8 +244,11 @@ func (m *Manager) sealedEnv(s *Session) (map[string]string, error) {
 		"SHROOMS_AGENT_SESSION":   s.Name(),
 		"SHROOMS_AGENT_PROXY":     CageProxyDir + "/proxy.sock",
 		"SHROOMS_OUTBOX":          SealedOutboxIn,
-		"PATH":                    cagePath(sealedHome, false),
-		"LANG":                    "C.UTF-8",
+		// Read-only for a sealed cage, but told all the same: it may be asked
+		// to read what the others put there (ADR-052).
+		"SHROOMS_SHARED": CageSharedDir,
+		"PATH":           cagePath(sealedHome, false),
+		"LANG":           "C.UTF-8",
 	}, nil
 }
 
