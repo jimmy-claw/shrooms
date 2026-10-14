@@ -510,10 +510,10 @@ Item {
             view.nsCage = true
             view.createSession(view.agentHosts[0], "boxed", "~/proj", false)
             var boxed = JSON.parse(top.lastPost)
-            view.cageOpts = { image: "localhost/shrooms-workbench:desktop", nix: true, github: false }
+            view.cageOpts = { image: "localhost/shrooms-workbench:desktop", nix: true, github: false, shared: true }
             view.createSession(view.agentHosts[0], "desk", "~/proj", false)
             var desk = JSON.parse(top.lastPost).cage
-            view.cageOpts = { image: "localhost/shrooms-workbench:desktop", nix: true, github: true, sealed: true }
+            view.cageOpts = { image: "localhost/shrooms-workbench:desktop", nix: true, github: true, shared: true, sealed: true }
             view.createSession(view.agentHosts[0], "sealedrev", "~/proj", false)
             var sealedBody = JSON.parse(top.lastPost).cage
             view.loadHarnesses(view.agentHosts[0])

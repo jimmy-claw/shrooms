@@ -103,9 +103,17 @@ func (s *Session) SetMeshes(labels []string, known []MeshInfo, by string) error 
 		clean = append(clean, l)
 	}
 	s.mu.Lock()
+	was := s.sharedFor()
 	s.meshes = clean
+	moved := s.sharedFor() != was
 	s.record("setting", by, map[string][]string{"meshes": clean})
 	s.mu.Unlock()
+	// A cage sharing a folder shares the one of its meshes (ADR-057): stopped
+	// now, so it does not keep the old meshes' folder until it next restarts.
+	// Its next start makes the cage again with the new one.
+	if moved {
+		s.stop()
+	}
 	s.m.mu.Lock()
 	defer s.m.mu.Unlock()
 	return s.m.save()

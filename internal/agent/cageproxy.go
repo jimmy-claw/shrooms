@@ -39,19 +39,18 @@ const CageProxyDir = "/run/shrooms-agent"
 // generation is made again on its next start. 1: with its socket to its
 // agent (ADR-044). 2: without the shrooms daemon's control socket.
 const (
-	proxyLabel = "xyz.vpavlin.shrooms.proxy"
-	// 3 (2026-10-14): the shared folder. Bumped, not just documented: a cage
-	// made before it would be reused WITHOUT the mount while still being told
-	// SHROOMS_SHARED=/shared, and a caged session's own rootfs is writable - so
-	// it would mkdir /shared, write into its private layer, and believe it was
-	// sharing. The remake path below is what makes the bump enough.
-	cageGeneration = "3"
+	proxyLabel     = "xyz.vpavlin.shrooms.proxy"
+	cageGeneration = "2"
 	// sealedLabel marks a sealed cage with how it was sealed; 1: without
 	// user namespaces (seccomp); 2: public resolvers only (sealedDNSArgs);
 	// 3: its socket's directory read-only.
-	sealedLabel = "xyz.vpavlin.shrooms.sealed"
-	// 4 (2026-10-14): the shared folder, read-only (see cageGeneration).
-	sealedGeneration = "4"
+	sealedLabel      = "xyz.vpavlin.shrooms.sealed"
+	sealedGeneration = "3"
+	// sharedLabel names the shared folder's volume a cage was made with, or
+	// is absent: a cage whose label is not what its session asks for now
+	// (ticked later, or its meshes changed) is made again (ADR-057). Not a
+	// generation: a cage without the folder that is not asked for it stays.
+	sharedLabel = "xyz.vpavlin.shrooms.shared"
 )
 
 // Machine is one machine on the mesh with an agent's address: this one

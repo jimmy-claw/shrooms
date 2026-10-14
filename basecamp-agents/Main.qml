@@ -1337,7 +1337,7 @@ Item {
         root.nsHarness = "claude"
         root.cageStatus = null
         root.nsCage = false
-        root.cageOpts = { image: "", nix: false, github: false }
+        root.cageOpts = { image: "", nix: false, github: false, shared: false }
         if (!h) return
         var r = unwrap(callCore("agentGet", [h.address, "/v1/harnesses"]))
         if (r && r.harnesses && r.harnesses.length > 0) root.harnesses = r.harnesses
@@ -1364,8 +1364,9 @@ Item {
     }
     function cageLabel(sess) { return sess && sess.cage ? "caged" : "" }
     // What a cage is given, chosen in "+ session" and in the cage dialog:
-    // its image ("" for the machine's), nix, the GitHub login.
-    property var cageOpts: ({ image: "", nix: false, github: false, sealed: false })
+    // its image ("" for the machine's), nix, the GitHub login, the shared
+    // folder (ADR-057).
+    property var cageOpts: ({ image: "", nix: false, github: false, shared: false, sealed: false })
     function cageBody(o) {
         var b = {}
         if (o && o.image) b.image = o.image
@@ -1373,6 +1374,7 @@ Item {
         if (o && o.sealed) { b.sealed = true; return b }
         if (o && o.nix) b.nix = true
         if (o && o.github) b.github = true
+        if (o && o.shared) b.shared = true
         return b
     }
     function imageLabel(img) {
@@ -1382,7 +1384,7 @@ Item {
     }
     function shortImage(img) { return img === "localhost/shrooms-workbench:latest" ? "workbench" : img === "localhost/shrooms-workbench:desktop" ? "desktop" : String(img || "") }
     function cageWords(c) {
-        return [c.sealed ? "sealed" : "", shortImage(c.image), c.nix ? "nix" : "", c.github ? "GitHub login" : ""].filter(function(x) { return x !== "" }).join(", ")
+        return [c.sealed ? "sealed" : "", shortImage(c.image), c.nix ? "nix" : "", c.github ? "GitHub login" : "", c.shared ? "shared folder" : ""].filter(function(x) { return x !== "" }).join(", ")
     }
     function cagedNote(d, by) {
         return (d && d.caged ? "moved into a cage (" + cageWords(d) + ")" : "taken out of its cage") + (by ? " from " + by : "")
@@ -1403,7 +1405,7 @@ Item {
             if (r && r.cage && r.cage.available) root.cageStatus = r.cage
         }
         var c = agentInfo && agentInfo.cage
-        root.cageOpts = c ? { image: c.image, nix: !!c.nix, github: !!c.github, sealed: !!c.sealed } : { image: "", nix: false, github: false, sealed: false }
+        root.cageOpts = c ? { image: c.image, nix: !!c.nix, github: !!c.github, shared: !!c.shared, sealed: !!c.sealed } : { image: "", nix: false, github: false, shared: false, sealed: false }
         cageDialog.open()
     }
     // Files between agents (ADR-048): who the open session takes files from, who
@@ -3187,7 +3189,7 @@ Item {
                       + (parent.caged ? "; a cage changed or left is deleted, with what was installed in it." : ".")
                 color: cAsh; font.family: "monospace"; font.pixelSize: root.fs(11)
             }
-            CageOptions { visible: root.cageStatus !== null; Layout.fillWidth: true }
+            CageOptions { forSession: true; visible: root.cageStatus !== null; Layout.fillWidth: true }
             Text {
                 visible: root.agentWorking
                 Layout.fillWidth: true; wrapMode: Text.Wrap
@@ -3354,9 +3356,17 @@ Item {
         }
     }
 
-    // What a cage is given: its image, nix, the GitHub login (root.cageOpts),
-    // as the machine offers them (root.cageStatus).
+    // What a cage is given: its image, nix, the GitHub login, the shared
+    // folder (root.cageOpts), as the machine offers them (root.cageStatus).
+    // forSession: in the cage dialog, of the open session (root.agentInfo).
     component CageOptions: ColumnLayout {
+        id: cageOptions
+        property bool forSession: false
+        // Where the open session's shared folder is on its machine: podman's
+        // volumes, then the session's volume (one per set of meshes).
+        readonly property string sharedHost: forSession && root.agentInfo && root.agentInfo.cage && root.agentInfo.cage.shared
+            && root.cageStatus && root.cageStatus.shared_root
+            ? root.cageStatus.shared_root + "/" + root.agentInfo.cage.shared + "/_data" : ""
         spacing: root.sz(6)
         Flow {
             Layout.fillWidth: true
@@ -3410,18 +3420,26 @@ Item {
             Layout.fillWidth: true
         }
 
-        // The folder every cage sees the same copy of (ADR-057). Shown, not
-        // configured: there is one, every cage gets it at the same path, and
-        // what changes is whether this one may write it. The host path is here
-        // so nobody has to go looking for a podman volume by hand.
-        //
-        // The path is a TextEdit with selectByMouse, so it can be copied, and
-        // the open action is a SEPARATE link: a MouseArea child of the TextEdit
-        // swallows the press and makes the path unselectable, which is what the
-        // first version of this did.
+        // The shared folder (ADR-057): asked for, like nix and the login, and
+        // never for a sealed cage, which gets nothing local.
+        CheckBox {
+            id: sharedCheck
+            objectName: "sharedCheck"
+            visible: !!(root.cageStatus && root.cageStatus.shared) && !root.cageOpts.sealed
+            checked: !!root.cageOpts.shared
+            onToggled: root.cageOpts = Object.assign({}, root.cageOpts, { shared: checked })
+            text: "shared folder — " + (root.cageStatus && root.cageStatus.shared_in ? root.cageStatus.shared_in : "/shared")
+                + ", read-write, the same folder as the other caged sessions on that machine that have it and are on the same meshes"
+            contentItem: Text { leftPadding: sharedCheck.indicator.width + 6; text: sharedCheck.text; color: cAsh; wrapMode: Text.Wrap; font.family: "monospace"; font.pixelSize: root.fs(10); verticalAlignment: Text.AlignVCenter }
+            Layout.fillWidth: true
+        }
+        // Where the open session's shared folder is, to copy or open. The path
+        // is a TextEdit with selectByMouse, so it can be copied, and the open
+        // action is a SEPARATE link: a MouseArea child of the TextEdit swallows
+        // the press and makes the path unselectable.
         Rectangle {
             objectName: "sharedBox"
-            visible: !!(root.cageStatus && root.cageStatus.shared)
+            visible: cageOptions.sharedHost !== "" && !!root.cageOpts.shared && !root.cageOpts.sealed
             Layout.fillWidth: true
             implicitHeight: sharedCol.implicitHeight + root.sz(16)
             radius: root.sz(6)
@@ -3433,57 +3451,28 @@ Item {
                 anchors.margins: root.sz(8)
                 spacing: root.sz(5)
                 Text {
-                    text: "SHARED FOLDER" + (root.cageOpts.sealed ? "   read-only" : "   read-write")
-                    color: root.cageOpts.sealed ? cAmber : cPhosphor
+                    text: "SHARED FOLDER, ON THAT MACHINE"
+                    color: cPhosphor
                     font.family: "monospace"; font.pixelSize: root.fs(10)
-                }
-                // One sentence, whole: split around the path it read as one
-                // sentence interrupted by a widget.
-                Text {
-                    Layout.fillWidth: true
-                    text: "Every cage on that machine sees the same folder, at "
-                        + (root.cageStatus && root.cageStatus.shared_in ? root.cageStatus.shared_in : "/shared")
-                        + " — a clone, a dataset, anything several of them work on."
-                        + (root.cageOpts.sealed
-                           ? " A sealed cage reads it and cannot write it: a folder every cage may write is one any of them may poison for the others."
-                           : "")
-                    color: cAsh; wrapMode: Text.Wrap; font.family: "monospace"; font.pixelSize: root.fs(10)
-                }
-                Text {
-                    visible: !!(root.cageStatus && root.cageStatus.shared_host)
-                    text: "On this machine it is:"
-                    color: cAsh; font.family: "monospace"; font.pixelSize: root.fs(10)
                 }
                 RowLayout {
                     Layout.fillWidth: true
                     spacing: root.sz(8)
-                    visible: !!(root.cageStatus && root.cageStatus.shared_host)
                     TextEdit {
                         objectName: "sharedHostPath"
-                        // A maximum, not fillWidth: with fillWidth the OPEN link
-                        // sat at the far edge of the box, reading as a box-level
-                        // action rather than one beside the path (seen in the
-                        // rendered screenshots).
+                        // A maximum, not fillWidth: OPEN then sits beside the
+                        // path, not at the far edge of the box.
                         Layout.maximumWidth: sharedCol.width * 0.65
-                        text: root.cageStatus && root.cageStatus.shared_host ? root.cageStatus.shared_host : ""
+                        text: cageOptions.sharedHost
                         readOnly: true; selectByMouse: true
-                        // WrapAnywhere broke the path mid-word ("..._d" / "ata").
                         wrapMode: TextEdit.WrapAtWordBoundaryOrAnywhere
                         color: cBone; font.family: "monospace"; font.pixelSize: root.fs(10)
                     }
                     Lnk {
                         objectName: "sharedOpen"
                         text: "OPEN"
-                        onClicked: if (root.cageStatus && root.cageStatus.shared_host) Qt.openUrlExternally("file://" + root.cageStatus.shared_host)
+                        onClicked: Qt.openUrlExternally("file://" + cageOptions.sharedHost)
                     }
-                }
-                // podman gone, or not answering: say so rather than showing a
-                // box with a header and no path and no reason why.
-                Text {
-                    Layout.fillWidth: true
-                    visible: !!(root.cageStatus && root.cageStatus.shared && !root.cageStatus.shared_host)
-                    text: "the host path is not known on this machine (podman did not answer) — put things in it from a cage"
-                    color: cAmber; wrapMode: Text.Wrap; font.family: "monospace"; font.pixelSize: root.sz(9)
                 }
             }
         }

@@ -1,4 +1,4 @@
-# 057. One folder every cage sees
+# 057. A folder caged sessions share
 
 **Status:** accepted 2026-10-14 — built the same day
 
@@ -13,72 +13,80 @@ arrival. A cage that is told to work in a folder it cannot see is not working in
 the folder.
 
 The mounts a cage gets are built in `cageMounts` (cage.go) and `sealedMounts`
-(sealed.go). Neither is configurable, and neither had any notion of a folder that
-belongs to no single session.
+(sealed.go). Neither had any notion of a folder that belongs to no single session.
+
+The first version gave every cage one machine-wide folder. Review found that it
+crossed two boundaries already drawn: sessions limited to different meshes
+(ADR-049) would have shared it, and sealed cages, which get "the internet and
+nothing local" (ADR-045), could have read it and copied it out.
 
 ## Decision
 
-**One podman named volume, `shrooms-shared`, mounted at `/shared` in every cage —
-read-write for a caged session, read-only for a sealed cage.**
+**A per-cage option, "shared folder", like nix and the GitHub login: a podman
+named volume at `/shared`, read-write, one per set of meshes, never for a sealed
+cage.**
 
+- **Asked for, not given.** `Cage.Shared`, chosen in "+ session" or the cage
+  dialog, off by default. Anything that widens a cage is chosen; existing cages do
+  not change on upgrade.
+- **One per set of meshes.** `shrooms-shared` for sessions on every mesh;
+  `shrooms-shared-LABELS-HASH` for a session limited to some (the labels for a
+  person reading `podman volume ls`, the hash so two sets that look alike in a
+  volume name stay apart). A session shares only with sessions seen from the same
+  meshes, as ADR-049 sees them.
+- **Never in a sealed cage**, not even read-only: for code nobody vouches for the
+  danger is exfiltration, which read-only does not stop. `newCage` drops the
+  option for a sealed cage, as it drops nix and the GitHub login.
 - **A named volume, not a path on the machine.** A cage must not write into the
-  owner's filesystem, and a host directory shared between cages would be exactly
-  that. A rootless podman volume lives under the agent's own storage, is owned by
-  the user that owns it, and the owner and the agent can read it directly to see
-  what a cage produced.
-- **`/shared` in the cage, the same path in every cage.** One path to document and
-  one to remember, and a session that moves between caged and sealed does not
-  have to relearn where data lives.
-- **Read-write only for caged sessions.** A caged session is the owner's own agent,
-  which is already trusted with the machine. A sealed cage holds code nobody
-  vouches for (ADR-045): a folder every cage may write is a folder any one of them
-  may poison for the others, so a sealed cage reads it and cannot write it.
-- **`mount.volume`, and the filter keeps it.** Both mount builders drop what is not
-  there (`os.Stat`), and a volume name is not a path — so without this the shared
-  folder would be dropped from every cage silently. One filter (`keepMounts`) is
-  used by both builders, so the rule cannot be right in one and wrong in the other.
-- **No configuration.** A fixed volume and a fixed path, like the cage proxy's own
-  directory. A cage is not the place to discover a mount list at runtime.
+  owner's filesystem. A rootless podman volume lives under the user's own podman
+  storage, and the owner can read it directly.
+- **`/shared` in the cage, and `SHROOMS_SHARED=/shared` in its environment**, only
+  in a cage that has it. Told, not discovered.
+- **The cage is labelled with its volume** (`xyz.vpavlin.shrooms.shared`). A cage
+  whose label is not what its session asks for now is made again on its next
+  start. Changing a session's meshes stops it, so it does not keep the old
+  meshes' folder until it next restarts.
+- **The agent makes the volume, and checks one that is there.** Before a cage is
+  made with it, the volume must be driver `local` with no options. The names are
+  fixed, so whoever makes one first decides what it is, and
+  `podman volume create --opt o=bind --opt device=DIR` would hand DIR read-write to
+  every cage given it. Such a volume is refused, with how to remove it, and no cage
+  is made.
 
 ## Consequences
 
-- **A cage made before this does not have it, and says it does.** The mount is set
-  at `podman create` time and an existing container is reused, so cages must be
-  removed and made again. Worse than a missing feature: the cage is still told
-  `SHROOMS_SHARED=/shared`, and a caged session's own rootfs is writable, so it
-  would `mkdir /shared`, write into its private layer, and believe it was sharing.
-  **The cage generation is therefore BUMPED**, not merely documented — the remake
-  path on a generation mismatch is what makes the bump enough.
-- **The volume is not copied into.** An empty named volume is seeded from the
-  image's content at the mount point on first mount, from the image side, even on
-  a read-only mount. `:nocopy` is set on every volume mount, so whichever image a
-  cage first uses cannot leave anything in the shared folder.
-- **The name is constant; the definition is not.** Whoever creates
-  `shrooms-shared` first decides what it is, and
-  `podman volume create --opt type=none --opt o=bind --opt device=<host dir>`
-  is honoured silently — every caged session would then have that host directory
-  read-write. The agent therefore reports no host path unless the volume is driver
-  `local` with no options. A cage cannot do this itself: it has no podman socket.
-- **`podman volume prune` can delete it.** A volume referenced by any container,
-  even a stopped one, survives a prune — but once every cage is removed, the next
-  prune takes the folder and everything in it. If that matters, keep a holder
-  container or back the folder up; this is documented rather than prevented.
-- **On the host side, treat `/shared` as untrusted.** A read-write cage can leave
-  a symlink there pointing at the owner's home, which is harmless inside cages (it
-  resolves in each container's own filesystem) but is followed by the owner, or by
-  an uncaged agent told to read the folder at the host path.
-- **No host path off Linux.** A podman machine reports a path inside its VM, which
-  does not exist where the app runs, so none is reported rather than a wrong one.
-- **Nothing is shared across machines.** A volume is per-user and per-machine;
+- **No generation bump.** A cage made before this has no `Shared`, needs no mount,
+  is not told `SHROOMS_SHARED`, and is kept with what was installed in it. A cage
+  made again (the option ticked later, or its meshes changed) loses its container
+  layer: installs and caches. Conversations survive, since `~/.claude`, pi's agent
+  directory and a sealed cage's `.claude` are directories on the machine.
+- **`nocopy`, after a colon.** An empty named volume is seeded from the image's
+  content at the mount point on first mount, even on a read-only mount; `nocopy`
+  stops that. The options follow a colon (`VOL:/shared:nocopy`): with a comma
+  straight after the path, podman mounts at a directory called `/shared,nocopy`
+  and the cage has no `/shared` at all (found with real podman, 2026-10-14).
+- **`podman volume prune` can delete it.** A volume used by any container, even a
+  stopped one, survives a prune; once every cage using it is removed, the next
+  prune takes the folder and everything in it.
+- **On the host side, treat it as untrusted.** A cage can leave a symlink there
+  pointing at the owner's home: harmless inside cages, followed by the owner or an
+  uncaged agent reading the folder on the machine.
+- **Where it is on the machine.** `GET /v1/harnesses` gives podman's volume
+  directory (`shared_root`) and the list gives each session's volume
+  (`cage.shared`); the folder is `shared_root/VOLUME/_data`, shown in the cage
+  dialog with OPEN. There is no path until the session's first start makes the
+  volume, and none off Linux, where a podman machine reports a path inside its VM.
+- **Nothing is shared across machines.** A volume is per user and per machine;
   handing something to another machine is still ADR-048.
 - **No locking.** Several read-write containers on one volume are not
   coordinated. Fine for a clone several agents read and build from; a hazard for
   two agents writing the same file.
 - **Do not add `:Z`.** `--security-opt label=disable` and no relabel is load
   bearing: a `:Z` relabel on a mount shared between containers takes it away from
-  the others on an SELinux host. Every cage also runs as container root (no `USER`
-  in the workbench image), which is why files written there map to the one host
-  user and stay mutually writable — an owner image with its own `USER` would break
-  that silently.
-- **The owner can look.** The volume's directory is readable by the user the agent
-  runs as, so what a cage wrote is inspectable without going through a cage.
+  the others on an SELinux host. Every cage runs as container root (no `USER` in
+  the workbench image), which is why files written there map to the one host user
+  and stay writable by all of them; an owner image with its own `USER` would break
+  that.
+- **Tested with podman** by `TestARealSharedFolder` (`SHROOMS_REAL_CAGE=1`): two
+  cages see each other's file at `/shared` and nowhere else, and a bind volume is
+  refused.

@@ -171,8 +171,7 @@ func (m *Manager) sealedMounts(s *Session) ([]mount, error) {
 		}
 	}
 	// One filter for both cages (cage.go): two copies of a rule that decides
-	// what a cage can reach is two chances to be wrong, and a volume dropped
-	// here would take the shared folder from sealed cages only.
+	// what a cage can reach is two chances to be wrong.
 	return keepMounts(ms), nil
 }
 

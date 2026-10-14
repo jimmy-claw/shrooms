@@ -66,6 +66,10 @@ type Cage struct {
 	Nix bool `json:"nix,omitempty"`
 	// GitHub gives it the owner's GitHub CLI login (~/.config/gh), read-only.
 	GitHub bool `json:"github,omitempty"`
+	// Shared gives it the folder the caged sessions it was made alongside
+	// share, read-write at /shared (ADR-057): the one of its meshes, so a
+	// session limited to the home mesh shares nothing with an office one.
+	Shared bool `json:"shared,omitempty"`
 	// Sealed: for code nobody vouches for (sealed.go, ADR-045) — the
 	// internet and nothing local, a credential of its own, no agents to
 	// ask, results through Outbox (a directory on the machine).
@@ -77,9 +81,9 @@ type Cage struct {
 // container name, and for a sealed one its outbox and none of the options
 // that widen a cage.
 func newCage(asked *Cage, session string) *Cage {
-	c := &Cage{Image: asked.Image, Nix: asked.Nix, GitHub: asked.GitHub, Sealed: asked.Sealed, Container: newContainerName(session)}
+	c := &Cage{Image: asked.Image, Nix: asked.Nix, GitHub: asked.GitHub, Shared: asked.Shared, Sealed: asked.Sealed, Container: newContainerName(session)}
 	if c.Sealed {
-		c.Nix, c.GitHub = false, false
+		c.Nix, c.GitHub, c.Shared = false, false, false
 		c.Outbox = sealedOutbox(session)
 	}
 	return c
@@ -104,11 +108,11 @@ type Cages struct {
 	Socket string
 	// Nft is the nft program closing the agent port in cages; "" finds it.
 	Nft string
-	// sharedMu guards the cached host path below. Its own mutex: Status()
-	// holds c.mu when it asks, so taking c.mu here would deadlock.
-	sharedMu   sync.Mutex
-	sharedPath string
-	sharedAt   time.Time
+	// volumesMu guards the cached volume directory below, apart from c.mu:
+	// finding it shells out to podman, which must not hold up the cages.
+	volumesMu  sync.Mutex
+	volumesDir string
+	volumesAt  time.Time
 	// SealedToken is the file with the Claude Code token sealed cages run
 	// on; "" for sealed-claude-token in the state directory.
 	SealedToken string
@@ -123,6 +127,8 @@ type CageInfo struct {
 	Image  string `json:"image"`
 	Nix    bool   `json:"nix,omitempty"`
 	GitHub bool   `json:"github,omitempty"`
+	// Shared: the volume of the folder it shares (ADR-057), "" for none.
+	Shared string `json:"shared,omitempty"`
 	Sealed bool   `json:"sealed,omitempty"`
 	Outbox string `json:"outbox,omitempty"`
 }
@@ -137,12 +143,13 @@ type CageStatus struct {
 	Nix bool `json:"nix,omitempty"`
 	// Sealed: the machine has a token for sealed cages (sealed.go).
 	Sealed bool `json:"sealed,omitempty"`
-	// Shared: the folder every cage sees the same copy of (ADR-057). SharedIn
-	// is where a cage sees it; SharedHost is where the owner does, so the app
-	// can offer to open it rather than making someone find a volume by hand.
+	// Shared: a cage can be given a shared folder (ADR-057), at SharedIn in
+	// it. SharedRoot is podman's directory of volumes on this machine, so the
+	// app can show where a session's folder is (SharedRoot/VOLUME/_data)
+	// rather than making someone find a volume by hand; "" when unknown.
 	Shared     bool   `json:"shared,omitempty"`
 	SharedIn   string `json:"shared_in,omitempty"`
-	SharedHost string `json:"shared_host,omitempty"`
+	SharedRoot string `json:"shared_root,omitempty"`
 	Ready      bool   `json:"ready"`              // the image is there
 	Building   bool   `json:"building,omitempty"` // it is being built
 	Error      string `json:"error,omitempty"`    // why the last build failed
@@ -213,7 +220,7 @@ func (c *Cages) Status() CageStatus {
 	// Resolved BEFORE the lock: it shells out to podman (bounded, but up to a
 	// few seconds), and holding c.mu across that would block every other cage
 	// operation on the machine.
-	sharedHost := c.sharedHostPath()
+	volumes := c.volumesPath()
 	c.mu.Lock()
 	st := CageStatus{Available: true, Image: c.Image, Building: c.building, Error: c.buildErr,
 		Images: []string{c.Image}, Nix: nixHere(), Sealed: tokenIn(c.SealedToken)}
@@ -224,14 +231,15 @@ func (c *Cages) Status() CageStatus {
 		}
 	}
 	st.Ready = !st.Building && c.imageExists(c.Image)
-	st.Shared, st.SharedIn, st.SharedHost = true, CageSharedDir, sharedHost
+	st.Shared, st.SharedIn, st.SharedRoot = true, CageSharedDir, volumes
 	return st
 }
 
-// sharedHostPath is where the owner finds the shared folder on this machine:
-// the directory behind the podman volume, so an app can open it and a person
-// can put something in it without knowing what a volume is.
-func (c *Cages) sharedHostPath() string {
+// volumesPath is podman's directory of volumes, where the owner finds a
+// shared folder: VOLUME/_data under it. Only volumes ensureSharedVolume let
+// through are mounted, and those are local ones with no options, which is
+// where podman keeps them.
+func (c *Cages) volumesPath() string {
 	if c == nil || c.Podman == "" {
 		return ""
 	}
@@ -242,33 +250,43 @@ func (c *Cages) sharedHostPath() string {
 	}
 	// Cached: Status() is polled by the apps, and a slow or hung podman would
 	// otherwise stall the whole status view for the timeout, every poll.
-	c.sharedMu.Lock()
-	defer c.sharedMu.Unlock()
-	if time.Since(c.sharedAt) < sharedPathTTL {
-		return c.sharedPath
+	c.volumesMu.Lock()
+	defer c.volumesMu.Unlock()
+	if time.Since(c.volumesAt) < sharedPathTTL {
+		return c.volumesDir
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), sharedPathTimeout)
 	defer cancel()
 	p := ""
-	if out, err := exec.CommandContext(ctx, c.Podman, "volume", "inspect", sharedVolume,
-		"--format", "{{.Driver}} {{.Options}} {{.Mountpoint}}").Output(); err == nil {
-		fields := strings.Fields(strings.TrimSpace(string(out)))
-		if len(fields) >= 2 && fields[0] == "local" && fields[1] == "map[]" && len(fields) >= 3 {
-			p = fields[2]
-		}
-		// Not local-with-no-options means someone else defined this name - a
-		// bind to a host directory, say, which every caged session would then
-		// get read-write. The name is constant, so whoever creates it first
-		// decides what it is. Report no host path rather than a misleading one.
+	if out, err := c.run(ctx, "info", "--format", "{{.Store.VolumePath}}"); err == nil {
+		p = strings.TrimSpace(out)
 	}
-	c.sharedPath, c.sharedAt = p, time.Now()
+	c.volumesDir, c.volumesAt = p, time.Now()
 	return p
 }
 
+// ensureSharedVolume makes the shared folder's volume, or checks that the one
+// there is what this would have made: local, with no options. The names are
+// fixed, so whoever makes one first decides what it is, and one made as a bind
+// (`--opt o=bind --opt device=DIR`) would hand DIR read-write to every cage
+// given it. Checked before every cage is made, not only shown.
+func (c *Cages) ensureSharedVolume(ctx context.Context, name string) error {
+	out, err := c.run(ctx, "volume", "inspect", "--format", "{{.Driver}} {{.Options}}", name)
+	if err != nil {
+		if _, err := c.run(ctx, "volume", "create", "--label", sharedLabel+"=1", name); err != nil {
+			return fmt.Errorf("the shared folder's volume %s: %w", name, err)
+		}
+		return nil
+	}
+	if got := strings.TrimSpace(out); got != "local map[]" {
+		return fmt.Errorf("the volume %s is not a plain one (%s), so it is not given to cages as their shared folder: remove it (podman volume rm %s), or move the session into a cage without the shared folder", name, got, name)
+	}
+	return nil
+}
+
 const (
-	// sharedPathTTL is how long a resolved host path is reused. Short enough
-	// that a volume removed and made again is noticed; long enough that a poll
-	// does not shell out each time.
+	// sharedPathTTL is how long the volume directory is reused: a poll does
+	// not shell out each time.
 	sharedPathTTL = 60 * time.Second
 	// sharedPathTimeout bounds the one lookup that is actually made. Shorter
 	// than the poll interval on purpose: a status view should be stale, not
@@ -321,8 +339,8 @@ func newContainerName(session string) string {
 // mount is one path of the machine's in a cage, at the same path.
 //
 // volume says `path` is a podman named volume, not a path on this machine. A
-// volume has no path to stat and podman makes it on first use, so the mount
-// filters below must not drop it for not existing.
+// volume has no path to stat, so the mount filter must not drop it for not
+// existing.
 type mount struct {
 	path   string
 	ro     bool
@@ -330,18 +348,50 @@ type mount struct {
 	volume bool
 }
 
-// CageSharedDir is the folder every cage sees the same copy of, and the one
+// CageSharedDir is where a cage given the shared folder sees it, and the one
 // path in a cage that is not this machine's. It is a podman named volume, so
 // the machine's own filesystem is not what a cage writes into: the owner (and
-// the agent, which reads it as the user that owns it) can look at it, and a
-// cage can be given it read-only or read-write without changing anything else.
+// the agent, which reads it as the user that owns it) can look at it.
 const CageSharedDir = "/shared"
 
-// sharedVolume is the volume name podman resolves to a directory of its own.
+// sharedVolume is the shared folder's volume for sessions on every mesh.
 // Deliberately not a host path: a folder the owner keeps on the machine and a
 // folder cages share are different things, and only one of them may be written
 // by a cage.
 const sharedVolume = "shrooms-shared"
+
+// sharedVolumeFor is the shared folder's volume for a session on these meshes
+// (none is all): one per set of meshes, so sessions share only with sessions
+// seen from the same meshes (ADR-049). The labels in the name are for a person
+// reading `podman volume ls`; the hash keeps two sets apart that the name's
+// alphabet would make look alike.
+func sharedVolumeFor(meshes []string) string {
+	if len(meshes) == 0 {
+		return sharedVolume
+	}
+	ms := append([]string(nil), meshes...)
+	sort.Strings(ms)
+	sum := sha256.Sum256([]byte(strings.Join(ms, "\n")))
+	name := strings.Map(func(r rune) rune {
+		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '.' {
+			return r
+		}
+		return '_'
+	}, strings.Join(ms, "_"))
+	if len(name) > 40 {
+		name = name[:40]
+	}
+	return sharedVolume + "-" + name + "-" + hex.EncodeToString(sum[:3])
+}
+
+// sharedFor is the volume a session's cage is given as its shared folder, or
+// "" for none. Called with s.mu held.
+func (s *Session) sharedFor() string {
+	if s.cage == nil || !s.cage.Shared || s.cage.Sealed {
+		return ""
+	}
+	return sharedVolumeFor(s.meshes)
+}
 
 // cageRun is what one start of a caged session's process needs.
 type cageRun struct {
@@ -359,10 +409,13 @@ func (m *Manager) cageMounts(s *Session, harness string) []mount {
 	// renamed keeps finding what was sent before under its old name.
 	up := filepath.Join(m.dir, "uploads")
 	os.MkdirAll(up, 0o700)
-	// The shared folder, read-write: a caged session is the owner's own agent,
-	// not code nobody vouches for, and the point of the folder is that several
-	// of them work in it together.
-	ms := []mount{{path: s.dir}, {path: up, ro: true}, {path: sharedVolume, at: CageSharedDir, volume: true}}
+	ms := []mount{{path: s.dir}, {path: up, ro: true}}
+	// The shared folder, read-write, when it was asked for: a caged session is
+	// the owner's own agent, and the point of the folder is that several of
+	// them work in it together.
+	if v := s.sharedFor(); v != "" {
+		ms = append(ms, mount{path: v, at: CageSharedDir, volume: true})
+	}
 	switch harness {
 	case "claude":
 		dir := filepath.Join(home, ".claude")
@@ -405,9 +458,9 @@ func (m *Manager) cageMounts(s *Session, harness string) []mount {
 }
 
 // keepMounts drops the mounts that are not there. A named volume is not a path
-// here and podman makes it on first use, so stat'ing one would drop the shared
-// folder from every cage, silently - which is why the volume case is in this
-// function and not repeated in each caller.
+// here (ensureSharedVolume makes it), so stat'ing one would drop the shared
+// folder silently - which is why the volume case is in this function and not
+// repeated in each caller.
 func keepMounts(ms []mount) []mount {
 	var out []mount
 	for _, x := range ms {
@@ -528,16 +581,22 @@ func (c *Cages) createArgs(name, session, image string, ms []mount, extra ...str
 		if x.at != "" {
 			at = x.at
 		}
-		v := x.path + ":" + at
+		var opts []string
 		if x.ro {
-			v += ":ro"
+			opts = append(opts, "ro")
 		}
 		// nocopy: an empty named volume is seeded from the image's content at
 		// the mount point on first mount - including from an owner-provided
 		// image, and even on a :ro mount, since the copy comes from the image
 		// side. Costs nothing and keeps the shared folder empty.
 		if x.volume {
-			v += ",nocopy"
+			opts = append(opts, "nocopy")
+		}
+		// After a colon, comma-separated: "VOL:/shared,nocopy" is a mount
+		// at a directory called "/shared,nocopy" (podman 5, 2026-10-14).
+		v := x.path + ":" + at
+		if len(opts) > 0 {
+			v += ":" + strings.Join(opts, ",")
 		}
 		args = append(args, "-v", v)
 	}
@@ -564,10 +623,23 @@ func (m *Manager) prepareCage(s *Session, bin string) (*cageRun, error) {
 		if s.cage.Sealed {
 			sealedOut, _ = c.run(ctx, "inspect", "--format", "{{index .Config.Labels \""+sealedLabel+"\"}}", name)
 		}
-		if strings.TrimSpace(out) != cageGeneration || strings.TrimSpace(sealedOut) != sealedGeneration {
+		// Its shared folder, which is set when it is made: one asked for
+		// later, or another one since its meshes changed, is a new cage.
+		sharedOut, _ := c.run(ctx, "inspect", "--format", "{{index .Config.Labels \""+sharedLabel+"\"}}", name)
+		if v := strings.TrimSpace(sharedOut); v == "<no value>" {
+			sharedOut = ""
+		}
+		why := ""
+		switch {
+		case strings.TrimSpace(out) != cageGeneration || strings.TrimSpace(sealedOut) != sealedGeneration:
+			why = "made again for a newer generation of the cage"
+		case strings.TrimSpace(sharedOut) != s.sharedFor():
+			why = "made again for its shared folder"
+		}
+		if why != "" {
 			c.run(ctx, "rm", "-f", "-t", "3", name)
 			s.record("caged", "shrooms", map[string]any{"caged": true, "image": image, "nix": s.cage.Nix, "github": s.cage.GitHub,
-				"remade": "made again for a newer generation of the cage; what was installed in it is gone"})
+				"shared": s.cage.Shared, "remade": why + "; what was installed in it is gone"})
 		}
 	}
 	if _, err := c.run(ctx, "container", "exists", name); err != nil {
@@ -593,6 +665,12 @@ func (m *Manager) prepareCage(s *Session, bin string) (*cageRun, error) {
 				return nil, err
 			}
 			extra = append([]string{"--security-opt", "seccomp=" + prof, "--label", sealedLabel + "=" + sealedGeneration}, sealedDNSArgs()...)
+		}
+		if v := s.sharedFor(); v != "" {
+			if err := c.ensureSharedVolume(ctx, v); err != nil {
+				return nil, err
+			}
+			extra = append(extra, "--label", sharedLabel+"="+v)
 		}
 		if _, err := c.run(ctx, c.createArgs(name, s.Name(), image, ms, extra...)...); err != nil {
 			return nil, err
@@ -645,10 +723,13 @@ func (m *Manager) cageEnv(s *Session) (string, error) {
 		"SHROOMS_AGENT_SESSION": s.Name(),
 		// The shrooms tools reach agents through this (ADR-044).
 		"SHROOMS_AGENT_PROXY": CageProxyDir + "/proxy.sock",
-		// Where the folder cages share is mounted (ADR-057). Told, not
-		// discovered: a folder nobody is told about is a folder nobody uses.
-		"SHROOMS_SHARED": CageSharedDir,
-		"PATH":           cagePath(home, s.cage.Nix),
+		"PATH":                cagePath(home, s.cage.Nix),
+	}
+	// Where the folder cages share is mounted (ADR-057), only in a cage that
+	// has it. Told, not discovered: a folder nobody is told about is a folder
+	// nobody uses.
+	if s.cage.Shared {
+		vars["SHROOMS_SHARED"] = CageSharedDir
 	}
 	if s.cage.Nix {
 		if _, err := os.Stat(nixDaemonSocket); err == nil {
@@ -794,7 +875,7 @@ func (m *Manager) SetCage(name string, cage *Cage, by string) (Info, error) {
 	data := map[string]any{"caged": cage != nil}
 	if cage != nil {
 		data["image"] = m.Cages.image(cage)
-		data["nix"], data["github"], data["sealed"] = cage.Nix, cage.GitHub, cage.Sealed
+		data["nix"], data["github"], data["shared"], data["sealed"] = cage.Nix, cage.GitHub, cage.Shared, cage.Sealed
 	}
 	s.record("caged", by, data)
 	s.mu.Unlock()
