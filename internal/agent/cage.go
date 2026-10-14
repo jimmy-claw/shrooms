@@ -30,6 +30,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -230,6 +231,11 @@ func (c *Cages) sharedHostPath() string {
 	if c == nil || c.Podman == "" {
 		return ""
 	}
+	// A podman machine on macOS reports a path inside its VM, which does not
+	// exist where the app runs: better no path than one that opens nothing.
+	if runtime.GOOS != "linux" {
+		return ""
+	}
 	// Cached: Status() is polled by the apps, and a slow or hung podman would
 	// otherwise stall the whole status view for the timeout, every poll.
 	c.sharedMu.Lock()
@@ -240,8 +246,16 @@ func (c *Cages) sharedHostPath() string {
 	ctx, cancel := context.WithTimeout(context.Background(), sharedPathTimeout)
 	defer cancel()
 	p := ""
-	if out, err := exec.CommandContext(ctx, c.Podman, "volume", "inspect", sharedVolume, "--format", "{{.Mountpoint}}").Output(); err == nil {
-		p = strings.TrimSpace(string(out))
+	if out, err := exec.CommandContext(ctx, c.Podman, "volume", "inspect", sharedVolume,
+		"--format", "{{.Driver}} {{.Options}} {{.Mountpoint}}").Output(); err == nil {
+		fields := strings.Fields(strings.TrimSpace(string(out)))
+		if len(fields) >= 2 && fields[0] == "local" && fields[1] == "map[]" && len(fields) >= 3 {
+			p = fields[2]
+		}
+		// Not local-with-no-options means someone else defined this name - a
+		// bind to a host directory, say, which every caged session would then
+		// get read-write. The name is constant, so whoever creates it first
+		// decides what it is. Report no host path rather than a misleading one.
 	}
 	c.sharedPath, c.sharedAt = p, time.Now()
 	return p
@@ -489,6 +503,9 @@ func (c *Cages) createArgs(name, session, image string, ms []mount, extra ...str
 		// A cage made with its own agent's socket (ADR-044); one without is
 		// made again.
 		"--label", proxyLabel + "=" + cageGeneration,
+		// label=disable, NOT :Z. A :Z relabel on a mount shared between
+		// containers takes it away from the others on an SELinux host
+		// (measured 2026-10-14); do not "harden" this to :Z.
 		"--network", cageNetwork, "--security-opt", "label=disable",
 		// Not in podman's defaults either; said so, since the rule that
 		// closes the agent port depends on it.
@@ -510,6 +527,13 @@ func (c *Cages) createArgs(name, session, image string, ms []mount, extra ...str
 		v := x.path + ":" + at
 		if x.ro {
 			v += ":ro"
+		}
+		// nocopy: an empty named volume is seeded from the image's content at
+		// the mount point on first mount - including from an owner-provided
+		// image, and even on a :ro mount, since the copy comes from the image
+		// side. Costs nothing and keeps the shared folder empty.
+		if x.volume {
+			v += ",nocopy"
 		}
 		args = append(args, "-v", v)
 	}
