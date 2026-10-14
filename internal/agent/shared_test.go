@@ -52,7 +52,10 @@ func TestACagedSessionGetsTheSharedFolderReadWrite(t *testing.T) {
 	}
 }
 
-func TestASealedCageGetsTheSharedFolderReadOnly(t *testing.T) {
+func TestASealedCageDoesNotGetTheSharedFolder(t *testing.T) {
+	// Not even read-only. A sealed cage holds code nobody vouches for (ADR-045:
+	// "the internet and nothing local"), and the danger there is EXFILTRATION,
+	// not poisoning - so read-only does not help it. Review finding, 2026-10-14.
 	state := t.TempDir()
 	m := newTestManager(t, state)
 	if err := os.WriteFile(filepath.Join(state, SealedTokenFile), []byte("not-a-real-token\n"), 0o600); err != nil {
@@ -68,14 +71,10 @@ func TestASealedCageGetsTheSharedFolderReadOnly(t *testing.T) {
 	}
 	ms, err := m.sealedMounts(s)
 	if err != nil {
-		t.Skipf("a sealed cage cannot be built here (%v); the caged case above still runs", err)
+		t.Skipf("a sealed cage cannot be built here (%v)", err)
 	}
-	found := findShared(ms)
-	if found == nil {
-		t.Fatal("a sealed cage does not get the shared folder: it is told to read data it cannot see")
-	}
-	if !found.ro {
-		t.Fatal("a sealed cage's shared folder is READ-WRITE: code nobody vouches for can poison it for every other cage")
+	if found := findShared(ms); found != nil {
+		t.Fatalf("a sealed cage is given the shared folder (%+v): code nobody vouches for can read everything the others put there, and can copy it out", *found)
 	}
 }
 

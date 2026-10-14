@@ -36,8 +36,8 @@ rm) eval last=\${$#}; rm -f "$D/c-$last" "$D/c-$last.old" ;;
 inspect)
   case "$3" in
   *Pid*) echo 4242 ;;
-  *proxy*) [ -f "$D/c-$4.old" ] || echo 2 ;;
-  *sealed*) echo 1 ;;
+  *proxy*) [ -f "$D/c-$4.old" ] || echo ` + cageGeneration + ` ;;
+  *sealed*) echo ` + sealedGeneration + ` ;;
   esac ;;
 unshare) cat > "$D/nft-rules" ;;
 build) cat > $D/Containerfile ;;

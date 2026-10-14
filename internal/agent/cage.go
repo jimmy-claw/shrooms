@@ -210,6 +210,10 @@ func (c *Cages) Status() CageStatus {
 	if c == nil {
 		return CageStatus{}
 	}
+	// Resolved BEFORE the lock: it shells out to podman (bounded, but up to a
+	// few seconds), and holding c.mu across that would block every other cage
+	// operation on the machine.
+	sharedHost := c.sharedHostPath()
 	c.mu.Lock()
 	st := CageStatus{Available: true, Image: c.Image, Building: c.building, Error: c.buildErr,
 		Images: []string{c.Image}, Nix: nixHere(), Sealed: tokenIn(c.SealedToken)}
@@ -220,7 +224,7 @@ func (c *Cages) Status() CageStatus {
 		}
 	}
 	st.Ready = !st.Building && c.imageExists(c.Image)
-	st.Shared, st.SharedIn, st.SharedHost = true, CageSharedDir, c.sharedHostPath()
+	st.Shared, st.SharedIn, st.SharedHost = true, CageSharedDir, sharedHost
 	return st
 }
 
@@ -563,7 +567,7 @@ func (m *Manager) prepareCage(s *Session, bin string) (*cageRun, error) {
 		if strings.TrimSpace(out) != cageGeneration || strings.TrimSpace(sealedOut) != sealedGeneration {
 			c.run(ctx, "rm", "-f", "-t", "3", name)
 			s.record("caged", "shrooms", map[string]any{"caged": true, "image": image, "nix": s.cage.Nix, "github": s.cage.GitHub,
-				"remade": "made again, to reach agents only through its own; what was installed in it is gone"})
+				"remade": "made again for a newer generation of the cage; what was installed in it is gone"})
 		}
 	}
 	if _, err := c.run(ctx, "container", "exists", name); err != nil {

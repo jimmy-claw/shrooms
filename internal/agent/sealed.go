@@ -154,11 +154,11 @@ func (m *Manager) sealedMounts(s *Session) ([]mount, error) {
 		// Read-only: a socket to talk to, not the agent's state to write in
 		// or the socket to unlink — connect() works through it (2026-10-13).
 		{path: pd, at: CageProxyDir, ro: true},
-		// The shared folder, read-only: this cage holds code nobody vouches
-		// for, and a folder every cage can write is a folder any one of them
-		// can poison for the others.
-		{path: sharedVolume, at: CageSharedDir, volume: true, ro: true},
 	}
+	// NOT the shared folder, not even read-only. A sealed cage holds code nobody
+	// vouches for (ADR-045: "the internet and nothing local"), and the danger
+	// there is EXFILTRATION, not poisoning - so read-only does not help it. What
+	// a sealed cage may reach is stripped, not narrowed.
 	if bin, err := claudeProgram(m.binOf("claude")); err == nil {
 		ms = append(ms, mount{path: filepath.Dir(bin), ro: true})
 	}
@@ -244,11 +244,8 @@ func (m *Manager) sealedEnv(s *Session) (map[string]string, error) {
 		"SHROOMS_AGENT_SESSION":   s.Name(),
 		"SHROOMS_AGENT_PROXY":     CageProxyDir + "/proxy.sock",
 		"SHROOMS_OUTBOX":          SealedOutboxIn,
-		// Read-only for a sealed cage, but told all the same: it may be asked
-		// to read what the others put there (ADR-057).
-		"SHROOMS_SHARED": CageSharedDir,
-		"PATH":           cagePath(sealedHome, false),
-		"LANG":           "C.UTF-8",
+		"PATH":                    cagePath(sealedHome, false),
+		"LANG":                    "C.UTF-8",
 	}, nil
 }
 
