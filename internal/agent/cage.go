@@ -254,11 +254,29 @@ func newContainerName(session string) string {
 }
 
 // mount is one path of the machine's in a cage, at the same path.
+//
+// volume says `path` is a podman named volume, not a path on this machine. A
+// volume has no path to stat and podman makes it on first use, so the mount
+// filters below must not drop it for not existing.
 type mount struct {
-	path string
-	ro   bool
-	at   string // where in the cage, when not at the same path
+	path   string
+	ro     bool
+	at     string // where in the cage, when not at the same path
+	volume bool
 }
+
+// CageSharedDir is the folder every cage sees the same copy of, and the one
+// path in a cage that is not this machine's. It is a podman named volume, so
+// the machine's own filesystem is not what a cage writes into: the owner (and
+// the agent, which reads it as the user that owns it) can look at it, and a
+// cage can be given it read-only or read-write without changing anything else.
+const CageSharedDir = "/shared"
+
+// sharedVolume is the volume name podman resolves to a directory of its own.
+// Deliberately not a host path: a folder the owner keeps on the machine and a
+// folder cages share are different things, and only one of them may be written
+// by a cage.
+const sharedVolume = "shrooms-shared"
 
 // cageRun is what one start of a caged session's process needs.
 type cageRun struct {
@@ -276,7 +294,10 @@ func (m *Manager) cageMounts(s *Session, harness string) []mount {
 	// renamed keeps finding what was sent before under its old name.
 	up := filepath.Join(m.dir, "uploads")
 	os.MkdirAll(up, 0o700)
-	ms := []mount{{path: s.dir}, {path: up, ro: true}}
+	// The shared folder, read-write: a caged session is the owner's own agent,
+	// not code nobody vouches for, and the point of the folder is that several
+	// of them work in it together.
+	ms := []mount{{path: s.dir}, {path: up, ro: true}, {path: sharedVolume, at: CageSharedDir, volume: true}}
 	switch harness {
 	case "claude":
 		dir := filepath.Join(home, ".claude")
@@ -315,8 +336,20 @@ func (m *Manager) cageMounts(s *Session, harness string) []mount {
 	// announced, and restart the daemon — the machine, from a cage (found
 	// 2026-10-09). The tools find the machines through the cage's own socket
 	// to its agent now (cageproxy.go).
+	return keepMounts(ms)
+}
+
+// keepMounts drops the mounts that are not there. A named volume is not a path
+// here and podman makes it on first use, so stat'ing one would drop the shared
+// folder from every cage, silently - which is why the volume case is in this
+// function and not repeated in each caller.
+func keepMounts(ms []mount) []mount {
 	var out []mount
 	for _, x := range ms {
+		if x.volume {
+			out = append(out, x)
+			continue
+		}
 		if _, err := os.Stat(x.path); err == nil {
 			out = append(out, x)
 		}

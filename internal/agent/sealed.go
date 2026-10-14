@@ -154,6 +154,10 @@ func (m *Manager) sealedMounts(s *Session) ([]mount, error) {
 		// Read-only: a socket to talk to, not the agent's state to write in
 		// or the socket to unlink — connect() works through it (2026-10-13).
 		{path: pd, at: CageProxyDir, ro: true},
+		// The shared folder, read-only: this cage holds code nobody vouches
+		// for, and a folder every cage can write is a folder any one of them
+		// can poison for the others.
+		{path: sharedVolume, at: CageSharedDir, volume: true, ro: true},
 	}
 	if bin, err := claudeProgram(m.binOf("claude")); err == nil {
 		ms = append(ms, mount{path: filepath.Dir(bin), ro: true})
@@ -166,13 +170,10 @@ func (m *Manager) sealedMounts(s *Session) ([]mount, error) {
 			}
 		}
 	}
-	var kept []mount
-	for _, x := range ms {
-		if _, err := os.Stat(x.path); err == nil {
-			kept = append(kept, x)
-		}
-	}
-	return kept, nil
+	// One filter for both cages (cage.go): two copies of a rule that decides
+	// what a cage can reach is two chances to be wrong, and a volume dropped
+	// here would take the shared folder from sealed cages only.
+	return keepMounts(ms), nil
 }
 
 // carryConversation copies one conversation — its transcript and what Claude
