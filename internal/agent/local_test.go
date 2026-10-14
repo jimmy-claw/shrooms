@@ -135,3 +135,26 @@ func TestOnlyLocalAddrGoesThroughTheSocket(t *testing.T) {
 		t.Error("a cancelled request to a mesh address succeeded")
 	}
 }
+
+// The socket is named as this machine, and is still not another device: its
+// sessions update their own tasks. A named mesh peer is another device.
+func TestTheSocketIsNotRemote(t *testing.T) {
+	m := newTestManager(t, t.TempDir())
+	m.Machines = func() ([]Machine, error) { return []Machine{{Name: "laptop", Addr: LocalAddr}}, nil }
+	h := &handler{m: m, who: func(a netip.Addr) string {
+		if a == netip.MustParseAddr("fd00::7") {
+			return "pi5.office"
+		}
+		return ""
+	}}
+	local := (&http.Request{RemoteAddr: "@"}).WithContext(context.WithValue(context.Background(), overSocketKey{}, true))
+	if h.caller(local) != "laptop" {
+		t.Errorf("over the socket the caller is %q, want this machine, laptop", h.caller(local))
+	}
+	if h.remote(local) {
+		t.Error("the socket counted as another device: its sessions could not update their tasks")
+	}
+	if !h.remote(&http.Request{RemoteAddr: "[fd00::7]:1234"}) {
+		t.Error("a named mesh peer did not count as another device")
+	}
+}
