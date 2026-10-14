@@ -61,6 +61,16 @@ the socket ACL and the firewall only when it finds a shrooms daemon. If it
 finds none, it says the agent will run on this machine only, and how to
 add Shrooms later.
 
+**Amended 2026-10-14: the tools are told which agent is theirs.** A
+session's MCP tools (`shrooms-agent mcp`, started by Claude Code or pi) are
+passed the agent's sockets as arguments (`--socket` for the daemon,
+`--agent-socket` for the agent), in Claude's `--mcp-config` and in pi's
+`mcp.json`. Before this, they used the default paths. A no-mesh agent beside
+a running daemon (the stream's demo) had its sessions asking the daemon's
+mesh instead, and one session's `ask_agent` to another on the same machine
+went to the hostname over TCP and was refused. With the paths passed, the
+same relay completed in 10 s.
+
 ## Consequences
 
 - Trying the agents is one install: the agent, then Basecamp. The mesh

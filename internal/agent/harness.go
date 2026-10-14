@@ -41,6 +41,10 @@ type StartOptions struct {
 	// MCP is shrooms-agent itself, run as `MCP mcp`: the mesh's agents as
 	// tools (cmd/shrooms-agent/mcp.go). "" leaves it out.
 	MCP string
+	// MCPArgs follow "mcp": which daemon and which agent the tools talk to,
+	// so they reach the agent that started them and not whatever the
+	// defaults find (a demo agent beside a real one, or a socket elsewhere).
+	MCPArgs []string
 	// Note is added to the system prompt: who the session is, and how to
 	// deal with other agents (AgentNote).
 	Note string
@@ -146,7 +150,7 @@ func (Claude) Args(o StartOptions) []string {
 	}
 	if o.MCP != "" {
 		cfg, _ := json.Marshal(map[string]any{"mcpServers": map[string]any{
-			"shrooms": map[string]any{"command": o.MCP, "args": []string{"mcp"}}}})
+			"shrooms": map[string]any{"command": o.MCP, "args": append([]string{"mcp"}, o.MCPArgs...)}}})
 		// Looking around is allowed; asking another agent — which costs
 		// its owner a turn — asks first, as any tool does.
 		args = append(args, "--mcp-config", string(cfg),

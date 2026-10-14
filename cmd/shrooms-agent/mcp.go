@@ -221,8 +221,15 @@ func (c a2aClient) call(tool string, a mcpArgs) (string, error) {
 
 func mcpMain(args []string) error {
 	sock := "/run/shrooms/shrooms.sock"
-	if len(args) == 2 && args[0] == "--socket" {
-		sock = args[1]
+	// The agent that starts a session says which daemon and which agent the
+	// tools belong to (--socket, --agent-socket).
+	for i := 0; i+1 < len(args); i += 2 {
+		switch args[i] {
+		case "--socket":
+			sock = args[i+1]
+		case "--agent-socket":
+			os.Setenv("SHROOMS_AGENT_SOCKET", args[i+1])
+		}
 	}
 	return serveMCP(os.Stdin, os.Stdout, newA2AClient(sock))
 }

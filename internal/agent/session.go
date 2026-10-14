@@ -218,8 +218,10 @@ type Manager struct {
 	// Meshes are this machine's meshes, by label and address (meshes.go).
 	Meshes func() []MeshInfo
 	// Socket is this agent's own unix socket (local.go): how LocalAddr, this
-	// machine without a mesh, is reached.
-	Socket string
+	// machine without a mesh, is reached. DaemonSocket is the shrooms
+	// daemon's, whether or not a daemon answers on it.
+	Socket       string
+	DaemonSocket string
 	// Tasks an asker is waiting on right now (a blocking send), by id: it gets
 	// the result as the reply, and is not sent a note of it too (asker.go).
 	waiting sync.Map
@@ -851,7 +853,7 @@ func (s *Session) ensureRunning() error {
 	s.m.mu.Unlock()
 	host, _ := os.Hostname()
 	o := StartOptions{Resume: s.convID, AutoApprove: s.autoApprove && s.harness.Caps().Approve, Session: s.Name(),
-		MCP: s.m.Self, Note: AgentNote(host, s.Name())}
+		MCP: s.m.Self, MCPArgs: s.m.mcpArgs(), Note: AgentNote(host, s.Name())}
 	var cage *cageRun
 	if s.cage != nil {
 		var err error

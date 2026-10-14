@@ -66,7 +66,7 @@ func (p Pi) Args(o StartOptions) []string {
 // it takes none on its command line (pi 1.0.0). Added when missing, and
 // moved along when the binary moved; an entry of the person's own under that
 // name, or anything else in the file, is left as it is.
-func (Pi) EnsureMCP(command string) error {
+func (Pi) EnsureMCP(command string, extra ...string) error {
 	dir := os.Getenv("PI_CODING_AGENT_DIR")
 	if dir == "" {
 		home, err := os.UserHomeDir()
@@ -90,13 +90,19 @@ func (Pi) EnsureMCP(command string) error {
 	if servers == nil {
 		servers = map[string]any{}
 	}
+	want := append([]string{"mcp"}, extra...)
 	if old, ok := servers["shrooms"].(map[string]any); ok {
-		args, _ := json.Marshal(old["args"])
-		if string(args) != `["mcp"]` || old["command"] == command {
-			return nil // the person's own, or already right
+		args, _ := old["args"].([]any)
+		if len(args) == 0 || args[0] != "mcp" {
+			return nil // the person's own
+		}
+		got, _ := json.Marshal(args)
+		exp, _ := json.Marshal(want)
+		if old["command"] == command && string(got) == string(exp) {
+			return nil // already right
 		}
 	}
-	servers["shrooms"] = map[string]any{"command": command, "args": []string{"mcp"},
+	servers["shrooms"] = map[string]any{"command": command, "args": want,
 		"description": "The coding agents on this shrooms mesh: list them, ask one, follow a task."}
 	cfg["mcpServers"] = servers
 	b, _ := json.MarshalIndent(cfg, "", "  ")

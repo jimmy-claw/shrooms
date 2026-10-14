@@ -116,6 +116,7 @@ func run() error {
 	// (asker.go) — on every agent, caged or not: without it the notes named
 	// tasks with no machine, which task_ack cannot take (2026-10-10).
 	m.Socket = *agentSock
+	m.DaemonSocket = *sock
 	// Sessions, and the tools they start, find this agent where it is.
 	os.Setenv("SHROOMS_AGENT_SOCKET", *agentSock)
 	m.Machines = func() ([]agent.Machine, error) {
@@ -180,7 +181,7 @@ func run() error {
 			log.Info("harness", "name", "pi", "bin", bin)
 			m.WatchCredits(ctx)
 			if m.Self != "" {
-				if err := (agent.Pi{}).EnsureMCP(m.Self); err != nil {
+				if err := (agent.Pi{}).EnsureMCP(m.Self, m.MCPArgs()...); err != nil {
 					log.Warn("pi will not have the mesh's agents as tools", "err", err)
 				}
 			}

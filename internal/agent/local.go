@@ -112,6 +112,22 @@ func remoteAddr(r *http.Request) (netip.Addr, error) {
 	return a.Unmap(), nil
 }
 
+// mcpArgs tell the MCP tools a session starts which daemon and which agent
+// are theirs: this agent's own.
+func (m *Manager) mcpArgs() []string {
+	var a []string
+	if m.DaemonSocket != "" {
+		a = append(a, "--socket", m.DaemonSocket)
+	}
+	if m.Socket != "" {
+		a = append(a, "--agent-socket", m.Socket)
+	}
+	return a
+}
+
+// MCPArgs is mcpArgs, for the pi config cmd/shrooms-agent writes.
+func (m *Manager) MCPArgs() []string { return m.mcpArgs() }
+
 // client is an HTTP client to the agent at addr: through this agent's own
 // socket for LocalAddr, over the mesh for any other.
 func (m *Manager) client(addr netip.Addr, timeout time.Duration) *http.Client {
