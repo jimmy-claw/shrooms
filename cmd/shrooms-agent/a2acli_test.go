@@ -39,9 +39,11 @@ func TestTheCommandLineRepliesAndTakesEitherTaskForm(t *testing.T) {
 	}))
 	defer srv.Close()
 	c := a2aClient{
-		base:  func(netip.Addr) string { return srv.URL },
-		peers: func() ([]machine, error) { return []machine{{"laptop", netip.MustParseAddr("fd00::1")}, {"proteus", netip.MustParseAddr("fd00::2")}}, nil },
-		sock:  "/nonexistent",
+		base: func(netip.Addr) string { return srv.URL },
+		peers: func() ([]machine, error) {
+			return []machine{{"laptop", netip.MustParseAddr("fd00::1")}, {"proteus", netip.MustParseAddr("fd00::2")}}, nil
+		},
+		sock: "/nonexistent",
 	}
 
 	// reply: onto the task, not a new one; and with the bare form, the
