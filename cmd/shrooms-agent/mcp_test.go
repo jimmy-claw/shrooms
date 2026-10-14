@@ -10,7 +10,9 @@ import (
 	"net/netip"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -18,12 +20,18 @@ import (
 // tools, and each tool against a mesh of one machine — a stand-in agent that
 // lists a session and answers A2A as shrooms-agent does.
 func TestMCPServesTheMeshsAgents(t *testing.T) {
+	// The tools' calls run side by side (serveMCP), so the fake agent below
+	// takes them in any order: what each one asked is told apart by what it
+	// carries, not by when it came.
+	var mu sync.Mutex
 	var asked, first map[string]any
 	var updated map[string]string
 	var updatedPath string
 	var methods []string
 	var dropped, droppedFrom, droppedBody string
 	agentSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
 		if strings.HasSuffix(r.URL.Path, "/drop") {
 			b, _ := io.ReadAll(r.Body)
 			dropped, droppedFrom, droppedBody = r.URL.Path+"?"+r.URL.RawQuery, r.Header.Get(agent.FromSessionHeader), string(b)
@@ -48,8 +56,10 @@ func TestMCPServesTheMeshsAgents(t *testing.T) {
 			json.NewDecoder(r.Body).Decode(&req)
 			methods = append(methods, req.Method)
 			if req.Method == "SendMessage" {
-				asked = req.Params
-				if first == nil {
+				// The answer to an open task names it; the new task does not.
+				if m, _ := req.Params["message"].(map[string]any); m["taskId"] != nil {
+					asked = req.Params
+				} else {
 					first = req.Params
 				}
 			}
@@ -152,7 +162,8 @@ func TestMCPServesTheMeshsAgents(t *testing.T) {
 		updated["state"] != "done" || updated["session"] != "jimmy" {
 		t.Errorf("task_update: %q %v %s %v", s, e, updatedPath, updated)
 	}
-	if strings.Join(methods, ",") != "SendMessage,GetTask,AckTask,SendMessage" {
+	sort.Strings(methods)
+	if strings.Join(methods, ",") != "AckTask,GetTask,SendMessage,SendMessage" {
 		t.Errorf("methods %v", methods)
 	}
 	// An answer to a task names it.
