@@ -3460,9 +3460,15 @@ Item {
                     visible: !!(root.cageStatus && root.cageStatus.shared_host)
                     TextEdit {
                         objectName: "sharedHostPath"
-                        Layout.fillWidth: true
+                        // A maximum, not fillWidth: with fillWidth the OPEN link
+                        // sat at the far edge of the box, reading as a box-level
+                        // action rather than one beside the path (seen in the
+                        // rendered screenshots).
+                        Layout.maximumWidth: sharedCol.width * 0.65
                         text: root.cageStatus && root.cageStatus.shared_host ? root.cageStatus.shared_host : ""
-                        readOnly: true; selectByMouse: true; wrapMode: TextEdit.WrapAnywhere
+                        readOnly: true; selectByMouse: true
+                        // WrapAnywhere broke the path mid-word ("..._d" / "ata").
+                        wrapMode: TextEdit.WrapAtWordBoundaryOrAnywhere
                         color: cBone; font.family: "monospace"; font.pixelSize: root.fs(10)
                     }
                     Lnk {
