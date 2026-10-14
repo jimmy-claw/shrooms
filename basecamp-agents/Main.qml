@@ -3410,10 +3410,15 @@ Item {
             Layout.fillWidth: true
         }
 
-        // The folder every cage sees the same copy of (ADR-052). Shown, not
+        // The folder every cage sees the same copy of (ADR-057). Shown, not
         // configured: there is one, every cage gets it at the same path, and
         // what changes is whether this one may write it. The host path is here
         // so nobody has to go looking for a podman volume by hand.
+        //
+        // The path is a TextEdit with selectByMouse, so it can be copied, and
+        // the open action is a SEPARATE link: a MouseArea child of the TextEdit
+        // swallows the press and makes the path unselectable, which is what the
+        // first version of this did.
         Rectangle {
             objectName: "sharedBox"
             visible: !!(root.cageStatus && root.cageStatus.shared)
@@ -3426,15 +3431,17 @@ Item {
                 id: sharedCol
                 anchors.fill: parent
                 anchors.margins: root.sz(8)
-                spacing: root.sz(4)
+                spacing: root.sz(5)
                 Text {
                     text: "SHARED FOLDER" + (root.cageOpts.sealed ? "   read-only" : "   read-write")
                     color: root.cageOpts.sealed ? cAmber : cPhosphor
                     font.family: "monospace"; font.pixelSize: root.fs(10)
                 }
+                // One sentence, whole: split around the path it read as one
+                // sentence interrupted by a widget.
                 Text {
                     Layout.fillWidth: true
-                    text: "Every cage on that machine sees the same folder at "
+                    text: "Every cage on that machine sees the same folder, at "
                         + (root.cageStatus && root.cageStatus.shared_in ? root.cageStatus.shared_in : "/shared")
                         + " — a clone, a dataset, anything several of them work on."
                         + (root.cageOpts.sealed
@@ -3442,26 +3449,35 @@ Item {
                            : "")
                     color: cAsh; wrapMode: Text.Wrap; font.family: "monospace"; font.pixelSize: root.fs(10)
                 }
-                TextEdit {
-                    objectName: "sharedHostPath"
-                    Layout.fillWidth: true
+                Text {
                     visible: !!(root.cageStatus && root.cageStatus.shared_host)
-                    text: root.cageStatus && root.cageStatus.shared_host ? root.cageStatus.shared_host : ""
-                    readOnly: true; selectByMouse: true; wrapMode: TextEdit.WrapAnywhere
-                    color: cBone; font.family: "monospace"; font.pixelSize: root.fs(10)
-                    // Putting something there is the owner's job and this is the
-                    // path they need: selectable, and openable where that works.
-                    MouseArea {
-                        anchors.fill: parent; acceptedButtons: Qt.LeftButton
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: if (parent.text) Qt.openUrlExternally("file://" + parent.text)
+                    text: "On this machine it is:"
+                    color: cAsh; font.family: "monospace"; font.pixelSize: root.fs(10)
+                }
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: root.sz(8)
+                    visible: !!(root.cageStatus && root.cageStatus.shared_host)
+                    TextEdit {
+                        objectName: "sharedHostPath"
+                        Layout.fillWidth: true
+                        text: root.cageStatus && root.cageStatus.shared_host ? root.cageStatus.shared_host : ""
+                        readOnly: true; selectByMouse: true; wrapMode: TextEdit.WrapAnywhere
+                        color: cBone; font.family: "monospace"; font.pixelSize: root.fs(10)
+                    }
+                    Lnk {
+                        objectName: "sharedOpen"
+                        text: "OPEN"
+                        onClicked: if (root.cageStatus && root.cageStatus.shared_host) Qt.openUrlExternally("file://" + root.cageStatus.shared_host)
                     }
                 }
+                // podman gone, or not answering: say so rather than showing a
+                // box with a header and no path and no reason why.
                 Text {
                     Layout.fillWidth: true
-                    text: "on this machine, and where to put things in it — click to open"
-                    color: cLine; wrapMode: Text.Wrap; font.family: "monospace"; font.pixelSize: root.fs(9)
-                    visible: !!(root.cageStatus && root.cageStatus.shared_host)
+                    visible: !!(root.cageStatus && root.cageStatus.shared && !root.cageStatus.shared_host)
+                    text: "the host path is not known on this machine (podman did not answer) — put things in it from a cage"
+                    color: cAmber; wrapMode: Text.Wrap; font.family: "monospace"; font.pixelSize: root.sz(9)
                 }
             }
         }

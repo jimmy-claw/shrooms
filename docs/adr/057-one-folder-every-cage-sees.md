@@ -1,4 +1,4 @@
-# 052. One folder every cage sees
+# 057. One folder every cage sees
 
 **Status:** accepted 2026-10-14 — built the same day
 

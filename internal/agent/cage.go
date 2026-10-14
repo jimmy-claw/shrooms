@@ -103,6 +103,11 @@ type Cages struct {
 	Socket string
 	// Nft is the nft program closing the agent port in cages; "" finds it.
 	Nft string
+	// sharedMu guards the cached host path below. Its own mutex: Status()
+	// holds c.mu when it asks, so taking c.mu here would deadlock.
+	sharedMu   sync.Mutex
+	sharedPath string
+	sharedAt   time.Time
 	// SealedToken is the file with the Claude Code token sealed cages run
 	// on; "" for sealed-claude-token in the state directory.
 	SealedToken string
@@ -131,7 +136,7 @@ type CageStatus struct {
 	Nix bool `json:"nix,omitempty"`
 	// Sealed: the machine has a token for sealed cages (sealed.go).
 	Sealed bool `json:"sealed,omitempty"`
-	// Shared: the folder every cage sees the same copy of (ADR-052). SharedIn
+	// Shared: the folder every cage sees the same copy of (ADR-057). SharedIn
 	// is where a cage sees it; SharedHost is where the owner does, so the app
 	// can offer to open it rather than making someone find a volume by hand.
 	Shared     bool   `json:"shared,omitempty"`
@@ -225,14 +230,33 @@ func (c *Cages) sharedHostPath() string {
 	if c == nil || c.Podman == "" {
 		return ""
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	out, err := exec.CommandContext(ctx, c.Podman, "volume", "inspect", sharedVolume, "--format", "{{.Mountpoint}}").Output()
-	if err != nil {
-		return ""
+	// Cached: Status() is polled by the apps, and a slow or hung podman would
+	// otherwise stall the whole status view for the timeout, every poll.
+	c.sharedMu.Lock()
+	defer c.sharedMu.Unlock()
+	if time.Since(c.sharedAt) < sharedPathTTL {
+		return c.sharedPath
 	}
-	return strings.TrimSpace(string(out))
+	ctx, cancel := context.WithTimeout(context.Background(), sharedPathTimeout)
+	defer cancel()
+	p := ""
+	if out, err := exec.CommandContext(ctx, c.Podman, "volume", "inspect", sharedVolume, "--format", "{{.Mountpoint}}").Output(); err == nil {
+		p = strings.TrimSpace(string(out))
+	}
+	c.sharedPath, c.sharedAt = p, time.Now()
+	return p
 }
+
+const (
+	// sharedPathTTL is how long a resolved host path is reused. Short enough
+	// that a volume removed and made again is noticed; long enough that a poll
+	// does not shell out each time.
+	sharedPathTTL = 60 * time.Second
+	// sharedPathTimeout bounds the one lookup that is actually made. Shorter
+	// than the poll interval on purpose: a status view should be stale, not
+	// blocked.
+	sharedPathTimeout = 3 * time.Second
+)
 
 // Prepare builds an image of ours, in the background, if it is the one a
 // cage needs and it is not there, or was built from an older Containerfile
@@ -593,7 +617,7 @@ func (m *Manager) cageEnv(s *Session) (string, error) {
 		"SHROOMS_AGENT_SESSION": s.Name(),
 		// The shrooms tools reach agents through this (ADR-044).
 		"SHROOMS_AGENT_PROXY": CageProxyDir + "/proxy.sock",
-		// Where the folder cages share is mounted (ADR-052). Told, not
+		// Where the folder cages share is mounted (ADR-057). Told, not
 		// discovered: a folder nobody is told about is a folder nobody uses.
 		"SHROOMS_SHARED": CageSharedDir,
 		"PATH":           cagePath(home, s.cage.Nix),
