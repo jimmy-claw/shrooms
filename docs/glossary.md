@@ -2,7 +2,7 @@
 
 The words this project uses, each with where it is defined. The definition
 there wins over the line here. `scripts/check-agent-docs.py` checks in CI
-that every path, ADR and `pkg.Symbol` below still exists.
+that every path, ADR and package symbol below (such as `agent.LocalAddr`) still exists.
 
 ## The mesh
 

@@ -38,7 +38,7 @@ def defined(pkg, name):
     """Whether name is declared at package level in internal/pkg or cmd/pkg."""
     dirs = [d for d in (os.path.join(ROOT, 'internal', pkg), os.path.join(ROOT, 'cmd', pkg)) if os.path.isdir(d)]
     if not dirs:
-        return None  # not a package of ours: not a symbol claim
+        return None  # no such package of ours
     decl = re.compile(r'^(func|type|var|const)\s+(\([^)]*\)\s*)?' + re.escape(name) + r'\b|^\t' + re.escape(name) + r'\b',
                       re.M)
     for d in dirs:
@@ -73,8 +73,13 @@ def check(path, make):
             word = words[0]
             m = re.fullmatch(r'([a-z][a-z0-9]*)\.([A-Z]\w*)', word)
             if m:
+                # Written as pkg.Symbol, it is a claim about one of our
+                # packages: a misspelt package fails as surely as a misspelt
+                # symbol (reviewer, #29: `meshx.LocalAddr` used to pass).
                 ok = defined(m.group(1), m.group(2))
-                if ok is False:
+                if ok is None:
+                    fails.append(f'{path}:{n}: `{word}`: no package {m.group(1)} in internal/ or cmd/')
+                elif not ok:
                     fails.append(f'{path}:{n}: `{word}`: {m.group(2)} is not defined in package {m.group(1)}')
                 continue
             if PATHY.match(word) and ('/' in word or word.endswith(EXTS)) and not word.startswith(('http', '-')) \

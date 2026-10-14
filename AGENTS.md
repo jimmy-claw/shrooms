@@ -2,7 +2,7 @@
 
 Short on purpose: everything here is either checked against the repository
 by `scripts/check-agent-docs.py` in CI (paths, `make` targets, ADR numbers,
-`pkg.Symbol` names), or generated from the code (`docs/codemap.md`). If
+package symbols such as `agent.LocalAddr`), or generated from the code (`docs/codemap.md`). If
 something here and the code disagree, the code is right; fix this file, and
 CI will tell you when it no longer matches.
 

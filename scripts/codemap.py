@@ -53,7 +53,11 @@ def render():
              'Do not edit it by hand: fix the package\'s doc comment and run the script',
              'again. CI fails while this file is out of date.', '',
              '| Package | What it is |', '|---|---|']
-    lines += [f'| `{p}` | {d.replace("|", "\\|")} |' for p, d in rows]
+    # Escaped outside the f-string: a backslash inside one is a syntax error
+    # before Python 3.12 (reviewer, #29).
+    for p, d in rows:
+        cell = d.replace('|', '\\|')
+        lines.append(f'| `{p}` | {cell} |')
     return '\n'.join(lines) + '\n'
 
 
