@@ -3409,6 +3409,62 @@ Item {
             contentItem: Text { leftPadding: ghBox.indicator.width + 6; text: ghBox.text; color: cAsh; wrapMode: Text.Wrap; font.family: "monospace"; font.pixelSize: root.fs(10); verticalAlignment: Text.AlignVCenter }
             Layout.fillWidth: true
         }
+
+        // The folder every cage sees the same copy of (ADR-052). Shown, not
+        // configured: there is one, every cage gets it at the same path, and
+        // what changes is whether this one may write it. The host path is here
+        // so nobody has to go looking for a podman volume by hand.
+        Rectangle {
+            objectName: "sharedBox"
+            visible: !!(root.cageStatus && root.cageStatus.shared)
+            Layout.fillWidth: true
+            implicitHeight: sharedCol.implicitHeight + root.sz(16)
+            radius: root.sz(6)
+            color: "transparent"
+            border.color: cLine
+            ColumnLayout {
+                id: sharedCol
+                anchors.fill: parent
+                anchors.margins: root.sz(8)
+                spacing: root.sz(4)
+                Text {
+                    text: "SHARED FOLDER" + (root.cageOpts.sealed ? "   read-only" : "   read-write")
+                    color: root.cageOpts.sealed ? cAmber : cPhosphor
+                    font.family: "monospace"; font.pixelSize: root.fs(10)
+                }
+                Text {
+                    Layout.fillWidth: true
+                    text: "Every cage on that machine sees the same folder at "
+                        + (root.cageStatus && root.cageStatus.shared_in ? root.cageStatus.shared_in : "/shared")
+                        + " — a clone, a dataset, anything several of them work on."
+                        + (root.cageOpts.sealed
+                           ? " A sealed cage reads it and cannot write it: a folder every cage may write is one any of them may poison for the others."
+                           : "")
+                    color: cAsh; wrapMode: Text.Wrap; font.family: "monospace"; font.pixelSize: root.fs(10)
+                }
+                TextEdit {
+                    objectName: "sharedHostPath"
+                    Layout.fillWidth: true
+                    visible: !!(root.cageStatus && root.cageStatus.shared_host)
+                    text: root.cageStatus && root.cageStatus.shared_host ? root.cageStatus.shared_host : ""
+                    readOnly: true; selectByMouse: true; wrapMode: TextEdit.WrapAnywhere
+                    color: cBone; font.family: "monospace"; font.pixelSize: root.fs(10)
+                    // Putting something there is the owner's job and this is the
+                    // path they need: selectable, and openable where that works.
+                    MouseArea {
+                        anchors.fill: parent; acceptedButtons: Qt.LeftButton
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: if (parent.text) Qt.openUrlExternally("file://" + parent.text)
+                    }
+                }
+                Text {
+                    Layout.fillWidth: true
+                    text: "on this machine, and where to put things in it — click to open"
+                    color: cLine; wrapMode: Text.Wrap; font.family: "monospace"; font.pixelSize: root.fs(9)
+                    visible: !!(root.cageStatus && root.cageStatus.shared_host)
+                }
+            }
+        }
     }
 
     // A hand over a link in text: TextEdit shows none of its own. Hover only
