@@ -46,6 +46,11 @@ const (
 	// 3: its socket's directory read-only.
 	sealedLabel      = "xyz.vpavlin.shrooms.sealed"
 	sealedGeneration = "3"
+	// sharedLabel names the shared folder's volume a cage was made with, or
+	// is absent: a cage whose label is not what its session asks for now
+	// (ticked later, or its meshes changed) is made again (ADR-057). Not a
+	// generation: a cage without the folder that is not asked for it stays.
+	sharedLabel = "xyz.vpavlin.shrooms.shared"
 )
 
 // Machine is one machine on the mesh with an agent's address: this one

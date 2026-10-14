@@ -306,5 +306,5 @@ object AgentChat {
 
 /** A session moved into a cage or out of one (Basecamp's cagedNote). */
 fun cagedNote(d: org.json.JSONObject): String =
-    if (d.optBoolean("caged")) "moved into a cage (${cageWords(SessionCage(d.optString("image"), d.optBoolean("nix"), d.optBoolean("github")))})"
+    if (d.optBoolean("caged")) "moved into a cage (${cageWords(SessionCage(d.optString("image"), d.optBoolean("nix"), d.optBoolean("github"), shared = d.optBoolean("shared")))})"
     else "taken out of its cage"

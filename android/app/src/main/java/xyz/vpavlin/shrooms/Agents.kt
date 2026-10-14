@@ -312,7 +312,7 @@ private fun shortImage(img: String): String = when (img) {
 
 /** A cage in a few words (Basecamp's cageWords): "desktop, nix, GitHub login". */
 fun cageWords(c: SessionCage): String =
-    listOf(if (c.sealed) "sealed" else "", shortImage(c.image), if (c.nix) "nix" else "", if (c.github) "GitHub login" else "").filter { it.isNotEmpty() }.joinToString(", ")
+    listOf(if (c.sealed) "sealed" else "", shortImage(c.image), if (c.nix) "nix" else "", if (c.github) "GitHub login" else "", if (c.shared) "shared folder" else "").filter { it.isNotEmpty() }.joinToString(", ")
 
 /** What "in a cage" means, said beside it (Basecamp's cageNote). */
 fun cageNote(c: CageOffer): String {
@@ -642,7 +642,7 @@ private fun SessionRow(s: AgentSession, where: String = "", reachable: Boolean =
     }
 }
 
-/** What a cage is given: its image, nix, the GitHub login — as the machine offers them. "" is the machine's image. */
+/** What a cage is given: its image, nix, the GitHub login, the shared folder — as the machine offers them. "" is the machine's image. */
 @Composable
 private fun CageOptions(offer: CageOffer, opts: SessionCage, modifier: Modifier = Modifier, onChange: (SessionCage) -> Unit) {
     Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -666,6 +666,10 @@ private fun CageOptions(offer: CageOffer, opts: SessionCage, modifier: Modifier 
                 onChange(opts.copy(nix = !opts.nix))
             }
             Tick("GitHub login — your gh login, read-only", opts.github) { onChange(opts.copy(github = !opts.github)) }
+            // The shared folder (ADR-057): never for a sealed cage, which gets nothing local.
+            if (offer.shared) Tick("shared folder — ${offer.sharedIn}, read-write, the same folder as the other caged sessions on that machine that have it and are on the same meshes", opts.shared) {
+                onChange(opts.copy(shared = !opts.shared))
+            }
         }
     }
 }

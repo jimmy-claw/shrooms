@@ -31,13 +31,22 @@ echo "$*" >> $D/calls
 case "$1" in
 image) ` + imageExists + ` ;;
 container) [ -f "$D/c-$3" ]; exit $? ;;
-create) while [ "$1" != "--name" ]; do shift; done; touch "$D/c-$2" ;;
-rm) eval last=\${$#}; rm -f "$D/c-$last" "$D/c-$last.old" ;;
+create) shared=$(echo "$*" | sed -n 's/.*xyz\.vpavlin\.shrooms\.shared=\([^ ]*\).*/\1/p')
+  while [ "$1" != "--name" ]; do shift; done; touch "$D/c-$2"
+  [ -z "$shared" ] || echo "$shared" > "$D/c-$2.shared" ;;
+volume)
+  eval last=\${$#}
+  case "$2" in
+  inspect) [ -f "$D/v-$last" ] || exit 1; cat "$D/v-$last" ;;
+  create) echo "local map[]" > "$D/v-$last" ;;
+  esac ;;
+rm) eval last=\${$#}; rm -f "$D/c-$last" "$D/c-$last.old" "$D/c-$last.shared" ;;
 inspect)
   case "$3" in
   *Pid*) echo 4242 ;;
-  *proxy*) [ -f "$D/c-$4.old" ] || echo 2 ;;
-  *sealed*) echo 1 ;;
+  *proxy*) [ -f "$D/c-$4.old" ] || echo ` + cageGeneration + ` ;;
+  *sealed*) echo ` + sealedGeneration + ` ;;
+  *shared*) cat "$D/c-$4.shared" 2>/dev/null ;;
   esac ;;
 unshare) cat > "$D/nft-rules" ;;
 build) cat > $D/Containerfile ;;

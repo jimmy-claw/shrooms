@@ -193,9 +193,11 @@ this phone.
   container of its own. Root inside, and of the machine only the project, the
   files sent to it and the harness's settings. Its options: the image (the
   machine's own, the workbench, or the desktop one with Xvfb, xdotool and
-  ffmpeg), **nix** (the machine's nix store and profile, when it has nix) and
-  **GitHub login** (your `gh` login, read-only), and **sealed**, for code you
-  do not trust: the internet and nothing local, its own login, results in
+  ffmpeg), **nix** (the machine's nix store and profile, when it has nix),
+  **GitHub login** (your `gh` login, read-only), **shared folder** (one folder
+  at `/shared` that the caged sessions on the same meshes share), and
+  **sealed**, for code you do not trust: the internet and nothing local, its
+  own login, results in
   `~/shrooms-outbox`. Sealed is offered only once the machine has a sealed
   token; until then the form says how to make one. The first caged session
   on a machine builds the image, which takes a few minutes. See

@@ -155,6 +155,10 @@ func (m *Manager) sealedMounts(s *Session) ([]mount, error) {
 		// or the socket to unlink — connect() works through it (2026-10-13).
 		{path: pd, at: CageProxyDir, ro: true},
 	}
+	// NOT the shared folder, not even read-only. A sealed cage holds code nobody
+	// vouches for (ADR-045: "the internet and nothing local"), and the danger
+	// there is EXFILTRATION, not poisoning - so read-only does not help it. What
+	// a sealed cage may reach is stripped, not narrowed.
 	if bin, err := claudeProgram(m.binOf("claude")); err == nil {
 		ms = append(ms, mount{path: filepath.Dir(bin), ro: true})
 	}
@@ -166,13 +170,9 @@ func (m *Manager) sealedMounts(s *Session) ([]mount, error) {
 			}
 		}
 	}
-	var kept []mount
-	for _, x := range ms {
-		if _, err := os.Stat(x.path); err == nil {
-			kept = append(kept, x)
-		}
-	}
-	return kept, nil
+	// One filter for both cages (cage.go): two copies of a rule that decides
+	// what a cage can reach is two chances to be wrong.
+	return keepMounts(ms), nil
 }
 
 // carryConversation copies one conversation — its transcript and what Claude

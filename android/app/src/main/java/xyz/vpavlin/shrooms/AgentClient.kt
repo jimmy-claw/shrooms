@@ -85,11 +85,13 @@ fun quotaClock(ms: Long, now: Long): String {
     return if (t.toLocalDate() == java.time.Instant.ofEpochMilli(now).atZone(z).toLocalDate()) hm else "${t.dayOfMonth}.${t.monthValue}. $hm"
 }
 
-/** A cage: its image, and whether it has the machine's nix and the owner's GitHub login. */
+/** A cage: its image, and whether it has the machine's nix, the owner's GitHub login and the shared folder. */
 data class SessionCage(
     val image: String, val nix: Boolean = false, val github: Boolean = false,
     /** Sealed (ADR-045): for code nobody vouches for; results in [outbox] on the machine. */
     val sealed: Boolean = false, val outbox: String = "",
+    /** The shared folder (ADR-057), at /shared; never for a sealed cage. */
+    val shared: Boolean = false,
 ) {
     fun json(): JSONObject = JSONObject().apply {
         if (image.isNotEmpty()) put("image", image)
@@ -97,11 +99,14 @@ data class SessionCage(
         if (sealed) { put("sealed", true); return@apply }
         if (nix) put("nix", true)
         if (github) put("github", true)
+        if (shared) put("shared", true)
     }
 
     companion object {
         fun parse(o: JSONObject?): SessionCage? = o?.let {
-            SessionCage(it.optString("image"), it.optBoolean("nix"), it.optBoolean("github"), it.optBoolean("sealed"), it.optString("outbox"))
+            // The list names the folder's volume; a note says true.
+            SessionCage(it.optString("image"), it.optBoolean("nix"), it.optBoolean("github"), it.optBoolean("sealed"), it.optString("outbox"),
+                shared = it.opt("shared").let { v -> v == true || (v is String && v.isNotEmpty()) })
         }
     }
 }
@@ -116,6 +121,8 @@ data class CageOffer(
     val images: List<String> = listOf(image), val nix: Boolean = false,
     /** Whether the machine has a token of its own for sealed cages. */
     val sealed: Boolean = false,
+    /** Whether it offers the shared folder (ADR-057), and where a cage sees it. */
+    val shared: Boolean = false, val sharedIn: String = "/shared",
 )
 
 /** What "+ session" offers on a machine: its harnesses, and a cage if it has podman. */
@@ -600,6 +607,7 @@ fun parseOffer(raw: String): SessionOffer {
         val ims = it.optJSONArray("images")
         CageOffer(it.optString("image"), it.optBoolean("ready"), it.optBoolean("building"), it.optString("error"),
             (0 until (ims?.length() ?: 0)).map { i -> ims!!.getString(i) }.ifEmpty { listOf(it.optString("image")) },
-            it.optBoolean("nix"), it.optBoolean("sealed"))
+            it.optBoolean("nix"), it.optBoolean("sealed"),
+            it.optBoolean("shared"), it.optString("shared_in").ifEmpty { "/shared" })
     })
 }

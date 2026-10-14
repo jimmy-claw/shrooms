@@ -65,7 +65,7 @@ A caged session **can still**:
   ends in `_TOKEN` or `_API_KEY` is passed in (below), except GitHub's
   (`GH_*`, `GITHUB_*`), which reach only a cage given the GitHub login.
 
-Two options widen it further, and neither is on by default:
+Three options widen it further, and none is on by default:
 
 - **GitHub login** mounts `~/.config/gh` read-only. The session can then push,
   open pull requests and do anything else your `gh` login can, on every
@@ -76,6 +76,10 @@ Two options widen it further, and neither is on by default:
   daemon, so the cage writes `/nix` itself, as you would. A session can then
   change what is in the store and in your profile, which the rest of the
   machine runs.
+- **shared folder** mounts a folder at `/shared`, read-write, that every
+  other caged session given it sees too, on the same machine and the same
+  meshes (ADR-057). A session can then leave a clone or a dataset there for
+  the others, and anything it writes there the others may read or run.
 
 So a cage is the right tool against an agent that does something careless
 with your machine: `rm -rf` in the wrong place, a global install that breaks
@@ -104,7 +108,7 @@ sealed cage is an ordinary cage, and also:
 - **its own login**: Claude Code runs on the machine's *sealed token*, not
   on your `~/.claude`. The cage has none of your settings, none of your
   other conversations, none of the keys in the agent's environment. Claude
-  Code only; GitHub and nix are not offered.
+  Code only; GitHub, nix and the shared folder are not offered.
 - **asks nothing**: it can finish the tasks it is given, and cannot ask
   another agent for anything or send it a file.
 - **no user namespaces**: a seccomp profile (podman's default, with
@@ -223,7 +227,8 @@ built, or failed to build last time. Under it:
 
 - the image: the machine's, the workbench, or the desktop;
 - **nix**, shown only where the machine has `/nix/store`;
-- **GitHub login**.
+- **GitHub login**;
+- **shared folder**.
 
 Turn on auto-approve as you would for any session. The same choice is offered
 when you take over a conversation started in a terminal.
@@ -243,7 +248,8 @@ curl -X POST "http://[MESH-ADDRESS]:7387/v1/sessions" \
 
 `GET /v1/harnesses` answers with a `cage` object as well: whether cages are
 `available`, the machine's `image`, the `images` offered, `nix`, `ready`,
-`building`, and the `error` of the last failed build.
+`building`, the `error` of the last failed build, and `shared`, `shared_in`
+and `shared_root` for the shared folder (below).
 
 ## Moving a session in and out
 
@@ -266,7 +272,7 @@ curl -X POST "http://[MESH-ADDRESS]:7387/v1/sessions/webapp/cage" \
   harness finds its transcript where it left it.
 - **The old container is deleted**, and everything that was installed in it.
   Changing the options gives the session a fresh container, too: the image,
-  nix and GitHub are fixed when a container is made.
+  nix, GitHub and the shared folder are fixed when a container is made.
 - A note in the conversation records the move and who made it.
 
 ## What the agent inside sees
@@ -285,7 +291,23 @@ curl -X POST "http://[MESH-ADDRESS]:7387/v1/sessions/webapp/cage" \
   daemon. It was mounted until 2026-10-09, and cages made with it are made
   again;
 - with nix: `/nix`, `~/.local/state/nix` and `~/.config/nix`; with GitHub:
-  `~/.config/gh`.
+  `~/.config/gh`;
+- with the shared folder: a podman volume at `/shared`, with
+  `SHROOMS_SHARED=/shared` in its environment.
+
+**The shared folder** (ADR-057) is one per set of meshes: `shrooms-shared`
+for sessions on every mesh, `shrooms-shared-LABELS-HASH` for a session
+limited to some. So a session limited to the home mesh shares nothing with an
+office one. Changing a session's meshes stops it, and its next start makes
+its cage again with the other folder. On the machine it is podman's volume
+directory (`shared_root` in `GET /v1/harnesses`, usually
+`~/.local/share/containers/storage/volumes`), then `VOLUME/_data`; the list
+gives each session's volume as `cage.shared`, and the cage dialog shows the
+path with OPEN. Treat what is in it as written by an agent: a link there can
+point anywhere on your machine when you follow it outside a cage. The agent
+makes the volume itself and refuses one of that name defined any other way
+(a bind to a directory of yours, say), and `podman volume prune` deletes it
+once no container uses it.
 
 Nothing else of your home directory is there. Files the agent writes into the
 project belong to your user outside, even though it wrote them as root.
