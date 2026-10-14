@@ -96,6 +96,11 @@ type handler struct {
 }
 
 func (h *handler) caller(r *http.Request) string {
+	if overSocket(r) {
+		// This machine's own user (ADR-056): named as the machine, so a
+		// session's claim beside it is kept and the board can link it.
+		return h.m.selfName()
+	}
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
 		return ""
@@ -142,7 +147,8 @@ func (h *handler) list(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"sessions": list, "limits": h.m.Limits(), "credits": h.m.Credits()})
+	writeJSON(w, http.StatusOK, map[string]any{"sessions": list, "limits": h.m.Limits(), "credits": h.m.Credits(),
+		"machine": h.m.selfName()})
 }
 
 func (h *handler) create(w http.ResponseWriter, r *http.Request) {

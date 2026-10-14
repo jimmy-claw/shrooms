@@ -447,7 +447,11 @@ Item {
             // it is one machine with one set of sessions.
             if (seen[h.name]) continue
             seen[h.name] = true
-            hosts.push({ name: h.name, mesh: h.mesh, address: h.address,
+            // Without a mesh the machine is "this device" to the view but
+            // its hostname to its sessions, which sign their tasks with it:
+            // named as the agent says, so the board's links find their cards.
+            var hname = (h.address === "local" && h.list && h.list.machine) ? h.list.machine : h.name
+            hosts.push({ name: hname, mesh: h.mesh, address: h.address,
                          sessions: (h.list && h.list.sessions) ? h.list.sessions : [],
                          tasks: (h.tasks && h.tasks.tasks) ? h.tasks.tasks : [] })
             // Where its subscription stands comes with the list: kept for the

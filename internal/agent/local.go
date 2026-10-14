@@ -112,6 +112,16 @@ func remoteAddr(r *http.Request) (netip.Addr, error) {
 	return a.Unmap(), nil
 }
 
+// selfName is this machine's name as its sessions sign their tasks: the
+// mesh's name for it, or the hostname with no mesh (machines, first).
+func (m *Manager) selfName() string {
+	if ms, err := m.machines(); err == nil && len(ms) > 0 {
+		return ms[0].Name
+	}
+	host, _ := os.Hostname()
+	return host
+}
+
 // mcpArgs tell the MCP tools a session starts which daemon and which agent
 // are theirs: this agent's own.
 func (m *Manager) mcpArgs() []string {
