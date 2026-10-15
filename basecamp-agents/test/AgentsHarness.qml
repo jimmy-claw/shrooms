@@ -321,6 +321,9 @@ Item {
             view.setAcceptCaged(true)
             var accepted = top.lastPostPath + " " + top.lastPost
             console.error("ACCEPTCAGED " + accepted + " said=" + view.said)
+            // The model, chosen as the name is renamed: sent as a setting, and noted.
+            view.setModelOpenSession(" venice/claude-haiku-5-5 ")
+            console.error("MODELSET " + top.lastPostPath + " " + top.lastPost + " note=" + view.modelNote({ model: "haiku" }, "phone.office") + "|" + view.modelNote({ model: "" }, ""))
             view.closeDialogs()
             // A turn the harness started itself: labelled by its source.
             var kept = view.agentEventsList

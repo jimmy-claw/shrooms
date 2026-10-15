@@ -20,6 +20,8 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
@@ -861,6 +863,9 @@ private fun SessionScreen(o: OpenSession, onBack: () -> Unit, onRenamed: (String
     var cageOffer by remember { mutableStateOf<CageOffer?>(null) }
     var cageOpts by remember { mutableStateOf(SessionCage("")) }
     var renaming by remember { mutableStateOf<String?>(null) }
+    // The model dialog: what is typed, and the models its machine's sessions run on, to pick from.
+    var modelDraft by remember { mutableStateOf<String?>(null) }
+    var modelsSeen by remember { mutableStateOf<List<String>>(emptyList()) }
     // How many of the last events are loaded: 0 is everything, once asked for;
     // more, to reach a search result further back.
     var tail by remember(o) { mutableStateOf(SESSION_TAIL) }
@@ -1238,6 +1243,55 @@ private fun SessionScreen(o: OpenSession, onBack: () -> Unit, onRenamed: (String
             },
         )
     }
+    modelDraft?.let { draft ->
+        fun choose(model: String) {
+            modelDraft = null
+            scope.launch {
+                withContext(Dispatchers.IO) { runCatching { client.setModel(o.session, model) } }
+                    .onSuccess { info = info?.copy(modelSetting = model, running = false) }
+                    .onFailure { actionError = it.message ?: "could not change the model" }
+            }
+        }
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { modelDraft = null },
+            containerColor = Palette.Panel,
+            title = { Text("Model for ${o.session}", color = Palette.Bone) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Now: ${info?.model?.ifEmpty { "not known yet" } ?: "not known yet"}" +
+                        if (info?.modelSetting.isNullOrEmpty()) ", its machine's default" else ", chosen",
+                        style = MaterialTheme.typography.bodySmall, color = Palette.Ash)
+                    Field("model", draft) { modelDraft = it }
+                    if (modelsSeen.isNotEmpty()) Text("On ${o.host}:", style = MaterialTheme.typography.labelSmall, color = Palette.Ash)
+                    @OptIn(ExperimentalLayoutApi::class)
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        modelsSeen.forEach { m ->
+                            Text(m, style = MaterialTheme.typography.labelSmall, color = Palette.Sky,
+                                modifier = Modifier.border(1.dp, Palette.Line, RoundedCornerShape(10.dp))
+                                    .clickable { modelDraft = m }.padding(horizontal = 10.dp, vertical = 6.dp))
+                        }
+                    }
+                    Text(if ((info?.harness ?: "claude") == "pi") "As pi names it: provider/model, e.g. venice/claude-haiku-5-5."
+                        else "As Claude Code takes it: haiku, sonnet, opus, or a full model name.",
+                        style = MaterialTheme.typography.bodySmall, color = Palette.Ash)
+                    Text("It is stopped, and your next message carries on in the same conversation on the new model.",
+                        style = MaterialTheme.typography.bodySmall, color = Palette.Ash)
+                }
+            },
+            confirmButton = {
+                Text("SET", style = MaterialTheme.typography.labelSmall, color = Palette.Phosphor,
+                    modifier = Modifier.clickable { choose(draft.trim()) }.padding(12.dp))
+            },
+            dismissButton = {
+                Row {
+                    if (!info?.modelSetting.isNullOrEmpty()) Text("DEFAULT", style = MaterialTheme.typography.labelSmall, color = Palette.Ash,
+                        modifier = Modifier.clickable { choose("") }.padding(12.dp))
+                    Text("CANCEL", style = MaterialTheme.typography.labelSmall, color = Palette.Ash,
+                        modifier = Modifier.clickable { modelDraft = null }.padding(12.dp))
+                }
+            },
+        )
+    }
     if (cageAsk) {
         val caged = info?.cage != null
         fun move(to: SessionCage?) {
@@ -1337,15 +1391,20 @@ private fun SessionScreen(o: OpenSession, onBack: () -> Unit, onRenamed: (String
             val facts = listOf(o.host, o.mesh, harnessLabel(i?.harness ?: "claude"),
                 i?.cage?.let { "in a cage (${cageWords(it)})" + if (it.outbox.isNotEmpty()) ", results in ${it.outbox}" else "" } ?: "", shortModel(i?.model ?: ""),
                 contextLabel(i?.contextUsed ?: 0, i?.contextWindow ?: 0)).filter { it.isNotEmpty() }
+            // All of it, wrapped: on one line the model was cut off at the
+            // phone's edge ("ven…"), with no way to read the rest.
             Text(facts.joinToString("  ·  "), style = MaterialTheme.typography.labelSmall, color = Palette.Ash,
-                maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(start = 30.dp))
+                modifier = Modifier.padding(start = 30.dp, end = 8.dp))
             if (i != null && i.contextWindow > 0) {
                 val f = (i.contextUsed.toFloat() / i.contextWindow).coerceIn(0f, 1f)
                 Box(Modifier.padding(start = 30.dp, top = 6.dp, end = 8.dp).fillMaxWidth().height(2.dp).background(Palette.Line)) {
                     Box(Modifier.fillMaxWidth(f).height(2.dp).background(contextColour(i.contextUsed, i.contextWindow)))
                 }
             }
-            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(start = 22.dp)) {
+            // Wrapped onto as many lines as it takes: in one row the controls
+            // past the phone's edge (cage, restart, delete) could not be reached.
+            @OptIn(ExperimentalLayoutApi::class)
+            FlowRow(verticalArrangement = Arrangement.Center, modifier = Modifier.padding(start = 22.dp, end = 8.dp)) {
                 val auto = i?.autoApprove == true
                 // A harness that never asks has nothing to approve.
                 if (i?.approves != false) Link(if (auto) "AUTO-APPROVE" else "asks first", if (auto) Palette.Phosphor else Palette.Ash) {
@@ -1355,7 +1414,6 @@ private fun SessionScreen(o: OpenSession, onBack: () -> Unit, onRenamed: (String
                             .onFailure { actionError = it.message ?: "could not change it" }
                     }
                 }
-                Spacer(Modifier.weight(1f))
                 Link(if (autoPlay) "AUTO-PLAY" else "auto-play", if (autoPlay) Palette.Phosphor else Palette.Ash) {
                     val last = maxOf(info?.lastSeq ?: 0, events.lastOrNull()?.seq ?: 0)
                     Speech.setAutoPlay(ctx, o.host, o.session, !autoPlay, last)
@@ -1382,6 +1440,19 @@ private fun SessionScreen(o: OpenSession, onBack: () -> Unit, onRenamed: (String
                     cageOffer = null
                     cageAsk = true
                     scope.launch { cageOffer = withContext(Dispatchers.IO) { client.offer().cage } }
+                }
+                // The model it runs on (lit when one was chosen for it), as the name is renamed.
+                val chosen = info?.modelSetting.orEmpty()
+                Link(if (chosen.isEmpty()) "model" else "MODEL", if (chosen.isEmpty()) Palette.Ash else Palette.Sky) {
+                    modelDraft = chosen.ifEmpty { info?.model.orEmpty() }
+                    modelsSeen = emptyList()
+                    scope.launch {
+                        modelsSeen = withContext(Dispatchers.IO) {
+                            runCatching { client.sessions() }.getOrDefault(emptyList())
+                                .filter { it.harness == (info?.harness ?: "claude") }
+                                .flatMap { listOf(it.model, it.modelSetting) }.filter { it.isNotEmpty() && it != "<synthetic>" }.distinct().sorted()
+                        }
+                    }
                 }
                 Link("restart", Palette.Ash) { askRestart = true }
                 Link("delete", Palette.Ash) { askDelete = true }

@@ -228,6 +228,8 @@ func (h *handler) update(w http.ResponseWriter, r *http.Request) {
 		Meshes *[]string `json:"meshes"`
 		// A refused sender's request, set aside without allowing it.
 		IgnoreFileRequest *string `json:"ignore_file_request"`
+		// The model it runs on; "" for its harness's default (SetModel).
+		Model *string `json:"model"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		fail(w, http.StatusBadRequest, err)
@@ -246,6 +248,13 @@ func (h *handler) update(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		h.log.Info("meshes changed", "session", s.Name(), "meshes", *req.Meshes, "by", h.caller(r))
+	}
+	if req.Model != nil {
+		if err := s.SetModel(*req.Model, h.caller(r)); err != nil {
+			fail(w, http.StatusConflict, err)
+			return
+		}
+		h.log.Info("model changed", "session", s.Name(), "model", *req.Model, "by", h.caller(r))
 	}
 	if req.IgnoreFileRequest != nil {
 		s.IgnoreFileAsk(*req.IgnoreFileRequest)

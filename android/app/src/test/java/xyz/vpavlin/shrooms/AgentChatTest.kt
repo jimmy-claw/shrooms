@@ -357,3 +357,13 @@ class VoiceItemsTest {
         assertFalse((AgentChat.items(listOf(ev(1, "message", """{"text":"hi","id":"m1"}"""))).single() as ChatItem.You).voice)
     }
 }
+
+class ModelNoteTest {
+    // A model chosen for a session, or set back, is noted in its conversation.
+    @Test fun aModelChangeIsNoted() {
+        val set = AgentEvent(5, "setting", "phone.office", JSONObject("""{"model":"venice/claude-haiku-5-5"}"""))
+        val back = AgentEvent(6, "setting", "", JSONObject("""{"model":""}"""))
+        val notes = AgentChat.items(listOf(set, back)).map { (it as ChatItem.Note).text }
+        assertEquals(listOf("model set to venice/claude-haiku-5-5 from phone.office", "model back to its machine's default"), notes)
+    }
+}

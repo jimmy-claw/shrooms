@@ -48,6 +48,9 @@ type StartOptions struct {
 	// Note is added to the system prompt: who the session is, and how to
 	// deal with other agents (AgentNote).
 	Note string
+	// Model is the one chosen for the session (SetModel); "" for the
+	// harness's default.
+	Model string
 }
 
 // AgentNote is what every session is told about the agents around it.
@@ -158,6 +161,9 @@ func (Claude) Args(o StartOptions) []string {
 	}
 	if o.Note != "" {
 		args = append(args, "--append-system-prompt", o.Note)
+	}
+	if o.Model != "" {
+		args = append(args, "--model", o.Model)
 	}
 	return args
 }

@@ -34,7 +34,24 @@ func (Pi) Bin() string   { return "pi" }
 func (Pi) Caps() Caps { return Caps{} }
 
 func (p Pi) Args(o StartOptions) []string {
-	args := append([]string{"--mode", "rpc"}, p.Extra...)
+	args := []string{"--mode", "rpc"}
+	if o.Model == "" {
+		args = append(args, p.Extra...)
+	} else {
+		// The session's own model in place of the machine's: its --model, and
+		// a --provider that would restrict the lookup to the machine's
+		// provider. The rest of the machine's arguments stay.
+		for i := 0; i < len(p.Extra); i++ {
+			switch a := p.Extra[i]; {
+			case a == "--model" || a == "--provider":
+				i++
+			case strings.HasPrefix(a, "--model=") || strings.HasPrefix(a, "--provider="):
+			default:
+				args = append(args, a)
+			}
+		}
+		args = append(args, "--model", o.Model)
+	}
 	if o.Resume != "" {
 		// By its file where there is one: given an id, pi looks only among
 		// the sessions of the directory it runs in, and says there is none

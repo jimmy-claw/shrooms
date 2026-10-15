@@ -58,6 +58,8 @@ data class AgentSession(
     val fileRequests: List<FileRequest> = emptyList(),
     /** The meshes it is there for, by its machine's labels; empty is every one (ADR-049). */
     val meshes: List<String> = emptyList(),
+    /** The model chosen for it; "" for its harness's default on its machine. */
+    val modelSetting: String = "",
 )
 
 /** A sender a session refused files from, and what it tried to send. */
@@ -208,6 +210,7 @@ class AgentClient(private val address: String) {
                 acceptCaged = s.optBoolean("accept_caged"),
                 acceptFilesFrom = s.optJSONArray("accept_files_from")?.let { a -> (0 until a.length()).map { a.getString(it) } }.orEmpty(),
                 meshes = s.optJSONArray("meshes")?.let { a -> (0 until a.length()).map { a.getString(it) } }.orEmpty(),
+                modelSetting = s.optString("model_setting"),
                 fileRequests = s.optJSONArray("file_requests")?.let { a ->
                     (0 until a.length()).map { val f = a.getJSONObject(it); FileRequest(f.optString("from"), f.optString("name"), f.optLong("size")) }
                 }.orEmpty(),
@@ -274,6 +277,11 @@ class AgentClient(private val address: String) {
     }
 
     /** Whether the session takes tasks from caged agents. */
+    /** The model it runs on; "" goes back to its harness's default. The agent stops it to change it. */
+    fun setModel(session: String, model: String) {
+        request("POST", "/v1/sessions/${enc(session)}/settings", JSONObject().put("model", model).toString())
+    }
+
     fun setAcceptCaged(session: String, on: Boolean) {
         request("POST", "/v1/sessions/${enc(session)}/settings", JSONObject().put("accept_caged", on).toString())
     }

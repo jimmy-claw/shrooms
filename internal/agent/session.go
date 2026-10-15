@@ -67,6 +67,9 @@ type Info struct {
 	Preview string `json:"preview,omitempty"`
 	// Model is the one the conversation runs on, as its harness names it.
 	Model string `json:"model,omitempty"`
+	// ModelSetting is the model chosen for it (SetModel), "" for the
+	// harness's default on its machine.
+	ModelSetting string `json:"model_setting,omitempty"`
 	// Harness runs it ("claude", "pi"), and what that harness can do.
 	Harness string `json:"harness"`
 	Caps    Caps   `json:"caps"`
@@ -140,6 +143,7 @@ type Session struct {
 	acceptFiles []string  // who it takes files from (drop.go)
 	fileAsks    []FileAsk // senders refused lately
 	meshes      []string  // the meshes it is there for; none is all (meshes.go)
+	modelSet    string    // the model chosen for it; "" for its harness's default
 	turns       uint64
 	// ids are the device-made ids of messages and voice notes already taken,
 	// so a device that sends again — it did not hear the answer, the
@@ -251,6 +255,7 @@ type record struct {
 	AcceptCaged *bool    `json:"accept_caged,omitempty"`
 	AcceptFiles []string `json:"accept_files_from,omitempty"`
 	Meshes      []string `json:"meshes,omitempty"`
+	ModelSet    string   `json:"model_setting,omitempty"`
 }
 
 // NewManager loads the sessions kept in stateDir.
@@ -292,6 +297,7 @@ func NewManager(ctx context.Context, log *slog.Logger, stateDir, claudeBin strin
 			s.acceptCaged = r.AcceptCaged
 			s.acceptFiles = r.AcceptFiles
 			s.meshes = r.Meshes
+			s.modelSet = r.ModelSet
 			s.loadEvents()
 			m.sessions[r.Name] = s
 		}
@@ -407,7 +413,7 @@ func (m *Manager) save() error {
 	for _, s := range m.sessions {
 		s.mu.Lock()
 		r := record{Name: s.Name(), Dir: s.dir, ConvID: s.convID, AutoApprove: s.autoApprove, Starred: s.starred,
-			KeepRunning: s.keepRunning, Cage: s.cage, AcceptCaged: s.acceptCaged, AcceptFiles: s.acceptFiles, Meshes: s.meshes}
+			KeepRunning: s.keepRunning, Cage: s.cage, AcceptCaged: s.acceptCaged, AcceptFiles: s.acceptFiles, Meshes: s.meshes, ModelSet: s.modelSet}
 		if s.harness.Name() != "claude" {
 			r.Harness = s.harness.Name()
 		}
@@ -633,7 +639,7 @@ func (s *Session) Info() Info {
 		Harness: s.harness.Name(), Caps: s.harness.Caps(), Starred: s.starred, Turns: s.turns,
 		KeepRunning: s.keepRunning, AcceptCaged: s.acceptsCaged(),
 		AcceptFilesFrom: append([]string(nil), s.acceptFiles...), FileRequests: append([]FileAsk(nil), s.fileAsks...),
-		Meshes: append([]string(nil), s.meshes...)}
+		Meshes: append([]string(nil), s.meshes...), ModelSetting: s.modelSet}
 	if s.cage != nil {
 		in.Cage = &CageInfo{Image: s.cage.Image, Nix: s.cage.Nix, GitHub: s.cage.GitHub, Shared: s.sharedFor(), Sealed: s.cage.Sealed, Outbox: s.cage.Outbox}
 		if in.Cage.Image == "" && s.m.Cages != nil {
@@ -853,7 +859,7 @@ func (s *Session) ensureRunning() error {
 	s.m.mu.Unlock()
 	host, _ := os.Hostname()
 	o := StartOptions{Resume: s.convID, AutoApprove: s.autoApprove && s.harness.Caps().Approve, Session: s.Name(),
-		MCP: s.m.Self, MCPArgs: s.m.mcpArgs(), Note: AgentNote(host, s.Name())}
+		MCP: s.m.Self, MCPArgs: s.m.mcpArgs(), Note: AgentNote(host, s.Name()), Model: s.modelSet}
 	var cage *cageRun
 	if s.cage != nil {
 		var err error
@@ -1339,6 +1345,34 @@ func (s *Session) acceptsCaged() bool {
 		return *s.acceptCaged
 	}
 	return s.cage != nil
+}
+
+// SetModel chooses the model the session runs on; "" goes back to its
+// harness's default on this machine. Kept with the session and given to the
+// harness at every start, so it outlives restarts: a model switched inside a
+// pi session lasted only until the agent next started it with the machine's
+// --model (proteus, 2026-10-15). A running process is stopped, and the next
+// message starts it on the new model, in the same conversation. Not while it
+// works: its turn would be cut off.
+func (s *Session) SetModel(model, by string) error {
+	model = strings.TrimSpace(model)
+	if strings.ContainsAny(model, " \t\n") || strings.HasPrefix(model, "-") {
+		return fmt.Errorf("%q is not a model name", model)
+	}
+	if in := s.Info(); in.State != Idle || in.Pending > 0 {
+		return fmt.Errorf("session %s is %s: change its model once it is idle", s.Name(), in.State)
+	}
+	s.mu.Lock()
+	changed := s.modelSet != model
+	s.modelSet = model
+	s.record("setting", by, map[string]string{"model": model})
+	s.mu.Unlock()
+	if changed {
+		s.stop()
+	}
+	s.m.mu.Lock()
+	defer s.m.mu.Unlock()
+	return s.m.save()
 }
 
 // AcceptsCaged is acceptsCaged, for a caller without the lock.

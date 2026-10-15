@@ -978,6 +978,7 @@ Item {
             else if (e.kind === "caged") add(e, { kind: "note", text: cagedNote(d, e.by) })
             else if (e.kind === "setting" && d.auto_approve !== undefined)
                 add(e, { kind: "note", text: (d.auto_approve ? "auto-approve on" : "auto-approve off") + (e.by ? " from " + e.by : "") })
+            else if (e.kind === "setting" && d.model !== undefined) add(e, { kind: "note", text: modelNote(d, e.by) })
             else if (e.kind === "claude") {
                 if (d.type === "assistant" && d.message && d.message.content) {
                     var c = d.message.content
@@ -1698,6 +1699,39 @@ Item {
         root.saidBad = false
         renamedTo(to)
         return true
+    }
+    // The model a session runs on (the agent's model setting): typed, or picked
+    // from those its machine's sessions of the same harness run on.
+    property var modelsSeen: []
+    function askModel() {
+        if (!agentOpen) return
+        var i = agentInfo || {}
+        modelField.text = i.model_setting || i.model || ""
+        var seen = {}, out = []
+        var r = unwrap(callCore("agentGet", [agentOpen.address, "/v1/sessions"]))
+        var ss = r && r.sessions ? r.sessions : []
+        for (var k = 0; k < ss.length; k++) {
+            if ((ss[k].harness || "claude") !== (i.harness || "claude")) continue
+            var ms = [ss[k].model, ss[k].model_setting]
+            for (var j = 0; j < ms.length; j++)
+                if (ms[j] && ms[j] !== "<synthetic>" && !seen[ms[j]]) { seen[ms[j]] = true; out.push(ms[j]) }
+        }
+        out.sort()
+        root.modelsSeen = out
+        modelDialog.open()
+    }
+    function setModelOpenSession(model) {
+        if (!agentOpen) return false
+        model = String(model || "").trim()
+        var path = "/v1/sessions/" + agentOpen.session + "/settings"
+        if (agentCall("agentPost", [agentOpen.address, path, JSON.stringify({ model: model })]) === null) return false
+        root.said = model ? "session " + agentOpen.session + " now runs on " + model + ", from your next message"
+                          : "session " + agentOpen.session + " is back on its machine's default model"
+        root.saidBad = false
+        return true
+    }
+    function modelNote(d, by) {
+        return (d.model ? "model set to " + d.model : "model back to its machine's default") + (by ? " from " + by : "")
     }
     function renamedTo(to) {
         if (!agentOpen || !to || to === agentOpen.session) return
@@ -2439,7 +2473,7 @@ Item {
     readonly property var boardCardList: boardCards(agentHosts)
     readonly property var boardEdgeList: boardEdges(agentHosts)
     function askDelete() { deleteDialog.open() }
-    function dialogs() { return [usageDialog, voiceDialog, deleteDialog, renameDialog, restartDialog, readingDialog, cageDialog] }
+    function dialogs() { return [usageDialog, voiceDialog, deleteDialog, renameDialog, modelDialog, restartDialog, readingDialog, cageDialog] }
     function closeDialogs() { dialogs().forEach(function(d) { d.close() }) }
     function deleteDialogOpen() { return deleteDialog.visible }
     function deleteOpenSession() {
@@ -2983,6 +3017,71 @@ Item {
                 Lnk { text: "CANCEL"; base: cBone; font.pixelSize: root.fs(12); onClicked: renameDialog.close() }
                 Lnk { text: "RENAME"; base: cPhosphor; font.pixelSize: root.fs(12)
                       onClicked: if (root.renameOpenSession(renameField.text)) renameDialog.close() }
+            }
+        }
+    }
+    Dialog {
+        id: modelDialog
+        modal: true
+        anchors.centerIn: parent
+        width: Math.min(root.sz(520), root.width - root.sz(40))
+        padding: root.sz(20)
+        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+        Overlay.modal: Rectangle { color: Qt.rgba(0, 0, 0, 0.6) }
+        background: Rectangle { color: cPanel; radius: root.sz(12); border.color: cSky }
+        header: Item {}
+        footer: Item {}
+        onOpened: modelField.forceActiveFocus()
+        contentItem: ColumnLayout {
+            spacing: root.sz(12)
+            Text {
+                Layout.fillWidth: true; wrapMode: Text.Wrap
+                text: root.agentOpen ? "Model for \"" + root.agentOpen.session + "\" on " + root.agentOpen.name : ""
+                color: cBone; font.family: "monospace"; font.pixelSize: root.fs(14)
+            }
+            Text {
+                Layout.fillWidth: true; wrapMode: Text.Wrap
+                text: "Now: " + (root.agentInfo && root.agentInfo.model ? root.agentInfo.model : "not known yet")
+                      + (root.agentInfo && root.agentInfo.model_setting ? ", chosen" : ", its machine's default")
+                color: cAsh; font.family: "monospace"; font.pixelSize: root.fs(11)
+            }
+            TextField {
+                id: modelField; objectName: "modelField"; Layout.fillWidth: true; color: cBone; font.family: "monospace"
+                background: Rectangle { color: cPanel; border.color: modelField.activeFocus ? cSky : cLine; radius: 6 }
+                onAccepted: if (root.setModelOpenSession(text)) modelDialog.close()
+            }
+            Flow {
+                Layout.fillWidth: true
+                spacing: root.sz(8)
+                Repeater {
+                    model: root.modelsSeen
+                    delegate: Text {
+                        id: mchip
+                        required property var modelData
+                        text: mchip.modelData
+                        color: cSky; font.family: "monospace"; font.pixelSize: root.fs(10)
+                        leftPadding: root.sz(10); rightPadding: root.sz(10); topPadding: root.sz(5); bottomPadding: root.sz(5)
+                        Rectangle { anchors.fill: parent; z: -1; radius: root.sz(10); color: "transparent"; border.color: cLine }
+                        MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: modelField.text = mchip.modelData }
+                    }
+                }
+            }
+            Text {
+                Layout.fillWidth: true; wrapMode: Text.Wrap
+                text: (root.agentInfo && root.agentInfo.harness === "pi"
+                       ? "As pi names it: provider/model, e.g. venice/claude-haiku-5-5."
+                       : "As Claude Code takes it: haiku, sonnet, opus, or a full model name.")
+                      + " It is stopped, and your next message carries on in the same conversation on the new model."
+                color: cAsh; font.family: "monospace"; font.pixelSize: root.fs(11)
+            }
+            RowLayout {
+                Layout.alignment: Qt.AlignRight
+                spacing: root.sz(20)
+                Lnk { visible: !!(root.agentInfo && root.agentInfo.model_setting); text: "DEFAULT"; base: cAsh; font.pixelSize: root.fs(12)
+                      onClicked: if (root.setModelOpenSession("")) modelDialog.close() }
+                Lnk { text: "CANCEL"; base: cBone; font.pixelSize: root.fs(12); onClicked: modelDialog.close() }
+                Lnk { text: "SET"; base: cSky; font.pixelSize: root.fs(12)
+                      onClicked: if (root.setModelOpenSession(modelField.text)) modelDialog.close() }
             }
         }
     }
@@ -4344,6 +4443,13 @@ Item {
                         Lnk { text: root.agentOpen ? root.agentOpen.session : ""; base: cBone; font.pixelSize: root.fs(16); onClicked: root.askRename() }
                         Pulse { visible: root.agentWorking; }
                         Item { Layout.fillWidth: true }
+                    }
+                    // The switches, wrapped onto more lines when the window is
+                    // narrow (a tablet): in one row the last ones were out of reach.
+                    Flow {
+                        objectName: "sessionSwitches"
+                        Layout.fillWidth: true
+                        spacing: 8
                         Lnk {
                             // A harness that never asks has nothing to approve.
                             visible: !(root.agentInfo && root.agentInfo.caps && !root.agentInfo.caps.approve)
@@ -4372,6 +4478,10 @@ Item {
                         Lnk { readonly property var only: root.agentInfo && root.agentInfo.meshes ? root.agentInfo.meshes : []
                               objectName: "meshesLink"; text: only.length ? "on " + only.join(", ") : "meshes"
                               base: only.length ? cSky : cAsh; onClicked: Qt.callLater(root.openMeshes) }
+                        // The model it runs on, lit when one was chosen for it.
+                        Lnk { readonly property bool chosen: !!(root.agentInfo && root.agentInfo.model_setting)
+                              objectName: "modelLink"; text: chosen ? "MODEL" : "model"; base: chosen ? cSky : cAsh
+                              onClicked: Qt.callLater(root.askModel) }
                         Lnk { text: "restart"; base: cAsh; onClicked: root.askRestart() }
                         Lnk { text: "delete"; base: cAsh; onClicked: root.askDelete() }
                         Lnk { visible: root.agentWorking; text: "■ stop"; base: cRust; onClicked: root.stopTurn() }
@@ -4387,6 +4497,7 @@ Item {
                              ].filter(function(x) { return x !== "" }).join("  ·  ") : ""
                         color: root.agentConnected ? cAsh : cAmber
                         font.family: "monospace"; font.pixelSize: root.fs(10)
+                        Layout.fillWidth: true; wrapMode: Text.Wrap
                     }
                     Rectangle {
                         visible: root.agentInfo !== null && root.agentInfo.context_window > 0

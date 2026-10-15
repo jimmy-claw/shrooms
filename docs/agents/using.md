@@ -155,6 +155,17 @@ sent files. None ticked is every mesh. With some ticked the link reads
 **Rename.** Tap or click the session's name in the header. Its history, its
 unread count, queued messages and what it is doing go with it.
 
+**Model.** "model" in the header chooses the model the session runs on: type
+it, or pick one its machine's sessions already run on. For Claude Code, `haiku`,
+`sonnet`, `opus` or a full name; for pi, `provider/model`, e.g.
+`venice/claude-haiku-5-5`. The session is stopped, and your next message
+carries on in the same conversation on the new model. It stays chosen across
+restarts, and the link reads "MODEL" while it is set; "DEFAULT" goes back to
+the machine's (for pi, the agent's `--pi-args`). Over the API:
+`POST /v1/sessions/NAME/settings {"model": "…"}`, while the session is idle.
+Typing `/model` in a message works for Claude Code, not for pi, which
+receives it as text.
+
 **Delete.** "delete" in the header, or on the phone a long press on the
 session in the list. This stops the session and removes it from the list.
 The Claude Code conversation itself stays on the machine, and can be
