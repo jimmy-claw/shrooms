@@ -4106,15 +4106,17 @@ Item {
         MouseArea { id: qtagMouse; anchors.fill: parent; hoverEnabled: true; acceptedButtons: Qt.NoButton }
     }
 
+    // A blink, not an animation: a running Qt Quick animation repaints the
+    // whole window at vsync for as long as it runs, and every working session
+    // has a dot. On the Duet tablet that was ~53 frames a second and 72% of
+    // the main thread with the view idle; stepped by a Timer it is 2 frames a
+    // second and 25% (duet/duet, 2026-10-15). No infinite animations here.
     component Pulse: Rectangle {
         property color tint: cPhosphor
         width: root.sz(8); height: width; radius: width / 2
         color: tint
-        SequentialAnimation on opacity {
-            loops: Animation.Infinite
-            NumberAnimation { from: 1; to: 0.25; duration: 900 }
-            NumberAnimation { from: 0.25; to: 1; duration: 900 }
-        }
+        Timer { interval: 900; repeat: true; running: parent.visible
+                onTriggered: parent.opacity = parent.opacity > 0.9 ? 0.35 : 1 }
     }
 
     Rectangle {

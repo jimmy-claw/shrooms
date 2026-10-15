@@ -329,6 +329,10 @@ grep -q 'onMovementEnded: root.chatStick = root.followingEnd(chatList.atYEnd)' b
 # The ack path: /a2a/ is not forwarded by the core, so an ack could never work
 # from Basecamp at all. The path itself is pinned above (ACKPATH); this says the
 # call uses it.
+# No infinite animations in the views: one keeps the window repainting at vsync
+# for as long as it runs, ~50 frames a second on the Duet tablet (2026-10-15).
+! grep -n 'Animation.Infinite' basecamp-agents/Main.qml basecamp/Main.qml \
+    || { echo "FAIL: an infinite animation repaints the whole window all the time; blink with a Timer"; exit 1; }
 grep -q 'ackPath(row.id)' basecamp-agents/Main.qml \
     || { echo "FAIL: an ack does not go to the /v1/ path the core forwards"; exit 1; }
 
