@@ -544,6 +544,8 @@ void Hub::follow(std::string address, std::string session, int tail, long long a
             if (sendAll(fd, requestText(address, "GET", target, "", true), err)) {
                 std::string buf;
                 bool inBody = false;
+                bool pushed = false, whole = false;
+                auto lastNotify = std::chrono::steady_clock::now() - std::chrono::seconds(1);
                 char chunk[8192];
                 for (;;) {
                     ssize_t n = ::recv(fd, chunk, sizeof chunk, 0);
@@ -587,7 +589,19 @@ void Hub::follow(std::string address, std::string session, int tail, long long a
                             base_ += static_cast<long long>(drop);
                         }
                         if (!partial) dirty = true;
+                        pushed = true;
+                        if (!partial) whole = true;
                     }
+                    // The view is told, not left to poll: at once for a whole
+                    // event, and at most every 150 ms for pieces of a reply.
+                    if (pushed && onChange) {
+                        auto now = std::chrono::steady_clock::now();
+                        if (whole || now - lastNotify > std::chrono::milliseconds(150)) {
+                            lastNotify = now;
+                            onChange("events");
+                        }
+                    }
+                    pushed = whole = false;
                     if (dirty && std::chrono::steady_clock::now() - lastSave > std::chrono::seconds(5)) {
                         saveHistory(address, session);
                         dirty = false;
@@ -851,6 +865,7 @@ void Hub::finishJob(long id, bool ok, const std::string& path, const std::string
         j.text = text;
         j.error = error;
     }
+    if (onChange) onChange("jobs");
 }
 
 long Hub::upload(const std::string& address, const std::string& session, const std::string& localPath)
@@ -1622,6 +1637,8 @@ void Hub::saveOutbox()
     }
     out.close();
     std::rename((path + ".tmp").c_str(), path.c_str());
+    // Saved on every change to what waits: sent, failed, added, taken out.
+    if (onChange) onChange("outbox");
 }
 
 std::string Hub::keepFile(const std::string& localPath, std::string& err)

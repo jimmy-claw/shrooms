@@ -1175,7 +1175,8 @@ std::string ShroomsCoreImpl::agentWatch(const std::string& address, const std::s
     if (!agents::isAgentAddress(address)) return errorJson("not an agent address", address);
     if (!safeSession(session)) return errorJson("not a session name", session);
     hub().watch(address, session, std::atoi(tail.c_str()));
-    return "{\"ok\":true}";
+    // "events": this core tells the view when something changes (agentChanged).
+    return "{\"ok\":true,\"events\":true}";
 }
 
 std::string ShroomsCoreImpl::agentEvents(const std::string& after)
@@ -1377,4 +1378,10 @@ std::string ShroomsCoreImpl::agentDelete(const std::string& address, const std::
         agents::Hub::forgetHistory(address, path.substr(sessions.size()));
     }
     return "{\"ok\":true}";
+}
+
+void ShroomsCoreImpl::onContextReady()
+{
+    // Set once, before any of the hub's threads runs: they only read it.
+    hub().onChange = [this](const std::string& what) { agentChanged(what); };
 }

@@ -36,6 +36,36 @@ Item {
     // hand the view a stand-in (test/AgentsHarness.qml).
     property var bridge: typeof logos !== "undefined" ? logos : null
     readonly property bool haveCore: !!bridge && !!bridge.callModule
+
+    // Told by the core when something shown changed (agentChanged, core
+    // 0.26): read at once, rather than polling fast to notice. Events are not
+    // guaranteed to arrive in every host, so the poll stays as a safety net:
+    // every 3 s once events have been seen, as before with a core that sends
+    // none. Subscribed after the first paint: a call to the core during
+    // construction freezes the view.
+    property bool coreEvents: false
+    property bool pumpQueued: false
+    function subscribeCore() {
+        if (bridge && bridge.onModuleEvent) bridge.onModuleEvent("shrooms_core", "agentChanged")
+    }
+    function coreChanged(what) {
+        root.coreEvents = true
+        if (!agentOpen) return
+        if (what === "events") {
+            if (pumpQueued) return
+            root.pumpQueued = true
+            Qt.callLater(function() { root.pumpQueued = false; root.pumpAgent() })
+        } else if (what === "jobs") Qt.callLater(root.readJobs)
+        else if (what === "outbox") Qt.callLater(root.refreshOutbox)
+    }
+    Connections {
+        target: root.bridge
+        ignoreUnknownSignals: true
+        function onModuleEventReceived(moduleName, eventName, data) {
+            if (moduleName === "shrooms_core" && eventName === "agentChanged")
+                root.coreChanged(data && data.length ? String(data[0]) : "events")
+        }
+    }
     function callCore(method, args) {
         if (!haveCore) return ""
         try {
@@ -319,7 +349,7 @@ Item {
         callCore("setPref", [key, String(value)])
     }
     // After the first paint: a call during construction freezes the view.
-    Component.onCompleted: Qt.callLater(function() { root.loadPrefs(); root.reload() })
+    Component.onCompleted: Qt.callLater(function() { root.loadPrefs(); root.reload(); root.subscribeCore() })
 
     Rectangle { anchors.fill: parent; color: cVoid }
 
@@ -570,7 +600,9 @@ Item {
         chatModel.clear()
         // fresh: without the copy kept by the core (it is of a session since
         // made again), which a negative tail says.
-        agentCall("agentWatch", [h.address, s, String(fresh && t > 0 ? -t : t)])
+        var watched = agentCall("agentWatch", [h.address, s, String(fresh && t > 0 ? -t : t)])
+        // A core that sends agentChanged says so: poll only as a safety net.
+        if (watched && watched.events) root.coreEvents = true
         root.agentEarlierAsked = false
         root.agentCaughtUp = false
         // The last session's connection says nothing about this one's.
@@ -1567,10 +1599,15 @@ Item {
     // Uploads and voice notes finish in the core's own time: picked up here.
     function pumpJobs() {
         // The outbox and the jobs about once a second while something moves
-        // (the poll's 300 ms); while nothing does, every third 1.5 s tick.
+        // (the poll's 300 ms); while nothing does, every third tick. With
+        // the core's events they come when they change (coreChanged).
         root.outboxTick = (outboxTick + 1) % 3
         if (outboxTick !== 0 && !agentBusy) return
         if (outboxTick === 0) refreshOutbox()
+        if (coreEvents && agentSending === "" && !agentTranscribing && !agentRecording) return
+        readJobs()
+    }
+    function readJobs() {
         var r = unwrap(callCore("agentJobs", []))
         if (!r || !r.jobs) return
         root.agentRecording = !!r.recording
@@ -3395,7 +3432,7 @@ Item {
         // second while a reply streams, so it grows smoothly; every 1.5 s
         // while nothing moves.
         id: sessionPoll
-        interval: root.agentBusy ? 300 : 1500
+        interval: root.coreEvents ? 3000 : root.agentBusy ? 300 : 1500
         running: root.agentsOpen && root.agentOpen !== null && root.haveCore
         repeat: true
         onTriggered: { root.pumpAgent(); root.pumpJobs(); root.pumpSearch(); root.pumpSpeech() }

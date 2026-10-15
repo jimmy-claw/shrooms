@@ -13,6 +13,11 @@
 #include <string>
 #include <thread>
 
+// The codegen writes the bodies of the module's logos_events: (a sidecar
+// <name>_events.cpp that emits through the host); built alone, as here, an
+// event goes nowhere.
+void ShroomsCoreImpl::agentChanged(const std::string&) {}
+
 static int fails = 0;
 #define CHECK(c, ...) do { if (!(c)) { std::printf("FAIL %s: ", #c); std::printf(__VA_ARGS__); std::printf("\n"); fails++; } else std::printf("ok   %s\n", #c); } while (0)
 

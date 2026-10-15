@@ -105,6 +105,10 @@ Item {
         id: view
         anchors.fill: parent
         bridge: QtObject {
+            // As Basecamp's logos object: subscribe, and the event signal.
+            signal moduleEventReceived(string moduleName, string eventName, var data)
+            property var subscribed: []
+            function onModuleEvent(module, name) { subscribed.push(module + "/" + name); return true }
             function callModule(module, method, args) {
                 top.calls.push(method)
                 if (method === "agentWatch") {
@@ -332,6 +336,15 @@ Item {
             var pollHidden = view.pollState()
             view.visible = true
             console.error("POLL busy=" + pollBusy + " hidden=" + pollHidden)
+            // The core's event: read at once, and the poll only a safety net.
+            var callsBefore = top.eventCalls
+            view.bridge.moduleEventReceived("shrooms_core", "agentChanged", ["events"])
+            view.bridge.moduleEventReceived("shrooms_core", "agentChanged", ["events"])
+            var evInterval = view.pollState().split("/")[0]
+            view.coreEvents = false
+            Qt.callLater(function() {
+                console.error("COREEVENT read=" + (top.eventCalls > callsBefore) + " interval=" + evInterval + " subscribed=" + view.bridge.subscribed.join(","))
+            })
             // The model, chosen as the name is renamed: sent as a setting, and noted.
             view.setModelOpenSession(" venice/claude-haiku-5-5 ")
             console.error("MODELSET " + top.lastPostPath + " " + top.lastPost + " note=" + view.modelNote({ model: "haiku" }, "phone.office") + "|" + view.modelNote({ model: "" }, ""))

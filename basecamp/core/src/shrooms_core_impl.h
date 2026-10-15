@@ -595,4 +595,19 @@ public:
     // A session was renamed (here or elsewhere): the copy kept of it and its
     // queued messages move to the new name.
     std::string agentMoveKept(const std::string& address, const std::string& from, const std::string& to);
+
+protected:
+    // Hands the agents hub its way to tell the view (agentChanged).
+    void onContextReady() override;
+
+logos_events:
+    /**
+     * @brief Something the Agents view shows changed: "events" (the
+     * followed session's, at once for a whole event and at most every
+     * 150 ms for pieces of a reply), "jobs" (an upload or voice note done)
+     * or "outbox" (what waits to be sent). The view listens and reads at
+     * once, and polls only slowly besides, since an event can fail to
+     * arrive.
+     */
+    void agentChanged(const std::string& what);
 };
