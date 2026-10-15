@@ -108,6 +108,9 @@ type Cages struct {
 	Socket string
 	// Nft is the nft program closing the agent port in cages; "" finds it.
 	Nft string
+	// SystemdRun starts cages in a systemd scope of their own; "" starts
+	// them as the agent's children (startCage).
+	SystemdRun string
 	// volumesMu guards the cached volume directory below, apart from c.mu:
 	// finding it shells out to podman, which must not hold up the cages.
 	volumesMu  sync.Mutex
@@ -164,7 +167,71 @@ func NewCages(image string) *Cages {
 	if image == "" {
 		image = WorkbenchImage
 	}
-	return &Cages{Podman: p, Image: image, Memory: "4g", CPUs: "2", Pids: 2048, Socket: "/run/shrooms/shrooms.sock"}
+	c := &Cages{Podman: p, Image: image, Memory: "4g", CPUs: "2", Pids: 2048, Socket: "/run/shrooms/shrooms.sock"}
+	// Under systemd (INVOCATION_ID is set for a unit's processes): a scope of
+	// their own for the cages, see startCage.
+	if os.Getenv("INVOCATION_ID") != "" {
+		if sr, err := exec.LookPath("systemd-run"); err == nil {
+			c.SystemdRun = sr
+		}
+	}
+	return c
+}
+
+// startCage starts a cage, and makes sure it has its network.
+//
+// `podman start` forks pasta, which carries the cage's network, in the
+// caller's cgroup: the agent's service. Restarting the agent then killed
+// pasta while the container ran on, and every caged session on the machine
+// had loopback only and "Connection error." on each turn (proteus, the
+// 2026-10-15 rollout). Under systemd the cage is started in a transient scope
+// of its own, which a restart of the agent leaves alone. A cage still running
+// without its network (started before this, or by an agent not under
+// systemd) is stopped and started again.
+func (c *Cages) startCage(ctx context.Context, name string) error {
+	start := func() error {
+		if c.SystemdRun == "" {
+			_, err := c.run(ctx, "start", name)
+			return err
+		}
+		var errb bytes.Buffer
+		cmd := exec.CommandContext(ctx, c.SystemdRun, "--user", "--scope", "--quiet", "--collect",
+			"--description=shrooms cage "+name, "--", c.Podman, "start", name)
+		cmd.Stderr = &errb
+		if err := cmd.Run(); err != nil {
+			return fmt.Errorf("podman start: %s", lastLine(strings.TrimSpace(errb.String()+" "+err.Error())))
+		}
+		return nil
+	}
+	if err := start(); err != nil {
+		return err
+	}
+	if c.hasNetwork(ctx, name) {
+		return nil
+	}
+	c.run(ctx, "stop", "-t", "3", name)
+	if err := start(); err != nil {
+		return err
+	}
+	if !c.hasNetwork(ctx, name) {
+		return fmt.Errorf("the cage %s has no network after starting it again", name)
+	}
+	return nil
+}
+
+// hasNetwork is whether a running cage has an interface besides loopback:
+// none means its pasta is gone.
+func (c *Cages) hasNetwork(ctx context.Context, name string) bool {
+	out, err := c.run(ctx, "exec", name, "cat", "/proc/net/if_inet6")
+	if err != nil {
+		return true // cannot tell; the harness's own errors will say
+	}
+	for _, l := range strings.Split(out, "\n") {
+		if f := strings.Fields(l); len(f) == 6 && f[5] != "lo" {
+			return true
+		}
+	}
+	return false
 }
 
 func (c *Cages) run(ctx context.Context, args ...string) (string, error) {
@@ -679,7 +746,7 @@ func (m *Manager) prepareCage(s *Session, bin string) (*cageRun, error) {
 	if err := m.startCageProxy(s, name); err != nil {
 		return nil, fmt.Errorf("the cage's socket to its agent: %w", err)
 	}
-	if _, err := c.run(ctx, "start", name); err != nil {
+	if err := c.startCage(ctx, name); err != nil {
 		return nil, err
 	}
 	if err := c.closeAgentPort(ctx, name, s.cage.Sealed); err != nil {

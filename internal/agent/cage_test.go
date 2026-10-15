@@ -51,6 +51,11 @@ inspect)
 unshare) cat > "$D/nft-rules" ;;
 build) cat > $D/Containerfile ;;
 exec)
+  case "$*" in *if_inet6*)
+    # A cage whose pasta is gone, once: loopback only.
+    if [ -f "$D/nonet-$2" ]; then rm "$D/nonet-$2"; echo "00000000000000000000000000000001 01 80 10 80       lo"; exit 0; fi
+    echo "fd5eca9e000100000000000000000002 02 40 00 00     eth0"; exit 0 ;;
+  esac
   shift
   while :; do
     case "$1" in
@@ -479,4 +484,36 @@ func TestAnOldCageIsMadeAgain(t *testing.T) {
 		t.Fatalf("an old cage is not made again before it is used: %q", cs)
 	}
 	waitFor(t, s, 0, func(e Event) bool { return e.Kind == "caged" && strings.Contains(string(e.Data), "made again") })
+}
+
+// A cage is started in a systemd scope of its own when the agent runs under
+// systemd, so restarting the agent does not kill its network; and one found
+// running without its network is stopped and started again.
+func TestACageKeepsItsNetwork(t *testing.T) {
+	podman, log := fakePodman(t, false)
+	dir := filepath.Dir(log)
+	sr := filepath.Join(t.TempDir(), "systemd-run")
+	os.WriteFile(sr, []byte("#!/bin/sh\necho \"systemd-run $*\" >> "+log+"\nwhile [ \"$1\" != -- ]; do shift; done; shift; exec \"$@\"\n"), 0o755)
+	m := newTestManager(t, t.TempDir())
+	m.Cages = &Cages{Podman: podman, Image: "localhost/bench:1", Nft: "nft", SystemdRun: sr}
+	if _, err := m.CreateCaged("box", t.TempDir(), "claude", &Cage{}); err != nil {
+		t.Fatal(err)
+	}
+	s, _ := m.Get("box")
+	name := s.cage.Container
+	os.WriteFile(filepath.Join(dir, "nonet-"+name), nil, 0o600)
+	if err := s.Send("hello", "phone"); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, s, 0, func(e Event) bool { return strings.Contains(assistantText(e), "hello") })
+	cs := calls(t, log)
+	scoped := indexOf(cs, `^systemd-run --user --scope .* -- \S+ start `+name+`$`)
+	stop := indexOf(cs, `^stop -t 3 `+name+`$`)
+	again := -1
+	if stop >= 0 {
+		again = indexOf(cs[stop:], `^systemd-run --user --scope .* start `+name+`$`)
+	}
+	if scoped < 0 || stop < scoped || again < 0 {
+		t.Fatalf("the cage is not started in a scope of its own, or not started again without its network: %q", cs)
+	}
 }
