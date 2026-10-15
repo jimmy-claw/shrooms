@@ -362,6 +362,16 @@ func (c *piCodec) Decode(line json.RawMessage) []json.RawMessage {
 			if m.StopReason == "error" && m.ErrorMessage != "" {
 				content = append(content, map[string]any{"type": "text", "text": "error: " + m.ErrorMessage})
 			}
+			// Out of output before a word of answer or a tool call: a model
+			// stuck thinking ("Hmm. Hmm." to 131072 tokens, deepseek on a long
+			// conversation, 2026-10-15) ended as a success with nothing to
+			// show, twice, and the person saw a session that never answered.
+			if m.StopReason == "length" && !answers(content) {
+				c.failed = true
+				content = append(content, map[string]any{"type": "text", "text": fmt.Sprintf(
+					"error: the model used all its output (%d tokens) before it answered, so nothing was said. "+
+						"Send it again; if it happens again, start a fresh conversation or switch to another model.", m.Usage.Output)})
+			}
 			if len(content) == 0 {
 				return nil
 			}
@@ -425,6 +435,17 @@ func (c *piCodec) Decode(line json.RawMessage) []json.RawMessage {
 		}
 	}
 	return nil
+}
+
+// answers is whether an assistant message says or does anything: text, or a
+// tool call. Thinking alone is neither.
+func answers(content []any) bool {
+	for _, x := range content {
+		if b, ok := x.(map[string]any); ok && (b["type"] == "text" || b["type"] == "tool_use") {
+			return true
+		}
+	}
+	return false
 }
 
 // dialog is an extension asking the person something, shown as a question

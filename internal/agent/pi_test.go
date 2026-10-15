@@ -164,6 +164,23 @@ func TestAPiErrorIsShown(t *testing.T) {
 	waitFor(t, s, 0, func(e Event) bool { return assistantText(e) == "error: connection refused" })
 }
 
+// A turn that runs out of output while still thinking, with no answer, says
+// so and ends as failed, rather than as a success with nothing to show.
+func TestAPiTurnOutOfOutputSaysSo(t *testing.T) {
+	_, s := newPiSession(t)
+	s.Send("ramble", "")
+	r := waitFor(t, s, 0, isResult)
+	if claudeType(r) != "result/error_during_execution" {
+		t.Errorf("result %s", r.Data)
+	}
+	waitFor(t, s, 0, func(e Event) bool {
+		return strings.HasPrefix(assistantText(e), "error: the model used all its output (5 tokens) before it answered")
+	})
+	if in := s.Info(); !strings.Contains(in.Preview, "used all its output") {
+		t.Errorf("the session list does not say it: %q", in.Preview)
+	}
+}
+
 // What was said in pi before the agent had the session — read from pi's own
 // session file — is its history, and searchable.
 func TestAPiSessionsHistoryIsItsTranscript(t *testing.T) {

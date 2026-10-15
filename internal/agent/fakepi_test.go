@@ -18,6 +18,7 @@ import (
 //	"run <x>"  → a bash tool call and its result, then "done";
 //	"ask <q>"  → an extension's select dialog, then what was picked;
 //	"fail"     → an assistant message that ended in an error;
+//	"ramble"   → thinking only, until the output ran out;
 //	anything   → "echo: <it>".
 //
 // A prompt sent while a turn runs without streamingBehavior is refused, as pi
@@ -125,6 +126,9 @@ func fakePi() {
 				default:
 					say("picked " + r["value"].(string))
 				}
+			case text == "ramble":
+				emit(map[string]any{"type": "message_end", "message": assistant([]any{
+					map[string]any{"type": "thinking", "thinking": "Hmm. Hmm. Hmm."}}, "length", nil)})
 			case text == "fail":
 				emit(map[string]any{"type": "message_end", "message": assistant([]any{}, "error",
 					map[string]any{"errorMessage": "connection refused"})})
