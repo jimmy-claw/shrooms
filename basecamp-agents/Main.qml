@@ -1552,8 +1552,10 @@ Item {
     }
     // Uploads and voice notes finish in the core's own time: picked up here.
     function pumpJobs() {
-        // The outbox about once a second: it changes as the core sends.
+        // The outbox and the jobs about once a second while something moves
+        // (the poll's 300 ms); while nothing does, every third 1.5 s tick.
         root.outboxTick = (outboxTick + 1) % 3
+        if (outboxTick !== 0 && !agentBusy) return
         if (outboxTick === 0) refreshOutbox()
         var r = unwrap(callCore("agentJobs", []))
         if (!r || !r.jobs) return
@@ -3355,12 +3357,14 @@ Item {
     function nsAutoChecked() { return nsAuto.checked }
     function pollState() { return sessionPoll.interval + "/" + sessionPoll.running }
 
-    // Polled only while the view is on screen, and fast only while something
-    // moves. Every poll is a synchronous call to the core on the GUI thread,
-    // and Basecamp logs each: on the Duet tablet (MT8183) an open session held
-    // its main thread at 75-80% of a core, 12 agentEvents and 12 agentJobs
-    // calls a second (duet/duet, 2026-10-15).
-    readonly property bool shown: root.visible && (!root.Window.window || root.Window.window.visible)
+    // Polled fast only while something moves. Every poll is a synchronous
+    // call to the core on the GUI thread, and Basecamp logs each: on the Duet
+    // tablet (MT8183) an open session held its main thread at 75-80% of a
+    // core, 12 agentEvents and 12 agentJobs calls a second (duet/duet,
+    // 2026-10-15). Not gated on being visible: Basecamp 0.3.1 hosts a view in
+    // a window that reports itself hidden while it is on screen, and the view's
+    // own visible stays true on another tab, so 0.51.1, which went by them,
+    // stopped polling altogether and never listed an agent.
     readonly property bool agentBusy: agentWorking || agentStreaming !== "" || agentSending !== ""
         || agentTranscribing || agentRecording || searchBusy || aloud !== null || speakQueue.length > 0
         || agentQueued.length > 0 || !agentCaughtUp
@@ -3368,7 +3372,7 @@ Item {
         // Finding agents: cheap, since the core probes in the background and
         // this returns at once what it has.
         interval: 3000
-        running: root.agentsOpen && root.haveCore && root.shown
+        running: root.agentsOpen && root.haveCore
         repeat: true; triggeredOnStart: true
         onTriggered: root.refreshAgents()
     }
@@ -3378,7 +3382,7 @@ Item {
         // while nothing moves.
         id: sessionPoll
         interval: root.agentBusy ? 300 : 1500
-        running: root.agentsOpen && root.agentOpen !== null && root.haveCore && root.shown
+        running: root.agentsOpen && root.agentOpen !== null && root.haveCore
         repeat: true
         onTriggered: { root.pumpAgent(); root.pumpJobs(); root.pumpSearch(); root.pumpSpeech() }
     }

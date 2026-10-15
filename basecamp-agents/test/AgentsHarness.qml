@@ -321,12 +321,13 @@ Item {
             view.setAcceptCaged(true)
             var accepted = top.lastPostPath + " " + top.lastPost
             console.error("ACCEPTCAGED " + accepted + " said=" + view.said)
-            // Polled fast only while something moves, and not at all hidden.
+            // Polled fast only while something moves; and still polled when
+            // the host says the view is hidden (Basecamp says so on screen).
             var pollBusy = view.pollState()
             view.visible = false
             var pollHidden = view.pollState()
             view.visible = true
-            console.error("POLL busy=" + pollBusy + " hidden=" + pollHidden + " shown=" + view.pollState())
+            console.error("POLL busy=" + pollBusy + " hidden=" + pollHidden)
             // The model, chosen as the name is renamed: sent as a setting, and noted.
             view.setModelOpenSession(" venice/claude-haiku-5-5 ")
             console.error("MODELSET " + top.lastPostPath + " " + top.lastPost + " note=" + view.modelNote({ model: "haiku" }, "phone.office") + "|" + view.modelNote({ model: "" }, ""))
