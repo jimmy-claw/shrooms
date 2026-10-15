@@ -3353,20 +3353,32 @@ Item {
     function chatModelAt(i) { return chatModel.get(i) }
     function composerText() { return composer.text }
     function nsAutoChecked() { return nsAuto.checked }
+    function pollState() { return sessionPoll.interval + "/" + sessionPoll.running }
 
+    // Polled only while the view is on screen, and fast only while something
+    // moves. Every poll is a synchronous call to the core on the GUI thread,
+    // and Basecamp logs each: on the Duet tablet (MT8183) an open session held
+    // its main thread at 75-80% of a core, 12 agentEvents and 12 agentJobs
+    // calls a second (duet/duet, 2026-10-15).
+    readonly property bool shown: root.visible && (!root.Window.window || root.Window.window.visible)
+    readonly property bool agentBusy: agentWorking || agentStreaming !== "" || agentSending !== ""
+        || agentTranscribing || agentRecording || searchBusy || aloud !== null || speakQueue.length > 0
+        || agentQueued.length > 0 || !agentCaughtUp
     Timer {
         // Finding agents: cheap, since the core probes in the background and
         // this returns at once what it has.
         interval: 3000
-        running: root.agentsOpen && root.haveCore
+        running: root.agentsOpen && root.haveCore && root.shown
         repeat: true; triggeredOnStart: true
         onTriggered: root.refreshAgents()
     }
     Timer {
         // The open session: collected by the core, read here several times a
-        // second so a streamed reply grows smoothly.
-        interval: 300
-        running: root.agentsOpen && root.agentOpen !== null && root.haveCore
+        // second while a reply streams, so it grows smoothly; every 1.5 s
+        // while nothing moves.
+        id: sessionPoll
+        interval: root.agentBusy ? 300 : 1500
+        running: root.agentsOpen && root.agentOpen !== null && root.haveCore && root.shown
         repeat: true
         onTriggered: { root.pumpAgent(); root.pumpJobs(); root.pumpSearch(); root.pumpSpeech() }
     }
