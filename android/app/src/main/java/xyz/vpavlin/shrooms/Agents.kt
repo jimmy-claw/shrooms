@@ -249,27 +249,16 @@ fun meshAddressesOf(name: String): List<String> =
 // --- the look ---------------------------------------------------------------
 
 /**
- * The same spores the mesh screen draws, faint, drifting behind everything:
- * the agents are part of the same app, not a utility bolted onto it.
+ * A dot that blinks: something is happening. Stepped every 900 ms, not
+ * animated: an infinite animation asks for every frame for as long as it
+ * runs, and a screen of working sessions kept the phone drawing at full rate
+ * (as it did Basecamp on the Duet tablet, 2026-10-15). So did the spores that
+ * drifted behind the agents, which are gone.
  */
 @Composable
-private fun SporeBackdrop(alpha: Float = 0.16f) {
-    val motes = remember { sporeField(26) }
-    val t by rememberInfiniteTransition(label = "agents-spores").animateFloat(
-        initialValue = 0f, targetValue = 2f * PI.toFloat(),
-        animationSpec = infiniteRepeatable(tween(60_000, easing = LinearEasing), RepeatMode.Restart),
-        label = "drift",
-    )
-    Canvas(Modifier.fillMaxSize()) { drawSpores(motes, t, alpha) }
-}
-
-/** A spore that breathes: something is happening. */
-@Composable
 private fun Pulse(colour: Color, size: Int = 8) {
-    val a by rememberInfiniteTransition(label = "pulse").animateFloat(
-        0.25f, 1f, infiniteRepeatable(tween(900), RepeatMode.Reverse), label = "a",
-    )
-    Box(Modifier.size(size.dp).background(colour.copy(alpha = a), CircleShape))
+    val on = steppedPhase(1800, 900) < 0.5f
+    Box(Modifier.size(size.dp).background(colour.copy(alpha = if (on) 1f else 0.35f), CircleShape))
 }
 
 private fun meshColour(mesh: String, meshes: List<String>): Color =
@@ -401,7 +390,6 @@ fun AgentsScreen(peers: List<Peer>, onClose: () -> Unit, initial: OpenSession? =
     }
 
     Box(Modifier.fillMaxSize().background(Palette.Void)) {
-        SporeBackdrop()
         if (usageOpen) {
             BackHandler { usageOpen = false }
             UsageScreen(hosts.orEmpty()) { usageOpen = false }

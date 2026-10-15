@@ -70,15 +70,9 @@ fun SporeField(
     // rather than being different noise on each launch.
     val spores = remember(count) { sporeField(count) }
 
-    val t by rememberInfiniteTransition(label = "spores").animateFloat(
-        initialValue = 0f,
-        targetValue = 2f * PI.toFloat(),
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 14_000, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart,
-        ),
-        label = "drift",
-    )
+    // Stepped eight times a second, not animated: it shows for as long as a
+    // mesh has no peers, which can be all day (2026-10-15).
+    val t = steppedPhase(14_000, 125, 2f * PI.toFloat())
 
     Column(
         modifier = modifier,
@@ -144,4 +138,20 @@ internal fun DrawScope.drawSpores(spores: List<Spore>, t: Float, alpha: Float = 
         drawCircle(color = c.copy(alpha = 0.14f * alpha), radius = s.size * 3.2f, center = p)
         drawCircle(color = c.copy(alpha = 0.85f * alpha), radius = s.size, center = p)
     }
+}
+
+/**
+ * A phase in [0, scale) that goes round every [periodMs], stepped every
+ * [stepMs]: motion that asks for a frame a few times a second, where an
+ * infinite animation asks for every one for as long as it runs.
+ */
+@Composable
+internal fun steppedPhase(periodMs: Long, stepMs: Long, scale: Float = 1f): Float {
+    val v by androidx.compose.runtime.produceState(0f, periodMs, stepMs, scale) {
+        while (true) {
+            value = (System.currentTimeMillis() % periodMs).toFloat() / periodMs * scale
+            kotlinx.coroutines.delay(stepMs)
+        }
+    }
+    return v
 }

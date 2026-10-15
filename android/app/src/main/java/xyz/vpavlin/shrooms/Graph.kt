@@ -65,29 +65,12 @@ fun MeshGraph(
 ) {
     val measurer = rememberTextMeasurer()
 
-    // A slow pulse on live links. Motion only where traffic is actually
-    // flowing, so an idle screen is still.
-    val pulse by rememberInfiniteTransition(label = "pulse").animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(tween(2600, easing = LinearEasing), RepeatMode.Restart),
-        label = "pulse",
-    )
-
-    // The slow wander, shared by the peers and the spores behind them. Much
-    // slower than the pulse: the pulse is traffic, this is the thing being
-    // alive. Same period as the joining screen, so the two read as one place.
-    val drift by rememberInfiniteTransition(label = "drift").animateFloat(
-        initialValue = 0f,
-        targetValue = 2f * PI.toFloat(),
-        animationSpec = infiniteRepeatable(tween(19_000, easing = LinearEasing), RepeatMode.Restart),
-        label = "wander",
-    )
-
-    // Spores drifting behind the mesh, at a fraction of the joining screen's
-    // presence. There they are the subject; here they are the substrate the
-    // mesh grows in, and anything more would compete with the peers.
-    val motes = remember { sporeField(9) }
+    // A slow pulse on live links, and the peers' slow wander. Stepped a few
+    // times a second, not animated: an infinite animation asks for every frame
+    // for as long as the screen is open (2026-10-15). The spores that drifted
+    // behind the mesh are gone for the same reason.
+    val pulse = steppedPhase(2600, 100)
+    val drift = steppedPhase(19_000, 200, 2f * PI.toFloat())
 
     // Where each peer was actually drawn, for hit testing. A plain list rather
     // than state: the draw pass writes it and the tap handler reads it, and
@@ -124,9 +107,6 @@ fun MeshGraph(
         ) {
             val centre = Offset(size.width / 2f, size.height / 2f)
             val radius = min(size.width, size.height) / 2f * 0.66f
-
-            // The substrate, first and faintest.
-            drawSpores(motes, drift, alpha = 0.22f)
 
             // Every position for this frame, computed once: the links, the
             // nodes and the hit test must agree, and recomputing the wander
