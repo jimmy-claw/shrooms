@@ -249,16 +249,15 @@ fun meshAddressesOf(name: String): List<String> =
 // --- the look ---------------------------------------------------------------
 
 /**
- * A dot that blinks: something is happening. Stepped every 900 ms, not
- * animated: an infinite animation asks for every frame for as long as it
- * runs, and a screen of working sessions kept the phone drawing at full rate
- * (as it did Basecamp on the Duet tablet, 2026-10-15). So did the spores that
- * drifted behind the agents, which are gone.
+ * A lit dot: something is happening. Still, as in Basecamp: beside the word
+ * it says enough, and anything that moves keeps the screen drawing; an
+ * infinite animation asks for every frame for as long as it runs (Basecamp
+ * on the Duet tablet, 2026-10-15). The spores that drifted behind the agents
+ * are gone for the same reason.
  */
 @Composable
 private fun Pulse(colour: Color, size: Int = 8) {
-    val on = steppedPhase(1800, 900) < 0.5f
-    Box(Modifier.size(size.dp).background(colour.copy(alpha = if (on) 1f else 0.35f), CircleShape))
+    Box(Modifier.size(size.dp).background(colour, CircleShape))
 }
 
 private fun meshColour(mesh: String, meshes: List<String>): Color =

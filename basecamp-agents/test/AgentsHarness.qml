@@ -11,6 +11,7 @@ Item {
 
     property string out: Qt.application.arguments[Qt.application.arguments.length - 1]
     property int eventCalls: 0
+    property bool partialOnly: false
 
     readonly property var hosts: [{
         name: "laptop", mesh: "office", address: "fdb0:9afc:a5ef:388c:8264:7716:36fc:64eb",
@@ -211,6 +212,9 @@ Item {
                     error: "", kept: 1759500000000, epoch: 0, events: Number(args[0]) >= 3 ? [] : [ev(50, "message", { text: "old" }), ev(51, "message", { text: "older" }), ev(52, "message", { text: "oldest" })] })
                 if (method === "agentEvents" && top.keptPhase === 2) return JSON.stringify({ next: 7, more: false, connected: true,
                     error: "", kept: 0, epoch: 5, events: Number(args[0]) >= 7 ? [] : top.events.slice(0, 4) })
+                // Only pieces of a reply as it streams.
+                if (method === "agentEvents" && top.partialOnly) return JSON.stringify({ next: Number(args[0]), more: false, connected: true, error: "",
+                    events: [{ seq: 0, kind: "partial", data: { text: " more" } }, { seq: 0, kind: "partial", data: { text: " words" } }] })
                 if (method === "agentEvents") {
                     top.eventCalls++
                     var after = Number(args[0])
@@ -338,6 +342,13 @@ Item {
             var hb = view.row(view.chatItems()[0])
             console.error("OUTSIDE=" + hb.outside + "," + hb.by)
             view.agentEventsList = kept
+            // A stream alone grows the streaming row and leaves the conversation as it is.
+            var before = view.rebuilds, was = view.agentStreaming
+            top.partialOnly = true
+            view.pumpAgent()
+            top.partialOnly = false
+            console.error("STREAMONLY rebuilt=" + (view.rebuilds - before) + " grew=" + (view.agentStreaming === was + " more words"))
+            view.agentStreaming = was
             console.error("STREAMING=[" + view.agentStreaming + "] WORKING=" + view.agentWorking
                           + " CONTEXT=" + view.contextLabel(view.agentInfo.context_used, view.agentInfo.context_window)
                           + " MODEL=" + view.shortModel(view.agentInfo.model))

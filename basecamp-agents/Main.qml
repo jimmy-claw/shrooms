@@ -641,15 +641,27 @@ Item {
             fetchEarlier()
             return
         }
-        var evs = root.agentEventsList.slice()
         var streaming = root.agentStreaming
+        var fresh = []
         for (var i = 0; i < r.events.length; i++) {
             var e = r.events[i]
             if (e.kind === "partial") { streaming += (e.data && e.data.text) || ""; continue }
             var t = e.data ? e.data.type : ""
             if (e.kind === "claude" && (t === "assistant" || t === "result")) streaming = ""
-            evs.push(e)
+            fresh.push(e)
         }
+        // Only pieces of the reply as it streams: the streaming row grows, and
+        // the conversation is left as it is. Rebuilding it from every event on
+        // each tick of a stream cost the whole conversation, three times a
+        // second, on the GUI thread (85% of a core on the Duet tablet while a
+        // session streamed, 2026-10-15).
+        if (fresh.length === 0) {
+            root.agentNext = r.next
+            root.agentStreaming = streaming
+            if (r.more) Qt.callLater(pumpAgent)
+            return
+        }
+        var evs = root.agentEventsList.concat(fresh)
         // The machine's own new events (not the copy kept here): auto-play.
         if (!(r.kept > 0)) heardEvents(r.events)
         root.agentNext = r.next
@@ -1017,7 +1029,9 @@ Item {
     // Updates the model in place where it can: rows are only ever appended or
     // changed (a prompt being answered), so the view keeps its place. History
     // arriving after the events is the one case that rebuilds it.
+    property int rebuilds: 0   // for the harness: a stream alone must not rebuild
     function rebuildChat() {
+        root.rebuilds++
         var items = chatItems()
         var i = 0
         for (; i < chatModel.count && i < items.length; i++) {
@@ -4106,17 +4120,15 @@ Item {
         MouseArea { id: qtagMouse; anchors.fill: parent; hoverEnabled: true; acceptedButtons: Qt.NoButton }
     }
 
-    // A blink, not an animation: a running Qt Quick animation repaints the
-    // whole window at vsync for as long as it runs, and every working session
-    // has a dot. On the Duet tablet that was ~53 frames a second and 72% of
-    // the main thread with the view idle; stepped by a Timer it is 2 frames a
-    // second and 25% (duet/duet, 2026-10-15). No infinite animations here.
+    // A lit dot, still: beside "WORKING" or "NEEDS YOU" it says enough, and
+    // anything that moves repaints the window. A running Qt Quick animation
+    // repaints all of it at vsync for as long as it runs: on the Duet tablet
+    // ~53 frames a second and 72% of the main thread with the view idle
+    // (duet/duet, 2026-10-15). No infinite animations here.
     component Pulse: Rectangle {
         property color tint: cPhosphor
         width: root.sz(8); height: width; radius: width / 2
         color: tint
-        Timer { interval: 900; repeat: true; running: parent.visible
-                onTriggered: parent.opacity = parent.opacity > 0.9 ? 0.35 : 1 }
     }
 
     Rectangle {

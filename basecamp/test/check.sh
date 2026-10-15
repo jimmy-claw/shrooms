@@ -389,6 +389,7 @@ expect "COPYCODE links=2 first=ssh-keygen -t ed25519 copied=true said=copied 2 l
 expect "QUOTATAG shown=1 label=QUOTA · back T,,QUOTA" "a session out of quota is not set apart in the session list"
 expect "CAGETAG shown=1 words=desktop, GitHub login" "a caged session is not marked in the session list"
 expect 'ACCEPTCAGED /v1/sessions/shrooms/settings {"accept_caged":true} said=session shrooms takes tasks from caged agents' "whether a session takes tasks from caged agents cannot be set"
+expect 'STREAMONLY rebuilt=0 grew=true' "pieces of a streaming reply rebuild the whole conversation (85% of a core on the Duet while streaming)"
 expect 'POLL busy=300/true hidden=300/true' "the open session is not polled fast while it works, or stops when the host says the view is hidden (Basecamp 0.3.1 says so while it is on screen: 0.51.1 never listed an agent)"
 expect 'MODELSET /v1/sessions/shrooms/settings {"model":"venice/claude-haiku-5-5"} note=model set to haiku from phone.office|model back to its machine'"'"'s default' "a session's model cannot be chosen, or its change is not noted"
 expect 'CAGED open=true offer=true moved=/v1/sessions/shrooms/cage {"cage":{"image":"localhost/shrooms-workbench:desktop","github":true}} out={"cage":null}' "a session is not moved into a cage with its options, or out of it"
