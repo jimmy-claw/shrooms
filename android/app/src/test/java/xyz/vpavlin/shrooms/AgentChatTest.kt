@@ -386,3 +386,11 @@ class MeshPickTest {
         assertEquals(listOf("laptop@home", "laptop@office"), merged.map { it.name + "@" + it.mesh })
     }
 }
+
+class RateLabelTest {
+    @Test fun theModelsSpeedReads() {
+        assertEquals("42.4 tok/s", rateLabel(42.37))
+        assertEquals("186 tok/s", rateLabel(186.4))
+        assertEquals("", rateLabel(0.0))
+    }
+}

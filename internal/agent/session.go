@@ -71,6 +71,9 @@ type Info struct {
 	// ModelSetting is the model chosen for it (SetModel), "" for the
 	// harness's default on its machine.
 	ModelSetting string `json:"model_setting,omitempty"`
+	// TokensPerSecond is how fast its model wrote in its last turn: output
+	// tokens over the time spent generating (rate.go); 0 when not known.
+	TokensPerSecond float64 `json:"tokens_per_second,omitempty"`
 	// Harness runs it ("claude", "pi"), and what that harness can do.
 	Harness string `json:"harness"`
 	Caps    Caps   `json:"caps"`
@@ -140,6 +143,11 @@ type Session struct {
 	// cageGateway: its cage reaches its model through the gateway this
 	// start (ADR-059); set by prepareCage, read by cageEnv.
 	cageGateway bool
+	// The model's speed: time spent generating this turn (from its stream's
+	// pieces), and the last turn's output tokens per second (rate.go).
+	genTime   time.Duration
+	lastPiece time.Time
+	tokRate   float64
 	// acceptCaged: whether it takes tasks from caged agents; nil for the
 	// default, which is yes for a caged session and no for one outside
 	// (ADR-044).
@@ -646,7 +654,7 @@ func (s *Session) Info() Info {
 		Harness: s.harness.Name(), Caps: s.harness.Caps(), Starred: s.starred, Turns: s.turns,
 		KeepRunning: s.keepRunning, AcceptCaged: s.acceptsCaged(),
 		AcceptFilesFrom: append([]string(nil), s.acceptFiles...), FileRequests: append([]FileAsk(nil), s.fileAsks...),
-		Meshes: append([]string(nil), s.meshes...), ModelSetting: s.modelSet}
+		Meshes: append([]string(nil), s.meshes...), ModelSetting: s.modelSet, TokensPerSecond: s.tokRate}
 	if s.cage != nil {
 		in.Cage = &CageInfo{Image: s.cage.Image, Nix: s.cage.Nix, GitHub: s.cage.GitHub, Shared: s.sharedFor(), Sealed: s.cage.Sealed, Outbox: s.cage.Outbox,
 			Memory: s.cage.Memory, CPUs: s.cage.CPUs}
@@ -1197,8 +1205,12 @@ func (s *Session) read(p *proc) {
 		json.Unmarshal(raw, &head)
 
 		if head.Type == "stream_event" {
+			s.timeDelta(raw)
 			s.partial(raw)
 			continue
+		}
+		if head.Type == "result" {
+			s.turnRate(raw)
 		}
 		if head.Type == outsideTurn {
 			// A turn the harness started itself: an extension's heartbeat, a

@@ -396,6 +396,7 @@ expect 'MESHPICK meshes=home,office home=k11@home,laptop@home all=2 switch=1' "t
 expect 'HERE first=k11:true second=laptop:false' "the machine Basecamp runs on is not first in the list, or not marked"
 expect 'COREEVENT read=true interval=3000 subscribed=shrooms_core/agentChanged' "the view does not subscribe to the core's agentChanged, read on it, or fall back to a slow safety-net poll"
 expect 'POLL busy=300/true hidden=300/true' "the open session is not polled fast while it works, or stops when the host says the view is hidden (Basecamp 0.3.1 says so while it is on screen: 0.51.1 never listed an agent)"
+expect 'RATE 42.4 tok/s|186 tok/s||' "the model's speed is not shown, or shown when not known"
 expect 'CAGELIMITS /v1/sessions/shrooms/cage/limits {"memory":"16g","cpus":"8"}' "a cage's memory and CPUs cannot be set"
 expect 'MODELSET /v1/sessions/shrooms/settings {"model":"venice/claude-haiku-5-5"} note=model set to haiku from phone.office|model back to its machine'"'"'s default' "a session's model cannot be chosen, or its change is not noted"
 expect 'CAGED open=true offer=true moved=/v1/sessions/shrooms/cage {"cage":{"image":"localhost/shrooms-workbench:desktop","github":true}} out={"cage":null}' "a session is not moved into a cage with its options, or out of it"

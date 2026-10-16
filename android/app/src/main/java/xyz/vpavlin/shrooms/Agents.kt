@@ -334,6 +334,13 @@ fun cageNote(c: CageOffer): String {
     }
 }
 
+/** How fast its model wrote in its last turn, as the header shows it ("" when not known). */
+fun rateLabel(r: Double): String = when {
+    !(r > 0) -> ""
+    r >= 100 -> "${Math.round(r)} tok/s"
+    else -> "${Math.round(r * 10) / 10.0} tok/s"
+}
+
 fun shortModel(m: String): String =
     m.removePrefix("claude-").replace("[", " ").replace("]", "").replace(Regex("""-\d{8}$"""), "")
 
@@ -1436,6 +1443,7 @@ private fun SessionScreen(o: OpenSession, onBack: () -> Unit, onRenamed: (String
             }
             val facts = listOf(o.host, o.mesh, harnessLabel(i?.harness ?: "claude"),
                 i?.cage?.let { "in a cage (${cageWords(it)})" + if (it.outbox.isNotEmpty()) ", results in ${it.outbox}" else "" } ?: "", shortModel(i?.model ?: ""),
+                rateLabel(i?.tokensPerSecond ?: 0.0),
                 contextLabel(i?.contextUsed ?: 0, i?.contextWindow ?: 0)).filter { it.isNotEmpty() }
             // All of it, wrapped: on one line the model was cut off at the
             // phone's edge ("ven…"), with no way to read the rest.

@@ -60,6 +60,8 @@ data class AgentSession(
     val meshes: List<String> = emptyList(),
     /** The model chosen for it; "" for its harness's default on its machine. */
     val modelSetting: String = "",
+    /** How fast its model wrote in its last turn, output tokens a second; 0 when not known. */
+    val tokensPerSecond: Double = 0.0,
 )
 
 /** A sender a session refused files from, and what it tried to send. */
@@ -216,6 +218,7 @@ class AgentClient(private val address: String) {
                 acceptFilesFrom = s.optJSONArray("accept_files_from")?.let { a -> (0 until a.length()).map { a.getString(it) } }.orEmpty(),
                 meshes = s.optJSONArray("meshes")?.let { a -> (0 until a.length()).map { a.getString(it) } }.orEmpty(),
                 modelSetting = s.optString("model_setting"),
+                tokensPerSecond = s.optDouble("tokens_per_second", 0.0),
                 fileRequests = s.optJSONArray("file_requests")?.let { a ->
                     (0 until a.length()).map { val f = a.getJSONObject(it); FileRequest(f.optString("from"), f.optString("name"), f.optLong("size")) }
                 }.orEmpty(),

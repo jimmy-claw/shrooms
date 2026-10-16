@@ -361,6 +361,8 @@ Item {
             Qt.callLater(function() {
                 console.error("COREEVENT read=" + (top.eventCalls > callsBefore) + " interval=" + evInterval + " subscribed=" + view.bridge.subscribed.join(","))
             })
+            // The model's speed, as the header shows it.
+            console.error("RATE " + view.rateLabel(42.37) + "|" + view.rateLabel(186.4) + "|" + view.rateLabel(0) + "|" + view.rateLabel(undefined))
             // A cage's limits, set where it is.
             view.setCageLimits(" 16g ", "8")
             console.error("CAGELIMITS " + top.lastPostPath + " " + top.lastPost)

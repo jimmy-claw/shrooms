@@ -1523,6 +1523,11 @@ Item {
         root.cageOpts = c ? { image: c.image, nix: !!c.nix, github: !!c.github, shared: !!c.shared, sealed: !!c.sealed } : { image: "", nix: false, github: false, shared: false, sealed: false }
         cageDialog.open()
     }
+    // How fast its model wrote in its last turn (the agent's rate.go).
+    function rateLabel(r) {
+        if (!(r > 0)) return ""
+        return (r >= 100 ? Math.round(r) : Math.round(r * 10) / 10) + " tok/s"
+    }
     // A caged session's memory and CPUs, set on its cage where it is.
     function setCageLimits(memory, cpus) {
         if (!agentOpen) return false
@@ -4718,6 +4723,7 @@ Item {
                               root.agentInfo ? root.harnessLabel(root.agentInfo.harness) : "",
                               root.agentInfo && root.agentInfo.cage ? "in a cage (" + root.cageWords(root.agentInfo.cage) + ")" + (root.agentInfo.cage.outbox ? ", results in " + root.agentInfo.cage.outbox : "") : "",
                               root.agentInfo ? root.shortModel(root.agentInfo.model) : "",
+                              root.agentInfo ? root.rateLabel(root.agentInfo.tokens_per_second) : "",
                               root.agentInfo ? root.contextLabel(root.agentInfo.context_used, root.agentInfo.context_window) : "",
                               root.agentKept > 0 ? "offline — as it was " + root.keptWhen(root.agentKept) : "",
                               root.agentConnected ? "" : ("reconnecting" + (root.agentProblem ? " — " + root.agentProblem : ""))

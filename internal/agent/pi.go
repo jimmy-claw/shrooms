@@ -347,6 +347,13 @@ func (c *piCodec) Decode(line json.RawMessage) []json.RawMessage {
 			return []json.RawMessage{out(map[string]any{"type": "stream_event", "event": map[string]any{
 				"type": "content_block_delta", "delta": map[string]any{"type": "text_delta", "text": e.Delta.Delta}}})}
 		}
+		// Its thinking and tool calls as they stream too, in Claude Code's
+		// names: not shown (only text is, session.partial), but timed, so the
+		// model's speed counts the time it spent on them (rate.go).
+		if kind := map[string]string{"thinking_delta": "thinking_delta", "toolcall_delta": "input_json_delta"}[e.Delta.Type]; kind != "" {
+			return []json.RawMessage{out(map[string]any{"type": "stream_event", "event": map[string]any{
+				"type": "content_block_delta", "delta": map[string]any{"type": kind}}})}
+		}
 	case "message_end":
 		switch e.Message.Role {
 		case "assistant":
