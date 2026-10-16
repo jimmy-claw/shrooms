@@ -276,6 +276,60 @@ func TestARefusedNewSessionFailsTheTurnAndIsNotRetried(t *testing.T) {
 	}
 }
 
+// An interrupt while a turn is still waiting for the session must not be a
+// button that does nothing. There is nothing at ACP to cancel yet, so the
+// queued turn is dropped — and the turn is ENDED, because a turn the codec
+// drops without a result leaves the session reading as working for ever.
+func TestAnInterruptBeforeTheSessionExistsEndsTheWaitingTurn(t *testing.T) {
+	c := OpenCode{}.Codec(StartOptions{}).(*openCodec)
+	if got := c.Turn("are you there?"); len(got) != 0 {
+		t.Fatalf("a turn before the session exists must wait: %s", mustJSON(got))
+	}
+	if got := c.Interrupt(); len(got) != 0 {
+		t.Errorf("nothing to cancel at ACP yet, so nothing to write: %s", mustJSON(got))
+	}
+	_, _ = c.Decode(rawJSON(ack(c.Start()[0], map[string]any{})))
+	msgs, write := c.Decode(rawJSON(ackID(c.openID, map[string]any{
+		"sessionId": "ses_x", "configOptions": []any{}})))
+
+	for _, w := range write {
+		if strings.Contains(mustJSON(w), "session/prompt") {
+			t.Errorf("a cancelled turn was sent anyway: %s", mustJSON(w))
+		}
+	}
+	if !strings.Contains(joinRaw(msgs), "error_during_execution") ||
+		!strings.Contains(joinRaw(msgs), "cancelled before the session was open") {
+		t.Errorf("the cancelled turn was not ended, or not said: %s", joinRaw(msgs))
+	}
+}
+
+// Usage accumulates across turns of one session — the figure the mesh's
+// accounting reads is the session's, not the last turn's. Found by the
+// reviewer: nothing exercised two turns on one session, so overwriting instead
+// of adding would have shipped silently.
+func TestUsageAccumulatesAcrossTurns(t *testing.T) {
+	_, s := newOpenCodeSession(t)
+	runTurn(t, s, "one")
+	got, _ := runTurn(t, s, "two")
+
+	last := string(got[len(got)-1].Data)
+	var res struct {
+		Usage struct {
+			Input  uint64 `json:"input_tokens"`
+			Output uint64 `json:"output_tokens"`
+			Cache  uint64 `json:"cache_read_input_tokens"`
+		} `json:"usage"`
+	}
+	if err := json.Unmarshal([]byte(last), &res); err != nil {
+		t.Fatalf("the turn's result: %s", last)
+	}
+	// The fake answers every prompt with 100 in / 20 out / 5 cached read.
+	if res.Usage.Input != 200 || res.Usage.Output != 40 || res.Usage.Cache != 10 {
+		t.Errorf("two turns of 100/20/5 should read 200/40/10, got %d/%d/%d: %s",
+			res.Usage.Input, res.Usage.Output, res.Usage.Cache, last)
+	}
+}
+
 // A turn that fails is reported as a failed turn, not as a quiet success.
 func TestAnOpenCodeFailureIsAFailedTurn(t *testing.T) {
 	_, s := newOpenCodeSession(t)

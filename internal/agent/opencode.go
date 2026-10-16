@@ -85,12 +85,13 @@ type openCodec struct {
 	mu sync.Mutex
 	// nextID numbers the requests we send. Responses are matched by it, so
 	// the codec knows which of its own steps it is being answered about.
-	nextID   int
-	initID   int
-	openID   int
-	opened   string // acpNewSession or acpLoad: only a failed LOAD may fall back // session/new or session/load
-	setID    int
-	promptID int
+	nextID    int
+	initID    int
+	openID    int
+	opened    string // acpNewSession or acpLoad: only a failed LOAD may fall back
+	cancelled bool   // a turn cancelled before the session existed // session/new or session/load
+	setID     int
+	promptID  int
 
 	sessionID string
 	ready     bool
@@ -206,6 +207,15 @@ func (c *openCodec) Interrupt() []any {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.sessionID == "" {
+		// There is nothing at ACP to cancel yet — but a turn may be waiting
+		// for the session, and leaving it queued would make cancel a button
+		// that does nothing. It is dropped here, and the turn is ENDED when
+		// the session opens: a dropped turn with no result would leave the
+		// session working for ever.
+		if len(c.pending) > 0 {
+			c.cancelled = true
+			c.pending = nil
+		}
 		return nil
 	}
 	return []any{c.notify(acpCancel, map[string]any{"sessionId": c.sessionID})}
@@ -327,6 +337,17 @@ func (c *openCodec) Decode(line json.RawMessage) ([]json.RawMessage, []any) {
 				c.setID = c.nextID + 1
 				write = append(write, c.request(acpSetConfig, map[string]any{
 					"sessionId": c.sessionID, "configId": "model", "value": c.model}))
+			}
+			if c.cancelled {
+				// The turn was cancelled while it waited for this session.
+				// It never went out, and it has to END: a turn the codec
+				// quietly drops is a session that reads as working for ever.
+				c.cancelled = false
+				c.ready = true
+				msgs = append(msgs, out(map[string]any{"type": "result",
+					"subtype": "error_during_execution", "session_id": c.sessionID,
+					"error": "the turn was cancelled before the session was open"}))
+				return msgs, write
 			}
 			// The session is open: anything a device sent meanwhile goes now,
 			// and the init event above tells the apps it did.

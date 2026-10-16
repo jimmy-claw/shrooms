@@ -103,6 +103,13 @@ func startProc(ctx context.Context, log *slog.Logger, h Harness, bin, dir string
 			// only make sense once it has.
 			if len(write) > 0 {
 				if err := p.writeAll(write); err != nil {
+					// A write that fails here takes the messages below with it,
+					// and with them any turn the codec was holding until the
+					// session existed (OpenCode queues a turn that arrives
+					// first). Those turns are not persisted anywhere, so the
+					// person's message is gone; it is reported as the process
+					// failing, not as the message not being sent. Worth knowing
+					// when the next vanished message is reported.
 					p.err = err
 					break
 				}
