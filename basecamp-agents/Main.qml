@@ -326,6 +326,9 @@ Item {
         prefsLoaded = true
         // The machines as last seen, at once (mergeHosts).
         try {
+            // Only a mesh's name: anything else (an error, nothing kept) is all.
+            var mp = String(callCore("getPref", ["agent_mesh"]) || "")
+            root.meshPick = /^[A-Za-z0-9._-]{1,40}$/.test(mp) ? mp : ""
             var kept = JSON.parse(String(callCore("getPref", ["agent_hosts"]) || "[]"))
             if (Array.isArray(kept) && root.agentHosts.length === 0)
                 root.agentHosts = kept.filter(function(h) { return h && h.name && h.address && Array.isArray(h.sessions) })
@@ -374,6 +377,24 @@ Item {
     // Always open: this module is the panel.
     readonly property bool agentsOpen: true
     property var agentHosts: []
+    // Which mesh's agents are shown: "" for all of them. Each mesh is a world
+    // of its own (a home mesh beside an office one), and seen together the
+    // machines of both crowd one list. Kept as a preference.
+    property string meshPick: ""
+    readonly property var meshNames: {
+        var seen = {}, out = []
+        for (var i = 0; i < agentHosts.length; i++) {
+            var m = agentHosts[i].mesh || ""
+            if (m !== "" && !seen[m]) { seen[m] = true; out.push(m) }
+        }
+        return out.sort()
+    }
+    readonly property var shownHosts: meshPick === "" ? agentHosts
+        : agentHosts.filter(function(h) { return (h.mesh || "") === meshPick })
+    function pickMesh(m) {
+        root.meshPick = m
+        savePref("agent_mesh", m)
+    }
     property var agentOpen: null          // {address, name, mesh, session}
     property var agentEventsList: []      // the agent's events, partials left out
     property var agentEarlier: []         // from the transcript, before the events
@@ -1687,9 +1708,9 @@ Item {
     // starredFirst). The star is kept on the agent, so the phone shows it too.
     readonly property var starredSessions: {
         var out = []
-        for (var i = 0; i < agentHosts.length; i++) {
-            var ss = agentHosts[i].sessions || []
-            for (var j = 0; j < ss.length; j++) if (ss[j].starred) out.push({ host: agentHosts[i], sess: ss[j] })
+        for (var i = 0; i < shownHosts.length; i++) {
+            var ss = shownHosts[i].sessions || []
+            for (var j = 0; j < ss.length; j++) if (ss[j].starred) out.push({ host: shownHosts[i], sess: ss[j] })
         }
         out.sort(function(a, b) { return a.sess.name === b.sess.name ? (a.host.name < b.host.name ? -1 : 1) : (a.sess.name < b.sess.name ? -1 : 1) })
         return out
@@ -2100,7 +2121,7 @@ Item {
         }
         return out
     }
-    readonly property var boardLinkData: boardLinkList(agentHosts)
+    readonly property var boardLinkData: boardLinkList(shownHosts)
     // What a session OWES and what it is WAITING FOR: the tasks it is working on,
     // and the tasks it asked others for. A card doing four things should say so.
     function cardLoad(hosts) {
@@ -2122,7 +2143,7 @@ Item {
         }
         return out
     }
-    readonly property var cardLoadData: cardLoad(agentHosts)
+    readonly property var cardLoadData: cardLoad(shownHosts)
     // A short label for a load count: "2 owed · 1 asked", and nothing when idle.
     function loadLabel(l) {
         if (!l) return ""
@@ -2379,7 +2400,7 @@ Item {
         })
         return out
     }
-    readonly property var taskRowList: taskRows(agentHosts)
+    readonly property var taskRowList: taskRows(shownHosts)
     // The panel's rows INCLUDING a header before each group that has something in
     // it. One flat list, because a QML Repeater cannot insert a header when a
     // value changes - and a group with nothing in it gets no header, so the
@@ -2463,7 +2484,7 @@ Item {
     // Where the link badges were drawn, so a tap on one can filter the panel to its
     // pair. Written by the canvas, read by the tap handler.
     property var badgeHit: []
-    readonly property var taskPanelList: taskPanelRows(agentHosts, linkFilter, showDone)
+    readonly property var taskPanelList: taskPanelRows(shownHosts, linkFilter, showDone)
 
     function edgeTint(state) {
         return state === "working" ? cPhosphor : state === "input-required" ? cAmber : state === "stalled" ? cRust : cAsh
@@ -2523,8 +2544,8 @@ Item {
         ctx.closePath(); ctx.fill()
         ctx.beginPath(); ctx.arc(p[0].x, p[0].y, width * 1.6, 0, 2 * Math.PI); ctx.fill()
     }
-    readonly property var boardCardList: boardCards(agentHosts)
-    readonly property var boardEdgeList: boardEdges(agentHosts)
+    readonly property var boardCardList: boardCards(shownHosts)
+    readonly property var boardEdgeList: boardEdges(shownHosts)
     function askDelete() { deleteDialog.open() }
     function dialogs() { return [usageDialog, voiceDialog, deleteDialog, renameDialog, modelDialog, restartDialog, readingDialog, cageDialog] }
     function closeDialogs() { dialogs().forEach(function(d) { d.close() }) }
@@ -4207,6 +4228,35 @@ Item {
                     Lnk { visible: root.haveCore; text: "voice"; base: cAsh; font.pixelSize: root.fs(10); onClicked: Qt.callLater(root.openVoice) }
                     Lnk { visible: root.haveCore; objectName: "toBoard"; text: "board"; base: cAsh; font.pixelSize: root.fs(10); onClicked: Qt.callLater(root.showBoard) }
                 }
+                // The meshes, when there is more than one: all, or one of them.
+                Flow {
+                    objectName: "meshSwitch"
+                    Layout.fillWidth: true
+                    visible: root.meshNames.length > 1 || root.meshPick !== ""
+                    spacing: root.sz(8)
+                    Repeater {
+                        model: [""].concat(root.meshNames)
+                        delegate: Text {
+                            id: mchoice
+                            required property var modelData
+                            readonly property bool on: root.meshPick === mchoice.modelData
+                            text: mchoice.modelData === "" ? "all" : mchoice.modelData
+                            color: on ? cVoid : root.meshTint(mchoice.modelData)
+                            font.family: "monospace"; font.pixelSize: root.fs(10)
+                            leftPadding: root.sz(10); rightPadding: root.sz(10); topPadding: root.sz(4); bottomPadding: root.sz(4)
+                            Rectangle { anchors.fill: parent; z: -1; radius: root.sz(10)
+                                        color: mchoice.on ? root.meshTint(mchoice.modelData) : "transparent"; border.color: root.meshTint(mchoice.modelData) }
+                            MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: root.pickMesh(mchoice.modelData) }
+                        }
+                    }
+                }
+                Text {
+                    Layout.fillWidth: true
+                    visible: root.haveCore && root.agentHosts.length > 0 && root.shownHosts.length === 0
+                    wrapMode: Text.Wrap
+                    text: "No agents on " + root.meshPick + " yet."
+                    color: cAsh; font.family: "monospace"; font.pixelSize: root.fs(11)
+                }
                 Text {
                     Layout.fillWidth: true
                     visible: !root.haveCore
@@ -4257,7 +4307,7 @@ Item {
                         }
                     }
                     Repeater {
-                    model: root.agentHosts
+                    model: root.shownHosts
                     delegate: Column {
                         id: hostCol
                         required property var modelData

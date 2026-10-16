@@ -115,12 +115,12 @@ object HostCache {
 
     fun reachable(h: AgentHost, now: Long): Boolean = now - h.lastSeen < STALE_MS
 
-    /** This round's [found] hosts, and the [previous] ones that did not answer, by name. */
+    /** This round's [found] hosts, and the [previous] ones that did not answer, by name and mesh. */
     fun merge(previous: List<AgentHost>, found: List<AgentHost>, now: Long): List<AgentHost> {
         val fresh = found.map { it.copy(lastSeen = now) }
-        val names = fresh.map { it.name }.toSet()
-        val kept = previous.filter { it.name !in names && now - it.lastSeen < FORGET_MS }
-        return (fresh + kept).sortedBy { it.name }
+        val names = fresh.map { it.name + "@" + it.mesh }.toSet()
+        val kept = previous.filter { it.name + "@" + it.mesh !in names && now - it.lastSeen < FORGET_MS }
+        return (fresh + kept).sortedWith(compareBy({ it.name }, { it.mesh }))
     }
 
     fun encode(hosts: List<AgentHost>): String = org.json.JSONArray(hosts.map { h ->
@@ -162,6 +162,14 @@ object HostCache {
 }
 
 /**
+ * The machines of one mesh, or of all ("" ): each mesh is a world of its own
+ * (a home mesh beside an office one), and together their machines crowd one
+ * list. As Basecamp's switch.
+ */
+fun onMesh(hosts: List<AgentHost>, mesh: String): List<AgentHost> =
+    if (mesh.isEmpty()) hosts else hosts.filter { it.mesh == mesh }
+
+/**
  * The list as shown: starred sessions first, from every machine, by name;
  * then each machine with the rest of its sessions.
  */
@@ -197,7 +205,10 @@ fun agentCandidates(handed: List<AgentHosts.Host>, seen: List<AgentHost>): List<
 suspend fun discoverAgents(peers: List<Peer>, byName: List<String> = emptyList(),
                            known: List<AgentHosts.Host> = emptyList()): List<AgentHost> =
     withContext(Dispatchers.IO) {
-        val fromPeers = peers.filter { it.online }.groupBy { it.name }.map { (name, ps) ->
+        // One per machine AND mesh: a machine on two meshes is two places, and
+        // each may show other sessions (ADR-049); the mesh switch shows one.
+        val fromPeers = peers.filter { it.online }.groupBy { it.name to it.mesh }.map { (key, ps) ->
+            val name = key.first
             async {
                 ps.firstNotNullOfOrNull { p ->
                     listOf(p.overlay, p.overlayV4).filter { it.isNotEmpty() }.firstNotNullOfOrNull { a ->
@@ -220,7 +231,7 @@ suspend fun discoverAgents(peers: List<Peer>, byName: List<String> = emptyList()
                 }
             }
         }
-        val found = (fromPeers + handed + named).awaitAll().filterNotNull().distinctBy { it.name }
+        val found = (fromPeers + handed + named).awaitAll().filterNotNull().distinctBy { it.name + "@" + it.mesh }
         // Then the mesh as each agent's machine sees it: a phone that knows one
         // agent finds the rest without being told (/v1/peers). One round, not
         // a crawl — every machine sees the same mesh.
@@ -348,6 +359,8 @@ fun AgentsScreen(peers: List<Peer>, onClose: () -> Unit, initial: OpenSession? =
     // Machines added by name, kept across launches.
     val prefs = remember { ctx.getSharedPreferences("agents", android.content.Context.MODE_PRIVATE) }
     var named by remember { mutableStateOf(prefs.getStringSet("named", emptySet())!!.sorted()) }
+    // Which mesh's agents are shown: "" for all. Kept across launches.
+    var meshPick by remember { mutableStateOf(prefs.getString("mesh", "") ?: "") }
     var addingMachine by remember { mutableStateOf(false) }
     var voiceOpen by remember { mutableStateOf(false) }
     var usageOpen by remember { mutableStateOf(false) }
@@ -404,7 +417,7 @@ fun AgentsScreen(peers: List<Peer>, onClose: () -> Unit, initial: OpenSession? =
         }
         if (tasksOpen) {
             BackHandler { tasksOpen = false }
-            TasksScreen(hosts.orEmpty(), taskRows, onRows = { keepTasks(it) }, onOpen = { r ->
+            TasksScreen(onMesh(hosts.orEmpty(), meshPick), taskRows, onRows = { keepTasks(it) }, onOpen = { r ->
                 tasksOpen = false
                 fromTasks = true
                 // A queued task has not arrived yet: its session opens at the end.
@@ -485,7 +498,26 @@ fun AgentsScreen(peers: List<Peer>, onClose: () -> Unit, initial: OpenSession? =
             }
 
             val meshes = hs.orEmpty().map { it.mesh }.distinct().sorted()
-            val (starred, rest) = starredFirst(hs.orEmpty())
+            // The meshes, when there is more than one: all, or one of them.
+            if (meshes.size > 1 || meshPick.isNotEmpty()) {
+                @OptIn(ExperimentalLayoutApi::class)
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier.padding(top = 6.dp, bottom = 4.dp)) {
+                    (listOf("") + meshes).forEach { m ->
+                        val on = meshPick == m
+                        val tint = if (m.isEmpty()) Palette.Bone else meshColour(m, meshes)
+                        Text(if (m.isEmpty()) "all" else m, style = MaterialTheme.typography.labelSmall,
+                            color = if (on) Palette.Void else tint,
+                            modifier = Modifier.background(if (on) tint else Color.Transparent, RoundedCornerShape(10.dp))
+                                .border(1.dp, tint, RoundedCornerShape(10.dp))
+                                .clickable { meshPick = m; prefs.edit().putString("mesh", m).apply() }
+                                .padding(horizontal = 10.dp, vertical = 6.dp))
+                    }
+                }
+            }
+            val shown = onMesh(hs.orEmpty(), meshPick)
+            if (hs != null && hs.isNotEmpty() && shown.isEmpty()) Label("No agents on $meshPick yet.")
+            val (starred, rest) = starredFirst(shown)
             // Read on each round's recomposition: what has gone quiet greys.
             val now = System.currentTimeMillis()
             // Replies not yet seen here, redrawn as sessions are read.
@@ -504,7 +536,7 @@ fun AgentsScreen(peers: List<Peer>, onClose: () -> Unit, initial: OpenSession? =
                         Text("🍄  STARRED", style = MaterialTheme.typography.labelSmall, color = Palette.Phosphor,
                             modifier = Modifier.padding(top = 14.dp))
                     }
-                    itemsIndexed(starred, key = { _, p -> "s-" + p.first.name + "/" + p.second.name }) { _, (h, sess) ->
+                    itemsIndexed(starred, key = { _, p -> "s-" + p.first.name + "@" + p.first.mesh + "/" + p.second.name }) { _, (h, sess) ->
                         SessionRow(sess, where = h.name, reachable = HostCache.reachable(h, now), unread = unread(h, sess), onStar = { star(h, sess) }, onLongPress = { deleting = h to sess }) {
                             open = OpenSession(h.address, h.name, h.mesh, sess.name)
                         }
@@ -512,7 +544,7 @@ fun AgentsScreen(peers: List<Peer>, onClose: () -> Unit, initial: OpenSession? =
                 }
                 for (h in rest) {
                     val up = HostCache.reachable(h, now)
-                    item(key = "h-" + h.name) {
+                    item(key = "h-" + h.name + "@" + h.mesh) {
                         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 14.dp).alpha(if (up) 1f else 0.45f)) {
                             Box(Modifier.size(10.dp).border(2.dp, meshColour(h.mesh, meshes), CircleShape))
                             Spacer(Modifier.width(10.dp))
@@ -529,10 +561,10 @@ fun AgentsScreen(peers: List<Peer>, onClose: () -> Unit, initial: OpenSession? =
                         }
                     }
                     if (h.sessions.isEmpty()) {
-                        val all = hs.orEmpty().firstOrNull { it.name == h.name }?.sessions.orEmpty()
-                        item(key = "e-" + h.name) { Label(if (all.isEmpty()) "no sessions yet" else "all starred") }
+                        val all = hs.orEmpty().firstOrNull { it.name == h.name && it.mesh == h.mesh }?.sessions.orEmpty()
+                        item(key = "e-" + h.name + "@" + h.mesh) { Label(if (all.isEmpty()) "no sessions yet" else "all starred") }
                     }
-                    itemsIndexed(h.sessions, key = { _, s -> h.name + "/" + s.name }) { _, s ->
+                    itemsIndexed(h.sessions, key = { _, s -> h.name + "@" + h.mesh + "/" + s.name }) { _, s ->
                         SessionRow(s, reachable = up, unread = unread(h, s), onStar = { star(h, s) }, onLongPress = { deleting = h to s }) {
                             open = OpenSession(h.address, h.name, h.mesh, s.name)
                         }

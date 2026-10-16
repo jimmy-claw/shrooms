@@ -336,6 +336,15 @@ Item {
             var pollHidden = view.pollState()
             view.visible = true
             console.error("POLL busy=" + pollBusy + " hidden=" + pollHidden)
+            // One mesh at a time: its machines alone, and back to all.
+            var hostsKept = view.agentHosts
+            view.agentHosts = hostsKept.concat([Object.assign({}, hostsKept[0], { mesh: "home", address: "fd7b::1", name: "k11" })])
+            var meshes = view.meshNames.join(",")
+            view.pickMesh("home")
+            var onHome = view.shownHosts.map(function(h) { return h.name + "@" + h.mesh }).join(",")
+            view.pickMesh("")
+            console.error("MESHPICK meshes=" + meshes + " home=" + onHome + " all=" + view.shownHosts.length + " switch=" + top.countVisible(view, "meshSwitch"))
+            view.agentHosts = hostsKept
             // The core's event: read at once, and the poll only a safety net.
             var callsBefore = top.eventCalls
             view.bridge.moduleEventReceived("shrooms_core", "agentChanged", ["events"])

@@ -367,3 +367,20 @@ class ModelNoteTest {
         assertEquals(listOf("model set to venice/claude-haiku-5-5 from phone.office", "model back to its machine's default"), notes)
     }
 }
+
+class MeshPickTest {
+    private fun host(name: String, mesh: String, seen: Long = 1) = AgentHost(name, mesh, "fd00::$name", emptyList(), lastSeen = seen)
+
+    // One mesh at a time, or all; a machine on two meshes is in each.
+    @Test fun aMeshShowsItsMachinesOnly() {
+        val hs = listOf(host("laptop", "home"), host("laptop", "office"), host("k11", "home"), host("pi5", "office"))
+        assertEquals(listOf("laptop", "k11"), onMesh(hs, "home").map { it.name })
+        assertEquals(4, onMesh(hs, "").size)
+    }
+
+    // A machine answering on one mesh does not drop it from the other.
+    @Test fun aMachineOnTwoMeshesIsKeptOnBoth() {
+        val merged = HostCache.merge(listOf(host("laptop", "home", 1), host("laptop", "office", 1)), listOf(host("laptop", "office")), 2)
+        assertEquals(listOf("laptop@home", "laptop@office"), merged.map { it.name + "@" + it.mesh })
+    }
+}
