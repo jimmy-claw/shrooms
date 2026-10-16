@@ -209,9 +209,9 @@ func TestACagedPiCageIsMadeWithTheGateway(t *testing.T) {
 		t.Fatal(err)
 	}
 	s, _ := m.Get("pibox")
-	if err := s.Send("hello", "phone"); err != nil {
-		t.Fatal(err)
-	}
+	// Its answer may be an error: the fake pi need not outlive the fake cage
+	// long enough to be written to ("file already closed", on CI).
+	s.Send("hello", "phone")
 	// Until pi is run in the cage (whether the fake pi answers there is not
 	// what this is about).
 	var cs []string

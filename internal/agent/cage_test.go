@@ -550,12 +550,12 @@ func TestACagesLimitsAreItsOwn(t *testing.T) {
 	if create < 0 || !strings.Contains(cs[create], "--memory 8g ") || !strings.Contains(cs[create], "--cpus 2 ") {
 		t.Fatalf("not made with its own memory and the machine's CPUs: %q", cs)
 	}
-	in, err := m.SetCageLimits("box", "16g", "8", "phone")
-	if err != nil || in.Cage.Memory != "16g" || in.Cage.CPUs != "8" || in.Cage.MachineMemory != "4g" {
+	in, err := m.SetCageLimits("box", "16g", "1", "phone")
+	if err != nil || in.Cage.Memory != "16g" || in.Cage.CPUs != "1" || in.Cage.MachineMemory != "4g" {
 		t.Fatalf("set: %v %+v", err, in.Cage)
 	}
 	cs = calls(t, log)
-	if indexOf(cs, `^update --memory 16g --cpus 8 `+s.cage.Container+`$`) < 0 || indexOf(cs[create+1:], `^(create|rm) `) >= 0 {
+	if indexOf(cs, `^update --memory 16g --cpus 1 `+s.cage.Container+`$`) < 0 || indexOf(cs[create+1:], `^(create|rm) `) >= 0 {
 		t.Fatalf("the cage was not changed where it is, or was made again: %q", cs[create:])
 	}
 	for _, bad := range [][2]string{{"lots", ""}, {"", "-1"}, {"", "100000"}, {"16g; rm", ""}} {
