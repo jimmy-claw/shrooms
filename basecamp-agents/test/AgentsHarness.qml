@@ -364,6 +364,13 @@ Item {
             var hb = view.row(view.chatItems()[0])
             console.error("OUTSIDE=" + hb.outside + "," + hb.by)
             view.agentEventsList = kept
+            // Overlapping reads (from where one had already read) add nothing twice.
+            var nEvents = view.agentEventsList.length, nextKept = view.agentNext, streamKept = view.agentStreaming
+            view.agentNext = 0
+            view.pumpAgent()
+            console.error("NODOUBLE before=" + nEvents + " after=" + view.agentEventsList.length)
+            view.agentNext = nextKept
+            view.agentStreaming = streamKept
             // A stream alone grows the streaming row and leaves the conversation as it is.
             var before = view.rebuilds, was = view.agentStreaming
             top.partialOnly = true

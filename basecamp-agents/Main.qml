@@ -662,7 +662,19 @@ Item {
         })
     }
 
+    // One read at a time. A call to the core blocks in a nested event loop,
+    // in which a core event (agentChanged) or the timer can start another
+    // read from the same point: both appended the same events, and replies
+    // showed twice (2026-10-16). A read asked for meanwhile runs after.
+    property bool pumping: false
+    property bool pumpAgain: false
     function pumpAgent() {
+        if (pumping) { root.pumpAgain = true; return }
+        root.pumping = true
+        try { pumpAgentOnce() } finally { root.pumping = false }
+        if (pumpAgain) { root.pumpAgain = false; Qt.callLater(pumpAgent) }
+    }
+    function pumpAgentOnce() {
         if (!agentOpen) return
         var r = unwrap(callCore("agentEvents", [String(agentNext)]))
         if (!r || r.next === undefined) return
@@ -714,6 +726,10 @@ Item {
             if (r.more) Qt.callLater(pumpAgent)
             return
         }
+        // And never the same event twice, whatever reads overlapped.
+        var lastSeq = root.agentEventsList.length ? root.agentEventsList[root.agentEventsList.length - 1].seq : -1
+        fresh = fresh.filter(function(e) { return !(e.seq > 0 && e.seq <= lastSeq) })
+        if (fresh.length === 0) { root.agentNext = r.next; root.agentStreaming = streaming; if (r.more) Qt.callLater(pumpAgent); return }
         var evs = root.agentEventsList.concat(fresh)
         // The machine's own new events (not the copy kept here): auto-play.
         if (!(r.kept > 0)) heardEvents(r.events)
