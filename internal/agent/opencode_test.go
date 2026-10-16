@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -328,28 +329,70 @@ func TestAResumeKeepsTheConversationIdItAskedFor(t *testing.T) {
 	}
 }
 
-// OpenCode cannot be caged yet: the image has no opencode and there is no
-// private home or gateway for it, so a cage would be made and then fail at
-// exec. Refused where it is asked for, and refused before the podman check, so
-// the answer does not depend on this machine having podman.
-func TestAnOpenCodeSessionIsRefusedACage(t *testing.T) {
-	m := newTestManager(t, t.TempDir())
+// OpenCode can be caged (ADR-062), and what goes in is the ADR-060 line:
+// the owner's config read-only, and a data directory of the CAGE's own — never
+// the owner's, which is one database holding every project's conversations.
+func TestAnOpenCodeCageGetsItsOwnDataDirectory(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	state := t.TempDir()
+	m := newTestManager(t, state)
 	m.Register(OpenCode{}, fakeOpenCodeBin(t))
+	proj := filepath.Join(home, "proj")
+	os.MkdirAll(filepath.Join(home, ".config", "opencode"), 0o700)
+	os.WriteFile(filepath.Join(home, ".config", "opencode", "opencode.jsonc"), []byte("{}"), 0o600)
+	os.MkdirAll(filepath.Join(home, ".local", "share", "opencode"), 0o700)
+	os.WriteFile(filepath.Join(home, ".local", "share", "opencode", "opencode.db"), []byte("db"), 0o600)
 
-	_, err := m.CreateCaged("boxed", t.TempDir(), "opencode", &Cage{})
-	if err == nil || !strings.Contains(err.Error(), "OpenCode is not caged yet (ADR-061)") {
-		t.Errorf("caging an OpenCode session at creation: %v", err)
+	s := &Session{dir: proj, harness: OpenCode{}, cage: &Cage{Container: "c3"}}
+	var got []string
+	for _, x := range m.cageMounts(s, "opencode") {
+		at := x.at
+		if at == "" {
+			at = x.path
+		}
+		ro := map[bool]string{true: ":ro", false: ""}[x.ro]
+		got = append(got, at+ro+" <- "+x.path)
 	}
-	if _, ok := m.Get("boxed"); ok {
-		t.Error("a refused cage must leave no session behind")
-	}
+	joined := strings.Join(got, "\n")
 
-	if _, err := m.CreateWith("plain", t.TempDir(), "opencode"); err != nil {
-		t.Fatal(err)
+	cfg := filepath.Join(home, ".config", "opencode")
+	data := filepath.Join(home, ".local", "share", "opencode")
+	priv := filepath.Join(state, "cages", "c3.home", "opencode")
+	if !strings.Contains(joined, cfg+" <- "+filepath.Join(priv, "config")) {
+		t.Errorf("the owner's config should be a private copy:\n%s", joined)
 	}
-	if _, err := m.SetCage("plain", &Cage{}, "nothing"); err == nil ||
-		!strings.Contains(err.Error(), "OpenCode is not caged yet (ADR-061)") {
-		t.Errorf("caging an OpenCode session that exists: %v", err)
+	if !strings.Contains(joined, filepath.Join(cfg, "opencode.jsonc")+":ro") {
+		t.Errorf("the owner's own config should come in read-only:\n%s", joined)
+	}
+	if !strings.Contains(joined, data+" <- "+filepath.Join(priv, "data")) {
+		t.Errorf("the cage's data directory should be its own:\n%s", joined)
+	}
+	// The line ADR-060 draws: the owner's database is never in the cage.
+	for _, x := range m.cageMounts(s, "opencode") {
+		if x.path == filepath.Join(data, "opencode.db") {
+			t.Errorf("the owner's conversation database must not be mounted:\n%s", joined)
+		}
+	}
+}
+
+// And the gateway is what carries its key: the override goes in the
+// environment, because a file named opencode.json would be ignored whenever
+// the owner has an opencode.jsonc (measured: jsonc wins over json).
+func TestAnOpenCodeCageReachesItsModelThroughTheGateway(t *testing.T) {
+	genv := OpenCode{}.GatewayEnv(false)
+	cfg := genv["OPENCODE_CONFIG_CONTENT"]
+	if !strings.Contains(cfg, GatewayBase("opencode")+"/v1") || !strings.Contains(cfg, GatewayKey) {
+		t.Errorf("the gateway override: %q", cfg)
+	}
+	if (OpenCode{}).GatewayFiles(false) != nil {
+		t.Error("nothing should be written as a file: it would be shadowed")
+	}
+	// And no key of the owner's is named for the cage.
+	for _, k := range (OpenCode{}).CageEnv() {
+		if strings.Contains(k, "KEY") || strings.Contains(k, "TOKEN") {
+			t.Errorf("a credential must not be named into a cage: %q", k)
+		}
 	}
 }
 
@@ -545,4 +588,80 @@ func ack(req any, result map[string]any) map[string]any {
 
 func ackID(id int, result map[string]any) map[string]any {
 	return map[string]any{"jsonrpc": "2.0", "id": id, "result": result}
+}
+
+// With real podman: a caged OpenCode session gets the owner's config read-only
+// and a data directory of its own — never the owner's, which is one database
+// holding every project's conversations (ADR-060's line, ADR-062's bar: a cage
+// is where fakes have lied before).
+func TestARealOpenCodeCageSeesItsOwnDataOnly(t *testing.T) {
+	if os.Getenv("SHROOMS_REAL_CAGE") != "1" {
+		t.Skip("SHROOMS_REAL_CAGE=1 runs it")
+	}
+	image := os.Getenv("SHROOMS_CAGE_TEST_IMAGE")
+	if image == "" {
+		t.Skip("SHROOMS_CAGE_TEST_IMAGE=<a local image> runs it")
+	}
+	c := NewCages("")
+	if c == nil {
+		t.Fatal("no podman")
+	}
+	// As the other real-cage tests do: no resource limits, since a runner may
+	// not delegate a cgroup (this machine's does not).
+	c.Memory, c.CPUs, c.Pids = "", "", 0
+	ctx := context.Background()
+
+	home := t.TempDir()
+	// HOME moves, so the harness's paths are the ones under test — but podman
+	// keeps its storage where XDG_DATA_HOME says, not inside the temp home.
+	if real, err := os.UserHomeDir(); err == nil {
+		t.Setenv("XDG_DATA_HOME", filepath.Join(real, ".local", "share"))
+	}
+	t.Setenv("HOME", home)
+	cfg := filepath.Join(home, ".config", "opencode")
+	data := filepath.Join(home, ".local", "share", "opencode")
+	os.MkdirAll(cfg, 0o700)
+	os.MkdirAll(data, 0o700)
+	os.WriteFile(filepath.Join(cfg, "opencode.jsonc"), []byte("{\"mine\":true}\n"), 0o600)
+	// The owner's conversations: one database, every project.
+	os.WriteFile(filepath.Join(data, "opencode.db"), []byte("OWNERS-OTHER-PROJECTS"), 0o600)
+
+	m := newTestManager(t, t.TempDir())
+	m.Register(OpenCode{}, fakeOpenCodeBin(t))
+	s := &Session{dir: filepath.Join(home, "proj"), harness: OpenCode{}, cage: &Cage{Container: "oc3"}}
+
+	// Absolute paths: this runs the container directly, without the env file
+	// that sets HOME to the owner's home in a real cage.
+	script := `set -e
+cat ` + filepath.Join(cfg, "opencode.jsonc") + `
+if grep -q OWNERS-OTHER-PROJECTS ` + filepath.Join(data, "opencode.db") + ` 2>/dev/null; then
+  echo "THE-OWNERS-DATABASE-IS-IN-THE-CAGE"
+fi
+echo "data: $(ls -A ` + data + ` | tr '\n' ' ')"
+if echo x >> ` + filepath.Join(cfg, "opencode.jsonc") + ` 2>/dev/null; then
+  echo "THE-OWNERS-CONFIG-IS-WRITABLE"
+fi
+echo DONE`
+	name := "shrooms-octest-" + filepath.Base(t.TempDir())
+	args := c.createArgs(name, "octest", image, m.cageMounts(s, "opencode"))
+	args = append(args[:len(args)-2], "sh", "-c", script)
+	args[0] = "run"
+	args = append([]string{args[0], "--rm"}, args[1:]...)
+	t.Cleanup(func() { c.run(ctx, "rm", "-f", name) })
+	out, err := c.run(ctx, args...)
+	if err != nil {
+		t.Fatalf("%s: %v", out, err)
+	}
+	if !strings.Contains(out, `{"mine":true}`) {
+		t.Errorf("the owner's settings should be in the cage:\n%s", out)
+	}
+	if strings.Contains(out, "THE-OWNERS-DATABASE-IS-IN-THE-CAGE") {
+		t.Errorf("the owner's conversation database reached the cage:\n%s", out)
+	}
+	if strings.Contains(out, "THE-OWNERS-CONFIG-IS-WRITABLE") {
+		t.Errorf("the owner's settings must be read-only:\n%s", out)
+	}
+	if !strings.Contains(out, "DONE") {
+		t.Errorf("the cage did not finish:\n%s", out)
+	}
 }

@@ -25,7 +25,6 @@ import (
 	"crypto/sha256"
 	_ "embed"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -508,20 +507,14 @@ func (m *Manager) cageMounts(s *Session, harness string) []mount {
 	// what is kept out, so what lands there later is out by default. Caged
 	// is the owner's agent kept in its folder; sealed is for what nobody
 	// vouches for (docs/agents/cages.md).
-	switch harness {
-	case "claude":
-		dir := filepath.Join(home, ".claude")
-		ms = append(ms, mount{path: m.privateHome(s.cage.Container, "claude"), at: dir})
-		ms = append(ms, readOnlyIn(dir, claudeHostCode)...)
-		ms = append(ms, ownConversations(filepath.Join(dir, "projects", claudeProjectName(s.dir))))
-		if bin, err := claudeProgram(m.binOf("claude")); err == nil {
-			ms = append(ms, mount{path: filepath.Dir(bin), ro: true})
-		}
-	case "pi":
-		dir := piAgentDir()
-		ms = append(ms, mount{path: m.privateHome(s.cage.Container, "pi"), at: dir})
-		ms = append(ms, readOnlyIn(dir, piHostCode)...)
-		ms = append(ms, ownConversations(filepath.Join(dir, "sessions", piSessionsName(s.dir))))
+	// What goes in is the harness's to say (ADR-062): its home, which of it is
+	// the owner's settings, and where one project's conversations live. A
+	// harness that cannot say is not caged at all, which is refused where
+	// caging is asked for.
+	// The session's own harness, not a lookup by name: what is caged is the
+	// harness the session runs on.
+	if c, ok := s.harness.(Cageable); ok {
+		ms = append(ms, c.CageMounts(m.cageFacts(s, harness))...)
 	}
 	if s.cage.Nix {
 		ms = append(ms, nixMounts(home)...)
@@ -852,8 +845,10 @@ func (m *Manager) prepareCage(s *Session, bin string) (*cageRun, error) {
 		return nil, err
 	}
 	r := &cageRun{c: c, container: name, dir: s.dir, envFile: env, bin: s.harness.Bin()}
-	if s.harness.Name() == "claude" {
-		if p, err := claudeProgram(bin); err == nil {
+	// The program to run inside is the harness's to say: Claude Code's is
+	// resolved through its symlinks, pi's is where it is.
+	if cg, ok := s.harness.(Cageable); ok {
+		if p, err := cg.CageProgram(m.cageFacts(s, s.harness.Name())); err == nil {
 			r.bin = p
 		}
 	}
@@ -961,19 +956,16 @@ func cageEnvAllowed(k string, harness []string) bool {
 
 // CageEnv is a harness that wants some of the agent's variables in its cage:
 // settings, never secrets (a cage's credentials come through the gateway).
-// cageableHarness refuses a harness that cannot run in a cage. Claude Code and
-// pi are set up for it by name — a private home, and the gateway for a sealed
-// one (ADR-059, ADR-060). OpenCode is not: the image has no opencode and there
-// is no home or gateway for it, so a cage would be made and then fail at exec.
-// Better refused where it is asked for.
+// cageableHarness refuses a harness that cannot run in a cage: one that does
+// not implement Cageable (ADR-062). It is refused where caging is asked for,
+// rather than a cage made and then failed at exec.
 //
-// AdoptCaged needs no check of its own: it requires a Transcripts harness, and
-// OpenCode is not one.
-func cageableHarness(harness string) error {
-	if harness == "opencode" {
-		return errors.New("OpenCode is not caged yet (ADR-061)")
+// AdoptCaged needs no check of its own: it requires a Transcripts harness.
+func cageableHarness(h Harness) error {
+	if _, ok := h.(Cageable); ok {
+		return nil
 	}
-	return nil
+	return fmt.Errorf("%s is not caged yet (ADR-062)", h.Name())
 }
 
 type CageEnv interface {
@@ -1050,7 +1042,7 @@ func (m *Manager) SetCage(name string, cage *Cage, by string) (Info, error) {
 	}
 	if cage != nil {
 		// Before the podman check, for the same reason as CreateCaged.
-		if err := cageableHarness(s.harness.Name()); err != nil {
+		if err := cageableHarness(s.harness); err != nil {
 			return Info{}, err
 		}
 	}
@@ -1196,6 +1188,18 @@ func (m *Manager) privateHome(container, harness string) string {
 	return d
 }
 
+// cageFacts is what a harness is told about the cage it is asked to run in.
+func (m *Manager) cageFacts(s *Session, harness string) CageFacts {
+	home, _ := os.UserHomeDir()
+	return CageFacts{
+		Home:        home,
+		Dir:         s.dir,
+		PrivateHome: m.privateHome(s.cage.Container, harness),
+		Bin:         m.binOf(harness),
+		Container:   s.cage.Container,
+	}
+}
+
 // ownConversations is the session's real conversation folder, read-write,
 // made if it is not there yet: its conversation is the owner's file as
 // before, which the terminal, the apps' history and moving it out of the
@@ -1232,44 +1236,7 @@ func piSessionsName(dir string) string {
 // proteus lost the foray tools their project's .pi/mcp.json gives them
 // (2026-10-16). Written at every start, so a decision made since is carried.
 func (m *Manager) carryProjectTrust(s *Session, container string) {
-	home, _ := os.UserHomeDir()
-	dir := filepath.Clean(s.dir)
-	switch s.harness.Name() {
-	case "pi":
-		var trust map[string]json.RawMessage
-		if b, err := os.ReadFile(filepath.Join(piAgentDir(), "trust.json")); err == nil && json.Unmarshal(b, &trust) == nil {
-			if v, ok := trust[dir]; ok {
-				b, _ := json.Marshal(map[string]json.RawMessage{dir: v})
-				os.WriteFile(filepath.Join(m.privateHome(container, "pi"), "trust.json"), b, 0o600)
-			}
-		}
-	case "claude":
-		var host struct {
-			Projects map[string]json.RawMessage `json:"projects"`
-		}
-		b, err := os.ReadFile(filepath.Join(home, ".claude.json"))
-		if err != nil || json.Unmarshal(b, &host) != nil {
-			return
-		}
-		entry, ok := host.Projects[dir]
-		if !ok {
-			return
-		}
-		// Into the cage's own config file (CLAUDE_CONFIG_DIR is its
-		// ~/.claude), keeping what Claude Code wrote there itself.
-		p := filepath.Join(m.privateHome(container, "claude"), ".claude.json")
-		cfg := map[string]json.RawMessage{}
-		if b, err := os.ReadFile(p); err == nil {
-			json.Unmarshal(b, &cfg)
-		}
-		projects := map[string]json.RawMessage{}
-		if raw, ok := cfg["projects"]; ok {
-			json.Unmarshal(raw, &projects)
-		}
-		projects[dir] = entry
-		cfg["projects"], _ = json.Marshal(projects)
-		if b, err := json.MarshalIndent(cfg, "", "  "); err == nil {
-			os.WriteFile(p, b, 0o600)
-		}
+	if c, ok := s.harness.(Cageable); ok {
+		c.CageTrust(m.cageFacts(s, s.harness.Name()))
 	}
 }

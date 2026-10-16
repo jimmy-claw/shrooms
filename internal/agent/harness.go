@@ -110,6 +110,37 @@ type Codec interface {
 	Respond(requestID string, response map[string]any) []any
 }
 
+// CageFacts is what a harness is told about the cage it is asked to run in
+// (ADR-062).
+type CageFacts struct {
+	Home        string // the owner's home on the host
+	Dir         string // the session's project directory
+	PrivateHome string // this cage's own directory for the harness, made already
+	Bin         string // the harness's binary on the host, as configured
+	Container   string // the container's name
+}
+
+// Cageable is a harness that can run in a cage (ADR-062): it says what of the
+// owner's home goes in, which program runs there, and what the owner has
+// decided about this project. Opt-in, like Transcripts and Gatewayed — a
+// harness that does not implement it is refused caging, which is what a check
+// by name used to do.
+type Cageable interface {
+	// CageMounts is what this harness needs in the cage: its private home, the
+	// owner's settings read-only over it, and THIS project's own conversations
+	// read-write. Nothing else of the owner's is in the list, so what lands in
+	// the home later is out by default.
+	CageMounts(f CageFacts) []mount
+
+	// CageProgram is the program to run inside the cage, for a binary on the
+	// host. Whatever it needs mounted comes from CageMounts.
+	CageProgram(f CageFacts) (string, error)
+
+	// CageTrust gives the cage's private home what the owner has decided about
+	// this project, and about no other.
+	CageTrust(f CageFacts) error
+}
+
 // Answering is a codec whose protocol needs a round trip before it can be
 // used, so it must write to its process WHILE decoding. OpenCode's ACP is that
 // shape: initialize is answered with session/new, and the id that comes back is
@@ -213,6 +244,58 @@ func (Claude) GatewayFiles(sealed bool) map[string]string {
 
 // CageEnv: Claude Code's settings that may follow it into a cage, which
 // choose models and limits, none of them a credential.
+// CageMounts: Claude Code's own directory, a private one of the cage's with
+// the owner's settings read-only over it and this project's conversations
+// read-write.
+func (Claude) CageMounts(f CageFacts) []mount {
+	dir := filepath.Join(f.Home, ".claude")
+	ms := []mount{{path: f.PrivateHome, at: dir}}
+	ms = append(ms, readOnlyIn(dir, claudeHostCode)...)
+	ms = append(ms, ownConversations(filepath.Join(dir, "projects", claudeProjectName(f.Dir))))
+	// Its program, for a cage whose node runs npm's cli.js.
+	if bin, err := claudeProgram(f.Bin); err == nil {
+		ms = append(ms, mount{path: filepath.Dir(bin), ro: true})
+	}
+	return ms
+}
+
+func (Claude) CageProgram(f CageFacts) (string, error) { return claudeProgram(f.Bin) }
+
+// CageTrust carries the owner's entry for this project — its .mcp.json servers
+// approved, its trust dialog accepted — into the cage's own config file.
+func (Claude) CageTrust(f CageFacts) error {
+	var host struct {
+		Projects map[string]json.RawMessage `json:"projects"`
+	}
+	b, err := os.ReadFile(filepath.Join(f.Home, ".claude.json"))
+	if err != nil || json.Unmarshal(b, &host) != nil {
+		return nil
+	}
+	dir := filepath.Clean(f.Dir)
+	entry, ok := host.Projects[dir]
+	if !ok {
+		return nil
+	}
+	// Into the cage's own config file (CLAUDE_CONFIG_DIR is its ~/.claude),
+	// keeping what Claude Code wrote there itself.
+	p := filepath.Join(f.PrivateHome, ".claude.json")
+	cfg := map[string]json.RawMessage{}
+	if b, err := os.ReadFile(p); err == nil {
+		json.Unmarshal(b, &cfg)
+	}
+	projects := map[string]json.RawMessage{}
+	if raw, ok := cfg["projects"]; ok {
+		json.Unmarshal(raw, &projects)
+	}
+	projects[dir] = entry
+	cfg["projects"], _ = json.Marshal(projects)
+	out, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return nil
+	}
+	return os.WriteFile(p, out, 0o600)
+}
+
 func (Claude) CageEnv() []string {
 	return []string{"ANTHROPIC_MODEL", "ANTHROPIC_SMALL_FAST_MODEL", "ANTHROPIC_DEFAULT_OPUS_MODEL", "ANTHROPIC_DEFAULT_SONNET_MODEL",
 		"ANTHROPIC_DEFAULT_HAIKU_MODEL", "CLAUDE_CODE_MAX_OUTPUT_TOKENS", "MAX_THINKING_TOKENS", "DISABLE_TELEMETRY",

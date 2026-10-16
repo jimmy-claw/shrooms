@@ -125,6 +125,12 @@ func (m *Manager) upstreams(sealed bool, harness string) map[string]upstream {
 		"openrouter": bearer("https://openrouter.ai/api/v1", "OPENROUTER_API_KEY", "openrouter"),
 		"venice":     bearer("https://api.venice.ai/api/v1", "VENICE_API_KEY", "venice"),
 		"openai":     bearer("https://api.openai.com/v1", "OPENAI_API_KEY", "openai"),
+		// OpenCode's free models go through its own inference endpoint, whose
+		// key is OPENCODE_API_KEY (measured from its model catalog: the
+		// provider "opencode" is https://opencode.ai/inference/openai/v1).
+		// Without /v1 here: the client appends it, and a cage's request
+		// arrives as /llm/opencode/v1/chat/completions.
+		"opencode": bearer("https://opencode.ai/inference/openai", "OPENCODE_API_KEY", "opencode"),
 	}
 	ups["anthropic"] = upstream{base: "https://api.anthropic.com", auth: func(h http.Header) error {
 		bearer := func(token string) {
