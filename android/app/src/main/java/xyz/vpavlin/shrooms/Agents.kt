@@ -275,9 +275,11 @@ suspend fun discoverAgents(peers: List<Peer>, byName: List<String> = emptyList()
         // Then the mesh as each agent's machine sees it: a phone that knows one
         // agent finds the rest without being told (/v1/peers). One round, not
         // a crawl — every machine sees the same mesh.
-        val known = found.map { it.name }.toSet() + peers.map { it.name }
+        // Known by machine AND mesh: by name alone, the laptop found on the
+        // office mesh was never looked for on home (k11, 2026-10-16).
+        val known = (found.map { it.name to meshPrefix(it.address) } + peers.map { it.name to meshPrefix(it.overlay) }).toSet()
         val via = found.flatMap { h -> runCatching { AgentClient(h.address).peers() }.getOrDefault(emptyList()) }
-            .filter { it.first !in known }.distinctBy { it.first }
+            .filter { (it.first to meshPrefix(it.third)) !in known }.distinctBy { it.first + "@" + meshPrefix(it.third) }
             .map { (name, mesh, addr) ->
                 async { runCatching { AgentHost(name, mesh, addr, AgentClient(addr).sessions(3000)) }.getOrNull() }
             }

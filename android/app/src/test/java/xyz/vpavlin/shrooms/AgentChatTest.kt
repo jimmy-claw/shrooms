@@ -393,6 +393,14 @@ class MeshPickTest {
         assertEquals("fdb0::1@office", h.of(h.sessions.first()).let { it.address + "@" + it.mesh })
     }
 
+    // An agent's peers come with its machine on each of its meshes.
+    @Test fun peersCarryTheMachineItself() {
+        val got = parsePeerList("""{"peers":[{"name":"k11","mesh":"home","overlay":"fd7b::2"}],
+            "self":[{"name":"laptop","mesh":"home","overlay":"fd7b::1"},{"name":"laptop","mesh":"office","overlay":"fdb0::1"}]}""")
+        assertEquals(listOf("k11@home", "laptop@home", "laptop@office"), got.map { it.first + "@" + it.second })
+        assertEquals(1, parsePeerList("""{"peers":[{"name":"k11","mesh":"home","overlay":"fd7b::2"}]}""").size)
+    }
+
     // A mesh is its address prefix, named as this phone names it: pi5 learnt
     // from atlas (whose name for the office mesh is "default") is on office.
     @Test fun aMeshIsItsPrefix() {

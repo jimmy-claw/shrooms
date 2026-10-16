@@ -479,13 +479,7 @@ class AgentClient(private val address: String) {
     }
 
     /** The mesh as the agent's machine sees it: (name, mesh, overlay address). */
-    fun peers(): List<Triple<String, String, String>> {
-        val a = JSONObject(request("GET", "/v1/peers", null, 4000)).optJSONArray("peers") ?: return emptyList()
-        return (0 until a.length()).map { i ->
-            val o = a.getJSONObject(i)
-            Triple(o.optString("name"), o.optString("mesh"), o.optString("overlay"))
-        }.filter { isMeshAddress(it.third) }
-    }
+    fun peers(): List<Triple<String, String, String>> = parsePeerList(request("GET", "/v1/peers", null, 4000))
 
     fun interrupt(session: String) {
         request("POST", "/v1/sessions/${enc(session)}/interrupt", null)
@@ -637,4 +631,20 @@ fun parseOffer(raw: String): SessionOffer {
             it.optBoolean("nix"), it.optBoolean("sealed"),
             it.optBoolean("shared"), it.optString("shared_in").ifEmpty { "/shared" })
     })
+}
+
+/**
+ * An agent's /v1/peers: its machine's peers, and the machine itself on each of
+ * its meshes ("self", from 0.53.4), so that a machine found on one mesh is
+ * looked for on the others too. Mesh addresses only. Pure, for the tests.
+ */
+fun parsePeerList(json: String): List<Triple<String, String, String>> {
+    val o = JSONObject(json)
+    return listOf("peers", "self").flatMap { k ->
+        val a = o.optJSONArray(k) ?: return@flatMap emptyList()
+        (0 until a.length()).map { i ->
+            val p = a.getJSONObject(i)
+            Triple(p.optString("name"), p.optString("mesh"), p.optString("overlay"))
+        }
+    }.filter { AgentClient.isMeshAddress(it.third) }
 }
