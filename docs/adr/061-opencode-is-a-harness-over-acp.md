@@ -23,8 +23,14 @@ interrupted. Measured on opencode 1.19.2:
   reply as `agent_message_chunk` deltas, reports tool calls as they run, and
   answers each turn with `stopReason` and usage.
 
-So ACP is the transport, and this ADR records the three things that followed
-from that, none of which were obvious before trying it.
+So ACP is the transport — **not `opencode serve`**, which this was expected to
+need. The earlier guess was that a harness for OpenCode would have to be a
+server: start `opencode serve`, speak HTTP to it, and add a second kind of
+process behind the same Codec idea. It was wrong, and nothing like it was
+needed: ACP is stdio, the shape the plug-in point already had.
+
+This ADR records the things that followed from using it, none of which were
+obvious before trying it.
 
 ## Decision
 
@@ -42,9 +48,13 @@ answered with `session/new`, and the session id that comes back is what every
 is up — `Session.SendID` writes it at once — so a turn can arrive *before* there
 is a session to put it in.
 
-`Decode` therefore returns messages **and** anything that must be written back
-to the process, and the read loop writes that first. Claude Code and pi return
-`nil` there and are otherwise untouched.
+So a codec must be able to answer its process while reading from it. That is a
+capability, not something every harness has, so it is **opt-in** — the way
+`Transcripts`, `Gatewayed` and `CageEnv` are: `Answering`, whose `Decoding()`
+returns what the codec queued to write, and the read loop writes that before the
+messages from the same line. **Claude Code and pi do not implement it and their
+codecs are unchanged** — they do not carry a return value they would never use,
+which is what the first draft of this change did to them.
 
 ### 2. The session is created by a round trip, so a turn can be queued
 
@@ -79,17 +89,26 @@ on the first prompt as a block of its own, once.
 - **Takeover is not built.** OpenCode keeps its conversations and ACP can list,
   load and fork them, but adopting another terminal's conversation is not
   implemented, so `Caps.Takeover` is false.
-- The model is a session setting (`-opencode-model`), defaulting to
-  `opencode/deepseek-v4.1-flash-free`. Most of OpenCode's free models are
-  **stealth** — unreleased and anonymous, free "for a limited time" — which is
-  fine for what they are for, but a session meant to outlive one should name a
-  model that is not a codename.
-- Nothing about Claude Code or pi changes except the `Decode` signature.
+- **The model is the session's to choose**, from the apps' model setting, as
+  for any harness. `-opencode-model` is only this machine's default for sessions
+  that name none, and it is **empty** out of the box so OpenCode's own config
+  decides — deliberately, because most of OpenCode's free models are **stealth**
+  (unreleased and anonymous, free "for a limited time") and a flag default
+  naming one would rot into a support call.
+- Nothing about Claude Code or pi changes at all: `Codec` gains nothing, and
+  neither of their codecs implements `Answering`.
+- **OpenCode cannot be caged yet**, and asking for it is refused where it is
+  asked for — `CreateCaged` and `SetCage` — rather than making a cage that fails
+  at exec. Its image has no `opencode`, and it has no private home or gateway
+  there (ADR-059 and ADR-060 are by name, for Claude Code and pi). `AdoptCaged`
+  needs no check of its own: it requires `Transcripts`, which OpenCode is not.
 
 ## What was not verified
 
 - `opencode serve`'s HTTP/SSE API, which might stream more finely than ACP. Not
   needed: ACP already streams, which was the point.
 - Cages. A caged session on OpenCode would need the binary and its own config
-  inside the image; that is a separate piece of work, and the generic
-  `missingHarness` path already covers a machine without it.
+  inside the image, and a private home or a gateway to reach its model. That is
+  a separate piece of work; until then it is refused (see Consequences). That is
+  not the same as `missingHarness`, which covers a machine without the binary,
+  not a cage without it.

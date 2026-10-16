@@ -18,11 +18,14 @@ import (
 //
 // Written against opencode 1.19.2.
 type OpenCode struct {
-	// Model is the value of the ACP model config option, e.g.
-	// "opencode/deepseek-v4.1-flash-free". Empty leaves OpenCode's own
-	// default, which is a stealth model (opencode/big-pickle) — free, and
-	// able to disappear without notice, so a session meant to last should
-	// name one.
+	// Model is this MACHINE's default for the ACP model config option,
+	// e.g. "opencode/deepseek-v4.1-flash-free". Empty — the default —
+	// leaves OpenCode's own config to decide. A session's own choice
+	// (StartOptions.Model, what the apps' model setting sets) wins over it.
+	//
+	// Deliberately not defaulted to a free model: OpenCode's free ones are
+	// mostly stealth (unreleased and anonymous, free for a limited time), so
+	// a default naming one would rot into a support call.
 	Model string
 }
 
@@ -53,8 +56,16 @@ func (OpenCode) Args(StartOptions) []string { return []string{"acp"} }
 // Codec is a translator that knows how this process was started, because
 // everything a session is given has to be sent as a message.
 func (o OpenCode) Codec(s StartOptions) Codec {
+	// The session's own choice wins over the machine's default, which wins
+	// over OpenCode's config. Without this the apps' model setting did
+	// nothing on an OpenCode session.
+	model := s.Model
+	if model == "" {
+		model = o.Model
+	}
 	return &openCodec{
-		model:   o.Model,
+		model:   model,
+		dir:     s.Dir,
 		resume:  s.Resume,
 		mcp:     s.MCP,
 		mcpArgs: s.MCPArgs,
@@ -77,6 +88,7 @@ const (
 
 type openCodec struct {
 	model   string
+	dir     string
 	resume  string
 	mcp     string
 	mcpArgs []string
@@ -94,6 +106,8 @@ type openCodec struct {
 
 	sessionID string
 	ready     bool
+	// writes is what Decode queued for the process: see Answering.
+	writes []any
 	// pending holds turns that arrived before the session existed: a device
 	// can send a message the moment a session starts, and the ACP session is
 	// created a round trip later. Each carries whether it was cancelled while
@@ -155,7 +169,14 @@ func (c *openCodec) Start() []any {
 
 // open asks for a new conversation, or for the one this session already has.
 func (c *openCodec) open() []any {
-	params := map[string]any{"cwd": ".", "mcpServers": c.mcpServers()}
+	// ACP wants an absolute path; the session's directory is one. "." is only
+	// a fallback for a codec built without one (a test), which the protocol
+	// does not promise to accept.
+	cwd := c.dir
+	if cwd == "" {
+		cwd = "."
+	}
+	params := map[string]any{"cwd": cwd, "mcpServers": c.mcpServers()}
 	method := acpNewSession
 	if c.resume != "" {
 		method = acpLoad
@@ -279,14 +300,34 @@ func (c *openCodec) flushText() []json.RawMessage {
 }
 
 // Decode turns one line of the ACP server into messages in the agent's own
-// shape, and into the requests this codec has to answer the server with.
+// shape, queueing anything that has to be written back to the server.
 //
-// It is the one harness here that writes while decoding, and it must: the ACP
+// It is the one codec here that writes while decoding, and it must: the ACP
 // session does not exist until initialize is answered with session/new, and
 // every turn needs the id that comes back. A device may send a message the
 // moment a session is up (Session.SendID writes it at once), so that turn is
-// queued and goes out on this step, with the session/new request.
-func (c *openCodec) Decode(line json.RawMessage) ([]json.RawMessage, []any) {
+// queued and goes out on this step, with the session/new request. See
+// Answering, which is how the read loop knows to write it.
+func (c *openCodec) Decode(line json.RawMessage) []json.RawMessage {
+	msgs, write := c.decode(line)
+	if len(write) > 0 {
+		c.mu.Lock()
+		c.writes = append(c.writes, write...)
+		c.mu.Unlock()
+	}
+	return msgs
+}
+
+// Decoding returns what this codec queued to write, and empties the queue.
+func (c *openCodec) Decoding() []any {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	w := c.writes
+	c.writes = nil
+	return w
+}
+
+func (c *openCodec) decode(line json.RawMessage) ([]json.RawMessage, []any) {
 	var m struct {
 		ID     *int            `json:"id"`
 		Method string          `json:"method"`
@@ -346,6 +387,15 @@ func (c *openCodec) Decode(line json.RawMessage) ([]json.RawMessage, []any) {
 			}
 			json.Unmarshal(m.Result, &res)
 			c.sessionID = res.SessionID
+			if c.sessionID == "" && c.opened == acpLoad {
+				// session/load answers configOptions and NO sessionId — the id
+				// is the one we asked to load. Measured against 1.19.2. Read
+				// from the response alone it was empty, so the model setting
+				// and every prompt went out with an empty id and opencode
+				// answered "session not found", after any restart — which is
+				// what a model change does.
+				c.sessionID = c.resume
+			}
 			for _, o := range res.ConfigOptions {
 				if o.ID == "model" && c.model == "" {
 					c.model = o.CurrentValue

@@ -127,8 +127,15 @@ scan:
 					map[string]any{"value": "opencode/deepseek-v4.1-flash-free", "name": "DeepSeek"},
 				},
 			}
-			emit(map[string]any{"jsonrpc": "2.0", "id": req.ID, "result": map[string]any{
-				"sessionId": id, "configOptions": []any{opt}}})
+			// Measured against 1.19.2: session/new answers a sessionId,
+			// session/load answers only configOptions. The fake said
+			// otherwise, which is why a resume that lost the id passed the
+			// tests and failed on the real thing.
+			res := map[string]any{"configOptions": []any{opt}}
+			if req.Method == "session/new" {
+				res["sessionId"] = id
+			}
+			emit(map[string]any{"jsonrpc": "2.0", "id": req.ID, "result": res})
 
 		case "session/set_config_option":
 			var p struct {

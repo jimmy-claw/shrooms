@@ -150,9 +150,9 @@ func TestATurnSentBeforeTheSessionExistsIsKept(t *testing.T) {
 	}
 
 	// initialize → session/new → the session exists, and the turn goes.
-	_, _ = c.Decode(rawJSON(ack(c.Start()[0], map[string]any{"protocolVersion": 1})))
+	_ = c.Decode(rawJSON(ack(c.Start()[0], map[string]any{"protocolVersion": 1})))
 	opened := c.openID
-	msgs, write := c.Decode(rawJSON(ackID(opened, map[string]any{
+	msgs, write := decode(c, rawJSON(ackID(opened, map[string]any{
 		"sessionId":     "ses_test",
 		"configOptions": []any{map[string]any{"id": "model", "currentValue": "m"}}})))
 
@@ -198,7 +198,8 @@ func TestTheNoteGoesOnTheFirstPromptOnly(t *testing.T) {
 // The mesh's agents as tools, in the shape ACP asks for, and only when this
 // agent has an MCP command to give.
 func TestTheMeshToolsAreOfferedOverACP(t *testing.T) {
-	with := OpenCode{}.Codec(StartOptions{MCP: "/usr/bin/shrooms-agent", MCPArgs: []string{"-x"}}).(*openCodec)
+	with := OpenCode{}.Codec(StartOptions{MCP: "/usr/bin/shrooms-agent", MCPArgs: []string{"-x"},
+		Dir: "/tmp/a-project"}).(*openCodec)
 	got := mustJSON(with.open()[0])
 	if !strings.Contains(got, `"name":"shrooms"`) ||
 		!strings.Contains(got, `"/usr/bin/shrooms-agent"`) ||
@@ -212,6 +213,11 @@ func TestTheMeshToolsAreOfferedOverACP(t *testing.T) {
 	if !strings.Contains(got, `"type":"stdio"`) || !strings.Contains(got, `"env":[]`) {
 		t.Errorf("the entry must carry the discriminator and env, or it is refused: %s", got)
 	}
+	// ACP specifies an absolute path, so the session's directory goes in by
+	// name rather than ".".
+	if !strings.Contains(got, `"cwd":"/tmp/a-project"`) {
+		t.Errorf("the session's directory, absolute, is the cwd: %s", got)
+	}
 	without := OpenCode{}.Codec(StartOptions{}).(*openCodec)
 	if strings.Contains(mustJSON(without.open()[0]), "shrooms") {
 		t.Errorf("a server was offered with nothing to run: %s", mustJSON(without.open()[0]))
@@ -222,13 +228,13 @@ func TestTheMeshToolsAreOfferedOverACP(t *testing.T) {
 // to take a message: the load fails, and a new conversation is opened.
 func TestAFailedResumeOpensANewConversation(t *testing.T) {
 	c := OpenCode{}.Codec(StartOptions{Resume: "ses_gone"}).(*openCodec)
-	_, _ = c.Decode(rawJSON(ack(c.Start()[0], map[string]any{})))
+	_ = c.Decode(rawJSON(ack(c.Start()[0], map[string]any{})))
 	if got := mustJSON(c.open()[0]); !strings.Contains(got, "session/load") ||
 		!strings.Contains(got, "ses_gone") {
 		t.Fatalf("a session with an id to resume should load it: %s", got)
 	}
 	loadID := c.openID
-	_, write := c.Decode(rawJSON(map[string]any{"jsonrpc": "2.0", "id": loadID,
+	_, write := decode(c, rawJSON(map[string]any{"jsonrpc": "2.0", "id": loadID,
 		"error": map[string]any{"code": -32001, "message": "no such session"}}))
 	var opened string
 	for _, w := range write {
@@ -288,8 +294,8 @@ func TestAnInterruptBeforeTheSessionExistsEndsTheWaitingTurn(t *testing.T) {
 	if got := c.Interrupt(); len(got) != 0 {
 		t.Errorf("nothing to cancel at ACP yet, so nothing to write: %s", mustJSON(got))
 	}
-	_, _ = c.Decode(rawJSON(ack(c.Start()[0], map[string]any{})))
-	msgs, write := c.Decode(rawJSON(ackID(c.openID, map[string]any{
+	_ = c.Decode(rawJSON(ack(c.Start()[0], map[string]any{})))
+	msgs, write := decode(c, rawJSON(ackID(c.openID, map[string]any{
 		"sessionId": "ses_x", "configOptions": []any{}})))
 
 	for _, w := range write {
@@ -303,6 +309,84 @@ func TestAnInterruptBeforeTheSessionExistsEndsTheWaitingTurn(t *testing.T) {
 	}
 }
 
+// A resumed conversation keeps the id we asked to resume. session/load
+// answers configOptions and NO sessionId (measured against 1.19.2), so reading
+// the id from the response alone left it empty and every prompt after a
+// restart went out as "session not found" — which is what a model change does,
+// since it restarts the process.
+func TestAResumeKeepsTheConversationIdItAskedFor(t *testing.T) {
+	c := OpenCode{}.Codec(StartOptions{Resume: "ses_old"}).(*openCodec)
+	_ = c.Decode(rawJSON(ack(c.Start()[0], map[string]any{})))
+
+	// The load's answer, exactly as opencode gives it: no sessionId.
+	_, _ = decode(c, rawJSON(ackID(c.openID, map[string]any{
+		"configOptions": []any{map[string]any{"id": "model", "currentValue": "m"}}})))
+
+	got := mustJSON(c.Turn("hello"))
+	if !strings.Contains(got, "ses_old") {
+		t.Errorf("a turn after a resume must name the conversation resumed: %s", got)
+	}
+}
+
+// OpenCode cannot be caged yet: the image has no opencode and there is no
+// private home or gateway for it, so a cage would be made and then fail at
+// exec. Refused where it is asked for, and refused before the podman check, so
+// the answer does not depend on this machine having podman.
+func TestAnOpenCodeSessionIsRefusedACage(t *testing.T) {
+	m := newTestManager(t, t.TempDir())
+	m.Register(OpenCode{}, fakeOpenCodeBin(t))
+
+	_, err := m.CreateCaged("boxed", t.TempDir(), "opencode", &Cage{})
+	if err == nil || !strings.Contains(err.Error(), "OpenCode is not caged yet (ADR-061)") {
+		t.Errorf("caging an OpenCode session at creation: %v", err)
+	}
+	if _, ok := m.Get("boxed"); ok {
+		t.Error("a refused cage must leave no session behind")
+	}
+
+	if _, err := m.CreateWith("plain", t.TempDir(), "opencode"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.SetCage("plain", &Cage{}, "nothing"); err == nil ||
+		!strings.Contains(err.Error(), "OpenCode is not caged yet (ADR-061)") {
+		t.Errorf("caging an OpenCode session that exists: %v", err)
+	}
+}
+
+// The session's own model wins over the machine's default. Without this the
+// apps' model setting did nothing on an OpenCode session — it silently kept
+// the machine's, which is what review found.
+func TestTheSessionsModelWinsOverTheMachines(t *testing.T) {
+	cases := []struct {
+		name    string
+		machine string
+		session string
+		want    string
+	}{
+		{"the session names one", "machine-model", "session-model", "session-model"},
+		{"only the machine names one", "machine-model", "", "machine-model"},
+		{"neither: OpenCode's own config decides", "", "", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c := OpenCode{Model: tc.machine}.Codec(StartOptions{Model: tc.session}).(*openCodec)
+			_ = c.Decode(rawJSON(ack(c.Start()[0], map[string]any{})))
+			_, write := decode(c, rawJSON(ackID(c.openID, map[string]any{
+				"sessionId": "ses_x", "configOptions": []any{}})))
+			got := mustJSON(write)
+			if tc.want == "" {
+				if strings.Contains(got, acpSetConfig) {
+					t.Errorf("nothing should be set, OpenCode decides: %s", got)
+				}
+				return
+			}
+			if !strings.Contains(got, acpSetConfig) || !strings.Contains(got, tc.want) {
+				t.Errorf("the model set should be %q: %s", tc.want, got)
+			}
+		})
+	}
+}
+
 // An interrupt cancels the turns that were waiting for it — not the session.
 // A turn that arrives AFTER the cancel must still go: marking the session
 // swallowed it too, and told the person their message was cancelled when
@@ -313,8 +397,8 @@ func TestATurnAfterAnInterruptIsStillSent(t *testing.T) {
 	c.Turn("first")  // waits for the session
 	c.Interrupt()    // ... and is the one that is cancelled
 	c.Turn("second") // typed after the cancel: it must go
-	_, _ = c.Decode(rawJSON(ack(c.Start()[0], map[string]any{})))
-	msgs, write := c.Decode(rawJSON(ackID(c.openID, map[string]any{
+	_ = c.Decode(rawJSON(ack(c.Start()[0], map[string]any{})))
+	msgs, write := decode(c, rawJSON(ackID(c.openID, map[string]any{
 		"sessionId": "ses_x", "configOptions": []any{}})))
 
 	if got := strings.Count(joinRaw(msgs), "cancelled before the session was open"); got != 1 {
@@ -421,6 +505,14 @@ func TestOpenCodeIsStartedBareAndCannotApprove(t *testing.T) {
 }
 
 // --- helpers ----------------------------------------------------------------
+
+// decode feeds one line to the codec and returns its messages plus what it
+// queued to write (the opt-in Answering side), which is the pair the read loop
+// acts on.
+func decode(c *openCodec, line json.RawMessage) ([]json.RawMessage, []any) {
+	msgs := c.Decode(line)
+	return msgs, c.Decoding()
+}
 
 func rawJSON(v any) json.RawMessage {
 	b, _ := json.Marshal(v)

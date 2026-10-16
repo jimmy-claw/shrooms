@@ -497,6 +497,11 @@ func (m *Manager) CreateCaged(name, dir, harness string, cage *Cage) (Info, erro
 		return Info{}, fmt.Errorf("there is already a session called %q", name)
 	}
 	if cage != nil {
+		// Before the podman check: whether a harness can be caged at all does
+		// not depend on this machine having podman.
+		if err := cageableHarness(harness); err != nil {
+			return Info{}, err
+		}
 		if m.Cages == nil {
 			return Info{}, errors.New("this machine has no podman to cage sessions with")
 		}
@@ -880,7 +885,8 @@ func (s *Session) ensureRunning() error {
 	s.m.mu.Unlock()
 	host, _ := os.Hostname()
 	o := StartOptions{Resume: s.convID, AutoApprove: s.autoApprove && s.harness.Caps().Approve, Session: s.Name(),
-		MCP: s.m.Self, MCPArgs: s.m.mcpArgs(), Note: AgentNote(host, s.Name()), Model: s.modelSet}
+		MCP: s.m.Self, MCPArgs: s.m.mcpArgs(), Note: AgentNote(host, s.Name()), Model: s.modelSet,
+		Dir: s.dir}
 	var cage *cageRun
 	if s.cage != nil {
 		var err error

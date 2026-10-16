@@ -71,8 +71,8 @@ func run() error {
 	piBin := flag.String("pi", "pi", "pi (pi.dev), offered for new sessions when found; \"\" to leave it out")
 	piArgs := flag.String("pi-args", "", "extra arguments for every pi session, e.g. \"--provider ollama --model qwen3\"")
 	openCodeBin := flag.String("opencode", "opencode", "OpenCode (opencode.ai), offered for new sessions when found; \"\" to leave it out")
-	openCodeModel := flag.String("opencode-model", "opencode/deepseek-v4.1-flash-free",
-		"the model every OpenCode session uses; it is free, and a free model can be withdrawn without notice, so name one that exists")
+	openCodeModel := flag.String("opencode-model", "",
+		"the model an OpenCode session on this machine uses unless the session names one; empty leaves OpenCode's own config to decide")
 	agentSock := flag.String("agent-socket", agent.SocketPath(), "this agent's own unix socket, for this machine's user only (ADR-056)")
 	mcp := flag.Bool("mcp", true, "give every session the mesh's agents as MCP tools (shrooms-agent mcp) and tell it how to use them")
 	flag.Parse()

@@ -276,13 +276,7 @@ func piText(text string) json.RawMessage {
 		"content": []any{map[string]any{"type": "text", "text": text}}}})
 }
 
-func (c *piCodec) Decode(line json.RawMessage) ([]json.RawMessage, []any) {
-	return c.decode(line), nil
-}
-
-// decode is pi's translation, kept as it was: pi never writes while
-// decoding, so the interface's second return stays nil for it.
-func (c *piCodec) decode(line json.RawMessage) []json.RawMessage {
+func (c *piCodec) Decode(line json.RawMessage) []json.RawMessage {
 	var e struct {
 		Type    string          `json:"type"`
 		ID      string          `json:"id"`

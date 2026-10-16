@@ -97,19 +97,11 @@ func startProc(ctx context.Context, log *slog.Logger, h Harness, bin, dir string
 				log.Debug(h.Name()+" wrote a line that is not JSON", "line", string(line))
 				continue
 			}
-			msgs, write := p.codec.Decode(append(json.RawMessage(nil), line...))
-			// Anything the codec must answer with goes first: for OpenCode it
-			// is the request that opens the session, and the messages below
-			// only make sense once it has.
-			if len(write) > 0 {
-				if err := p.writeAll(write); err != nil {
-					// A write that fails here takes the messages below with it,
-					// and with them any turn the codec was holding until the
-					// session existed (OpenCode queues a turn that arrives
-					// first). Those turns are not persisted anywhere, so the
-					// person's message is gone; it is reported as the process
-					// failing, not as the message not being sent. Worth knowing
-					// when the next vanished message is reported.
+			msgs := p.codec.Decode(append(json.RawMessage(nil), line...))
+			// A codec that has to answer its process while decoding (Answering)
+			// writes first: the messages below only make sense once it has.
+			if a, ok := p.codec.(Answering); ok {
+				if err := p.writeAll(a.Decoding()); err != nil {
 					p.err = err
 					break
 				}

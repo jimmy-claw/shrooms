@@ -57,6 +57,10 @@ type StartOptions struct {
 	// Model is the one chosen for the session (SetModel); "" for the
 	// harness's default.
 	Model string
+	// Dir is the session's directory, absolute. It is also the process's
+	// working directory; a codec needs it by name when its protocol takes a
+	// path (OpenCode's ACP session/new wants one, and wants it absolute).
+	Dir string
 }
 
 // AgentNote is what every session is told about the agents around it.
@@ -94,17 +98,8 @@ type Codec interface {
 	// Start is what to write as soon as the process is up (nil for nothing).
 	Start() []any
 	// Decode turns one line the process wrote into zero or more stream-json
-	// messages, and into anything that must be written BACK to the process
-	// before those messages are acted on.
-	//
-	// The second return is not decoration: a harness whose protocol needs a
-	// round trip to become usable has to answer its process while decoding.
-	// OpenCode's ACP session is created that way — initialize is answered
-	// with session/new, and the session id from that is what every turn
-	// needs — so a turn that arrived before the session existed goes out on
-	// that same step. Claude Code and pi write nothing here: what they send
-	// is decided before the process starts, or by a turn.
-	Decode(line json.RawMessage) (msgs []json.RawMessage, write []any)
+	// messages. A line that means nothing to the apps yields none.
+	Decode(line json.RawMessage) []json.RawMessage
 	// Turn is a user turn, sent whether or not a turn is in progress.
 	Turn(text string) []any
 	// Interrupt stops the turn in progress.
@@ -113,6 +108,20 @@ type Codec interface {
 	// sent) with the id given: response is {"behavior":"allow",
 	// "updatedInput":{…}} or {"behavior":"deny","message":…}.
 	Respond(requestID string, response map[string]any) []any
+}
+
+// Answering is a codec whose protocol needs a round trip before it can be
+// used, so it must write to its process WHILE decoding. OpenCode's ACP is that
+// shape: initialize is answered with session/new, and the id that comes back is
+// what every turn needs — so a turn that arrived before the session existed
+// goes out on that step. The codec queues what it must send and the read loop
+// writes it before the messages from the same line.
+//
+// Opt-in, like Transcripts and Gatewayed: Claude Code and pi write nothing
+// here, and their codecs do not carry a return value they would never use.
+type Answering interface {
+	// Decoding returns what this codec queued to write, and empties the queue.
+	Decoding() []any
 }
 
 // Transcripts is a harness whose conversations are kept on disk where the
@@ -222,13 +231,7 @@ type claudeCodec struct{}
 var interrupts atomic.Uint64
 
 func (claudeCodec) Start() []any { return nil }
-func (claudeCodec) Decode(line json.RawMessage) ([]json.RawMessage, []any) {
-	return claudeDecode(line), nil
-}
-
-// claudeDecode is the pass-through, kept separate so the interface's second
-// return does not thread through every branch of it.
-func claudeDecode(line json.RawMessage) []json.RawMessage {
+func (claudeCodec) Decode(line json.RawMessage) []json.RawMessage {
 	return []json.RawMessage{line}
 }
 func (claudeCodec) Turn(text string) []any {
