@@ -248,8 +248,9 @@ func (m *Manager) sealedEnv(s *Session) (map[string]string, error) {
 	// Through the gateway when the harness can be pointed there (ADR-059):
 	// the token stays with the agent, and code nobody vouches for cannot
 	// read it out of the cage's environment.
-	if g, ok := s.harness.(Gatewayed); ok && m.Self != "" {
-		for k, v := range g.GatewayEnv(true) {
+	if s.cageGateway {
+		genv, _, _ := m.gatewayFor(s)
+		for k, v := range genv {
 			env[k] = v
 		}
 		return env, nil
@@ -258,12 +259,19 @@ func (m *Manager) sealedEnv(s *Session) (map[string]string, error) {
 	return env, nil
 }
 
-// gatewayed is whether a session's cage reaches its model through the
-// gateway: sealed, its harness can be pointed there, and there is an agent
-// binary in the cage to forward with.
-func (m *Manager) gatewayed(s *Session) bool {
-	_, ok := s.harness.(Gatewayed)
-	return ok && s.cage != nil && s.cage.Sealed && m.Self != ""
+// gatewayFor is how a session's harness is pointed at the gateway in its
+// cage: its environment and files; ok when it can be (a harness that
+// plugs in, with something to say for this cage, and an agent binary in
+// the cage to forward with). Claude Code in a caged session runs on the
+// owner's own login, which the gateway does not hold: it says nothing there
+// and keeps its login.
+func (m *Manager) gatewayFor(s *Session) (env, files map[string]string, ok bool) {
+	g, is := s.harness.(Gatewayed)
+	if !is || s.cage == nil || m.Self == "" {
+		return nil, nil, false
+	}
+	env, files = g.GatewayEnv(s.cage.Sealed), g.GatewayFiles(s.cage.Sealed)
+	return env, files, len(env)+len(files) > 0
 }
 
 // cageRules is the nftables ruleset set inside a cage from outside. Every

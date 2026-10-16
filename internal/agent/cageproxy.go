@@ -51,6 +51,8 @@ const (
 	// (ticked later, or its meshes changed) is made again (ADR-057). Not a
 	// generation: a cage without the folder that is not asked for it stays.
 	sharedLabel = "xyz.vpavlin.shrooms.shared"
+	// gatewayLabel marks a cage made with the gateway's files (ADR-059).
+	gatewayLabel = "xyz.vpavlin.shrooms.gateway"
 )
 
 // Machine is one machine on the mesh with an agent's address: this one

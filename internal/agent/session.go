@@ -137,6 +137,9 @@ type Session struct {
 	keepRunning bool
 	// cage: the session runs in a container of its own (cage.go); nil not.
 	cage *Cage
+	// cageGateway: its cage reaches its model through the gateway this
+	// start (ADR-059); set by prepareCage, read by cageEnv.
+	cageGateway bool
 	// acceptCaged: whether it takes tasks from caged agents; nil for the
 	// default, which is yes for a caged session and no for one outside
 	// (ADR-044).

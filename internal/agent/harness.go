@@ -169,8 +169,14 @@ func (Claude) Args(o StartOptions) []string {
 }
 
 // GatewayEnv points Claude Code at the gateway (ADR-059): its API's base
-// URL and a key, which the gateway replaces with the real credential.
-func (Claude) GatewayEnv(bool) map[string]string {
+// URL and a key, which the gateway replaces with the real credential. In a
+// sealed cage only: there it runs on the machine's sealed token, which the
+// gateway holds. A caged session runs on the owner's own login, kept in
+// ~/.claude, which the gateway does not hold, and keeps it.
+func (Claude) GatewayEnv(sealed bool) map[string]string {
+	if !sealed {
+		return nil
+	}
 	return map[string]string{"ANTHROPIC_BASE_URL": GatewayBase("anthropic"), "ANTHROPIC_API_KEY": GatewayKey}
 }
 

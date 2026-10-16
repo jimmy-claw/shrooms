@@ -1,8 +1,13 @@
 # 059. Cages reach their models through the agent, and hold no keys
 
-**Status:** accepted 2026-10-16. Phase 1 built the same day: sealed cages
-running Claude Code reach Anthropic through the gateway and hold no token.
-Phase 2 next: pi, then caged sessions by default.
+**Status:** accepted 2026-10-16, built the same day:
+- **Phase 1:** sealed cages running Claude Code reach Anthropic through the
+  gateway, and hold no token.
+- **Phase 2:** caged pi sessions reach their cloud providers through it, and
+  hold no model keys.
+
+Caged Claude Code sessions keep the owner's own login: it lives in
+`~/.claude`, which the gateway does not hold.
 
 ## Context
 
@@ -67,6 +72,16 @@ caged sessions by default.
   log of usage, an allowlist of models.
 - A harness that does not plug in keeps working as before, with the keys
   passed in, until it does.
+- **A cage made before the gateway keeps its keys** until it is made again,
+  rather than losing what was installed in it to an upgrade. Cages made with
+  the gateway carry the label `xyz.vpavlin.shrooms.gateway=1`.
+- **pi's file replaces a mount, not adds one.** pi's `models.json` is one of
+  its settings mounted read-only, and podman refuses two mounts at one place.
+  The first live run found this.
+- **Tested live, 2026-10-16, on OpenRouter:** a caged pi session answered
+  through the gateway. The key was in none of its environment or processes,
+  its `models.json` pointed OpenRouter at the gateway and kept the owner's
+  `k11` provider, and the real file on the machine was untouched.
 - The gateway is in the path of every model call a cage makes. If the
   agent restarts, those calls fail and are retried, as on any network
   error.

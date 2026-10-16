@@ -554,3 +554,33 @@ func (Pi) ParseTranscriptLine(line []byte) (Said, bool) {
 	}
 	return Said{}, false
 }
+
+// GatewayEnv: pi takes its endpoints from models.json, not the environment.
+func (Pi) GatewayEnv(bool) map[string]string { return nil }
+
+// GatewayFiles points pi at the gateway (ADR-059): its models.json as the
+// owner keeps it, with the cloud providers' baseUrl the gateway's and their
+// key a dummy. A provider given only these keeps its built-in models; the
+// owner's own (a local server on the mesh) stay as they are.
+func (Pi) GatewayFiles(bool) map[string]string {
+	path := filepath.Join(piAgentDir(), "models.json")
+	cfg := map[string]any{}
+	if b, err := os.ReadFile(path); err == nil {
+		json.Unmarshal(b, &cfg)
+	}
+	providers, _ := cfg["providers"].(map[string]any)
+	if providers == nil {
+		providers = map[string]any{}
+	}
+	for _, name := range []string{"anthropic", "openai", "openrouter", "venice"} {
+		p, _ := providers[name].(map[string]any)
+		if p == nil {
+			p = map[string]any{}
+		}
+		p["baseUrl"], p["apiKey"] = GatewayBase(name), GatewayKey
+		providers[name] = p
+	}
+	cfg["providers"] = providers
+	b, _ := json.MarshalIndent(cfg, "", "  ")
+	return map[string]string{path: string(b)}
+}

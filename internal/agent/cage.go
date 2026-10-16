@@ -723,6 +723,11 @@ func (m *Manager) prepareCage(s *Session, bin string) (*cageRun, error) {
 		if s.cage.Sealed {
 			sealedOut, _ = c.run(ctx, "inspect", "--format", "{{index .Config.Labels \""+sealedLabel+"\"}}", name)
 		}
+		// Made with the gateway's files (ADR-059)? A cage made before them
+		// keeps its keys until it is made again, rather than losing what
+		// was installed in it to an upgrade.
+		gwOut, _ := c.run(ctx, "inspect", "--format", "{{index .Config.Labels \""+gatewayLabel+"\"}}", name)
+		s.cageGateway = strings.TrimSpace(gwOut) == "1"
 		// Its shared folder, which is set when it is made: one asked for
 		// later, or another one since its meshes changed, is a new cage.
 		sharedOut, _ := c.run(ctx, "inspect", "--format", "{{index .Config.Labels \""+sharedLabel+"\"}}", name)
@@ -772,6 +777,29 @@ func (m *Manager) prepareCage(s *Session, bin string) (*cageRun, error) {
 			}
 			extra = append(extra, "--label", sharedLabel+"="+v)
 		}
+		// Through the gateway (ADR-059): its files laid over the cage's,
+		// and the label that says so.
+		if _, files, ok := m.gatewayFor(s); ok {
+			for at := range files {
+				// In place of what is mounted there already: pi's models.json
+				// is one of its settings mounted read-only (piHostCode), and
+				// podman refuses two mounts at one place.
+				kept := ms[:0]
+				for _, x := range ms {
+					if x.at != at && !(x.at == "" && x.path == at) {
+						kept = append(kept, x)
+					}
+				}
+				ms = append(kept, mount{path: m.gatewayFile(name, at), at: at, ro: true})
+			}
+			extra = append(extra, "--label", gatewayLabel+"=1")
+			s.cageGateway = true
+		} else {
+			s.cageGateway = false
+		}
+		if err := m.writeGatewayFiles(s, name); err != nil {
+			return nil, err
+		}
 		if _, err := c.run(ctx, c.createArgsWith(s.cage, name, s.Name(), image, ms, extra...)...); err != nil {
 			return nil, err
 		}
@@ -790,7 +818,15 @@ func (m *Manager) prepareCage(s *Session, bin string) (*cageRun, error) {
 	// The forwarder to the gateway, on the cage's loopback, before the
 	// harness that will use it (ADR-059). It holds no secret; a second one
 	// in a cage that kept running finds the port taken and goes.
-	if m.gatewayed(s) {
+	// A sealed Claude cage needs no files, only its environment: the
+	// gateway, whatever the cage was made with.
+	if genv, files, ok := m.gatewayFor(s); ok && s.cage.Sealed && len(files) == 0 && len(genv) > 0 {
+		s.cageGateway = true
+	}
+	if err := m.writeGatewayFiles(s, name); err != nil {
+		return nil, err
+	}
+	if s.cageGateway {
 		if _, err := c.run(ctx, "exec", "-d", name, m.Self, "llm-forward",
 			"--listen", GatewayListen, "--socket", CageProxyDir+"/proxy.sock"); err != nil {
 			return nil, fmt.Errorf("the cage's way to its model: %w", err)
@@ -847,7 +883,17 @@ func (m *Manager) cageEnv(s *Session) (string, error) {
 	}
 	for _, kv := range os.Environ() {
 		k, v, _ := strings.Cut(kv, "=")
+		// Through the gateway, no model's key goes in (ADR-059).
+		if s.cageGateway && modelCredential(k) {
+			continue
+		}
 		if passedToCage(k, s.cage.GitHub) {
+			vars[k] = v
+		}
+	}
+	if s.cageGateway {
+		genv, _, _ := m.gatewayFor(s)
+		for k, v := range genv {
 			vars[k] = v
 		}
 	}
@@ -1060,4 +1106,48 @@ func (m *Manager) SetCageLimits(name, memory, cpus, by string) (Info, error) {
 		}
 	}
 	return s.Info(), nil
+}
+
+// modelCredential is a variable that holds a key to a model: kept out of a
+// cage that reaches its model through the gateway. A GitHub token is not
+// one; it goes with the GitHub login, as before.
+func modelCredential(k string) bool {
+	if strings.HasPrefix(k, "GH_") || strings.HasPrefix(k, "GITHUB_") {
+		return false
+	}
+	return strings.HasSuffix(k, "_API_KEY") || strings.HasSuffix(k, "_TOKEN") || k == "ANTHROPIC_AUTH_TOKEN"
+}
+
+// gatewayFile is where on the machine a cage's gateway file is kept, to be
+// mounted over the one at `at` in the cage.
+func (m *Manager) gatewayFile(container, at string) string {
+	return filepath.Join(m.dir, "cages", container+".gw", strings.ReplaceAll(strings.TrimPrefix(at, "/"), "/", "_"))
+}
+
+// writeGatewayFiles writes a session's gateway files, fresh at every start.
+// Written in place, not replaced: a file mounted into a cage is its inode,
+// and a new one would not be seen there.
+func (m *Manager) writeGatewayFiles(s *Session, container string) error {
+	_, files, ok := m.gatewayFor(s)
+	if !ok {
+		return nil
+	}
+	for at, content := range files {
+		p := m.gatewayFile(container, at)
+		if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
+			return err
+		}
+		f, err := os.OpenFile(p, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+		if err != nil {
+			return err
+		}
+		_, werr := f.WriteString(content)
+		if cerr := f.Close(); werr == nil {
+			werr = cerr
+		}
+		if werr != nil {
+			return werr
+		}
+	}
+	return nil
 }

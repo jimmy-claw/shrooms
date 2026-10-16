@@ -51,6 +51,8 @@ inspect)
 unshare) cat > "$D/nft-rules" ;;
 build) cat > $D/Containerfile ;;
 exec)
+  # The gateway's forwarder, started in the background: nothing to run here.
+  case "$*" in *llm-forward*) exit 0 ;; esac
   case "$*" in *if_inet6*)
     # A cage whose pasta is gone, once: loopback only.
     if [ -f "$D/nonet-$2" ]; then rm "$D/nonet-$2"; echo "00000000000000000000000000000001 01 80 10 80       lo"; exit 0; fi

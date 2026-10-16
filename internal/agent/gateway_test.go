@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // A sealed cage's request reaches the model with the machine's token and not
@@ -97,6 +98,11 @@ func TestASealedCageHoldsNoToken(t *testing.T) {
 	name := "rev"
 	s := &Session{dir: t.TempDir(), harness: Claude{}, cage: &Cage{Sealed: true, Container: "c"}}
 	s.label.Store(&name)
+	genv, files, ok := m.gatewayFor(s)
+	if !ok || len(files) != 0 || genv["ANTHROPIC_BASE_URL"] == "" {
+		t.Fatalf("a sealed Claude cage is not pointed at the gateway by its environment: %v %v %v", genv, files, ok)
+	}
+	s.cageGateway = true // as prepareCage sets it
 	env, err := m.sealedEnv(s)
 	if err != nil {
 		t.Fatal(err)
@@ -109,7 +115,83 @@ func TestASealedCageHoldsNoToken(t *testing.T) {
 	if env["ANTHROPIC_BASE_URL"] != GatewayBase("anthropic") || env["ANTHROPIC_API_KEY"] != GatewayKey {
 		t.Fatalf("not pointed at the gateway: %v", env)
 	}
-	if !m.gatewayed(s) {
-		t.Error("the forwarder would not be started")
+}
+
+// A caged pi session made with the gateway gets a models.json pointing the
+// cloud providers at it, keeps the owner's own providers, and no model keys;
+// a caged Claude session keeps its own login and is not gatewayed.
+func TestACagedPiReachesItsModelsThroughTheGateway(t *testing.T) {
+	agentDir := t.TempDir()
+	t.Setenv("PI_CODING_AGENT_DIR", agentDir)
+	os.WriteFile(filepath.Join(agentDir, "models.json"), []byte(`{"providers":{"k11":{"baseUrl":"http://ai.k11.home.mesh/v1","api":"openai-completions","apiKey":"lemonade","models":[{"id":"q"}]},"openrouter":{"headers":{"X-Title":"mine"}}}}`), 0o600)
+	t.Setenv("OPENROUTER_API_KEY", "sk-or-real")
+	t.Setenv("GH_TOKEN", "gh-real")
+	m := newTestManager(t, t.TempDir())
+	m.Self = "/usr/local/bin/shrooms-agent"
+	name := "pi-box"
+	s := &Session{dir: t.TempDir(), harness: Pi{}, cage: &Cage{Container: "c", GitHub: true}}
+	s.label.Store(&name)
+	_, files, ok := m.gatewayFor(s)
+	mj := files[filepath.Join(agentDir, "models.json")]
+	if !ok || !strings.Contains(mj, GatewayBase("openrouter")) || !strings.Contains(mj, "ai.k11.home.mesh") || !strings.Contains(mj, `"X-Title"`) || strings.Contains(mj, "sk-or-real") {
+		t.Fatalf("pi's models.json through the gateway:\n%s", mj)
+	}
+	s.cageGateway = true
+	path, err := m.cageEnv(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := os.ReadFile(path)
+	if strings.Contains(string(b), "sk-or-real") || !strings.Contains(string(b), "GH_TOKEN=gh-real") {
+		t.Fatalf("the cage's environment:\n%s", b)
+	}
+	c := &Session{dir: t.TempDir(), harness: Claude{}, cage: &Cage{Container: "d"}}
+	c.label.Store(&name)
+	if _, _, ok := m.gatewayFor(c); ok {
+		t.Error("a caged Claude session on the owner's login is gatewayed")
+	}
+}
+
+// A caged pi session's cage is made with the gateway's models.json in place
+// of the owner's read-only one (one mount there, not two), labelled, and the
+// forwarder started before pi; a cage made before the gateway keeps its keys.
+func TestACagedPiCageIsMadeWithTheGateway(t *testing.T) {
+	agentDir := t.TempDir()
+	t.Setenv("PI_CODING_AGENT_DIR", agentDir)
+	os.WriteFile(filepath.Join(agentDir, "models.json"), []byte(`{"providers":{}}`), 0o600)
+	t.Setenv("OPENROUTER_API_KEY", "sk-or-real")
+	podman, log := fakePodman(t, false)
+	m := newTestManager(t, t.TempDir())
+	m.Register(Pi{}, fakePiBin(t))
+	m.Self = fakePiBin(t)
+	m.Cages = &Cages{Podman: podman, Image: "localhost/bench:1", Nft: "nft"}
+	if _, err := m.CreateCaged("pibox", t.TempDir(), "pi", &Cage{}); err != nil {
+		t.Fatal(err)
+	}
+	s, _ := m.Get("pibox")
+	if err := s.Send("hello", "phone"); err != nil {
+		t.Fatal(err)
+	}
+	// Until pi is run in the cage (whether the fake pi answers there is not
+	// what this is about).
+	var cs []string
+	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
+		if cs = calls(t, log); indexOf(cs, `^exec -i `) >= 0 {
+			break
+		}
+	}
+	create := indexOf(cs, `^create `)
+	at := filepath.Join(agentDir, "models.json")
+	if create < 0 || strings.Count(cs[create], ":"+at) != 1 || !strings.Contains(cs[create], ".gw/") || !strings.Contains(cs[create], "--label "+gatewayLabel+"=1") {
+		t.Fatalf("not made with the gateway's models.json alone at %s, labelled: %s", at, cs[create])
+	}
+	fw := indexOf(cs, `^exec -d \S+ \S+ llm-forward --listen `+GatewayListen)
+	run := indexOf(cs, `^exec -i `)
+	if fw < 0 || run < 0 || fw > run {
+		t.Fatalf("the forwarder is not started before pi: %q", cs)
+	}
+	env, _ := os.ReadFile(filepath.Join(m.dir, "cages", s.cage.Container+".env"))
+	if strings.Contains(string(env), "sk-or-real") {
+		t.Fatalf("the key is in the cage:\n%s", env)
 	}
 }
