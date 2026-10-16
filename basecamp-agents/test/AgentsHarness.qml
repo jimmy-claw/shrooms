@@ -656,8 +656,9 @@ Item {
             var byCost = view.usageSections()[0].lines.map(function(l) { return l.name }).join(",")
             console.error("USAGE asked=" + top.usageAsked[0].replace(/since=\d{4}-\d{2}-\d{2}/, "since=D") + " who="
                           + secs[0].lines.map(function(l) { return l.name + ":" + view.usageFormat(l, "output") }).join(",")
-                          + " where=" + secs[1].lines.map(function(l) { return l.name + ":" + l.turns }).join(",")
-                          + " model=" + secs[2].lines.map(function(l) { return l.name }).join(",")
+                          + " agent=" + secs[1].lines.map(function(l) { return l.name + ":" + l.turns }).join(",")
+                          + " where=" + secs[2].lines.map(function(l) { return l.name + ":" + l.turns }).join(",")
+                          + " model=" + secs[3].lines.map(function(l) { return l.name }).join(",")
                           + " bycost=" + byCost + " busy=" + view.usageHours(secs[0].lines[0].busy)
                           + " since7=" + view.usageSince(7, "2026-10-05T12:00:00") + " sinceAll=[" + view.usageSince(0) + "]"
                           + " first=" + waitingFirst + " then=" + view.usageWaiting.length)

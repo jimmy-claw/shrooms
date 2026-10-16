@@ -365,6 +365,8 @@ fun UsageScreen(hosts: List<AgentHost>, onBack: () -> Unit) {
                 r.isEmpty() -> Text("nothing used in this period", style = MaterialTheme.typography.bodySmall, color = Palette.Ash)
                 else -> {
                     UsageSection("WHO ASKED", UsageView.group(r, measure, UsageView::device), measure, Palette.Phosphor)
+                    // Per agent: which session used what, as Basecamp shows it.
+                    UsageSection("WHICH AGENT", UsageView.group(r, measure) { it.machine + "/" + it.session }, measure, Palette.Chartreuse)
                     UsageSection("WHERE IT RAN", UsageView.group(r, measure) { it.machine }, measure, Palette.Sky)
                     UsageSection("MODEL", UsageView.group(r, measure) { it.model.ifEmpty { "?" } }, measure, Palette.Violet)
                 }

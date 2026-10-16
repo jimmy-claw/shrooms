@@ -2874,6 +2874,9 @@ Item {
         var r = usageRows || [], m = usageMeasure
         return [
             { title: "WHO ASKED", tint: cPhosphor, lines: usageGroup(r, usageDevice, m) },
+            // Per agent: a machine runs several sessions, and which of them
+            // used what says more than the machine they share.
+            { title: "WHICH AGENT", tint: cChartreuse, lines: usageGroup(r, function(x) { return x.machine + "/" + x.session }, m) },
             { title: "WHERE IT RAN", tint: cSky, lines: usageGroup(r, function(x) { return x.machine }, m) },
             { title: "MODEL", tint: cViolet, lines: usageGroup(r, function(x) { return x.model || "?" }, m) }
         ]
