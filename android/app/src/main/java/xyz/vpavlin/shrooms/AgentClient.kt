@@ -62,6 +62,12 @@ data class AgentSession(
     val modelSetting: String = "",
     /** How fast its model wrote in its last turn, output tokens a second; 0 when not known. */
     val tokensPerSecond: Double = 0.0,
+    /**
+     * Where it is reached, when not at its machine's address as shown: under
+     * "all", a session there only for another of the machine's meshes (onMesh).
+     */
+    val at: String = "",
+    val atMesh: String = "",
 )
 
 /** A sender a session refused files from, and what it tried to send. */

@@ -380,6 +380,19 @@ class MeshPickTest {
         assertEquals(listOf("laptop:office:home,office", "k11:home:home"), all.map { it.name + ":" + it.mesh + ":" + it.meshes.joinToString(",") })
     }
 
+    // All: a session there for one mesh only is listed under its machine
+    // however the machine is shown, and reached on that mesh.
+    @Test fun allKeepsAMeshOnlySession() {
+        fun s(n: String) = AgentSession(n, "/", "idle", 0, true, 0)
+        val home = AgentHost("laptop", "home", "fd7b::1", listOf(s("SPEL"), s("k11")), lastSeen = 5)
+        val office = AgentHost("laptop", "office", "fdb0::1", listOf(s("SPEL"), s("reviewer")), lastSeen = 9)
+        val h = onMesh(listOf(home, office), "").single()
+        assertEquals(listOf("SPEL", "k11", "reviewer"), h.sessions.map { it.name })
+        val k11 = h.sessions.first { it.name == "k11" }
+        assertEquals("fd7b::1@home", h.of(k11).let { it.address + "@" + it.mesh })
+        assertEquals("fdb0::1@office", h.of(h.sessions.first()).let { it.address + "@" + it.mesh })
+    }
+
     // A mesh is its address prefix, named as this phone names it: pi5 learnt
     // from atlas (whose name for the office mesh is "default") is on office.
     @Test fun aMeshIsItsPrefix() {

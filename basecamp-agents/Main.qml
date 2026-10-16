@@ -417,8 +417,25 @@ Item {
             }
             if (h.mesh && by[h.name].meshes.indexOf(h.mesh) < 0) by[h.name].meshes.push(h.mesh)
         }
-        return out.map(function(x) { return Object.assign({}, x, { meshes: x.meshes.slice().sort() }) })
+        // With the sessions there only for another of its meshes, reached
+        // there: a session for the home mesh alone was missing when the
+        // office copy was shown (k11, 2026-10-16). Agents.kt's onMesh.
+        return out.map(function(x) {
+            var ss = (x.sessions || []).slice(), others = hosts.filter(function(o) { return o.name === x.name && o !== x && o.address !== x.address })
+            others.sort(function(a, b) { return (b.lastSeen || 0) - (a.lastSeen || 0) })
+            var more = 0
+            for (var i = 0; i < others.length; i++)
+                for (var j = 0; j < (others[i].sessions || []).length; j++) {
+                    var o = others[i].sessions[j]
+                    if (ss.some(function(y) { return y.name === o.name })) continue
+                    ss.push(Object.assign({}, o, { at: others[i].address, atMesh: others[i].mesh })); more++
+                }
+            if (more) ss.sort(function(a, b) { return a.name < b.name ? -1 : a.name > b.name ? 1 : 0 })
+            return Object.assign({}, x, { meshes: x.meshes.slice().sort(), sessions: ss })
+        })
     }
+    // The machine as a session is reached: on the mesh it is there for.
+    function hostFor(h, s) { return (s && s.at) ? Object.assign({}, h, { address: s.at, mesh: s.atMesh }) : h }
     function pickMesh(m) {
         root.meshPick = m
         savePref("agent_mesh", m)
@@ -2103,7 +2120,7 @@ Item {
             // negates it), which is ONE event - the session opened with a single line and
             // "N earlier events not loaded" (2026-10-10). The default tail is what opens a
             // session the way the list does.
-            openSession(hs[i], row.session)
+            openSession(hostFor(hs[i], (hs[i].sessions || []).filter(function(x) { return x.name === row.session })[0]), row.session)
             return
         }
     }
@@ -2121,7 +2138,7 @@ Item {
         for (var i = 0; i < hosts.length; i++) {
             var ss = hosts[i].sessions || []
             for (var j = 0; j < ss.length; j++) {
-                var c = { key: boardKey(hosts[i], ss[j].name), host: hosts[i], sess: ss[j] }
+                var c = { key: boardKey(hosts[i], ss[j].name), host: hostFor(hosts[i], ss[j]), sess: ss[j] }
                 if (ss[j].starred) starred.push(c); else out.push(c)
             }
         }
@@ -4430,7 +4447,7 @@ Item {
                             delegate: SessionCard {
                                 required property var modelData
                                 width: hostList.availableWidth
-                                host: modelData.host
+                                host: root.hostFor(modelData.host, modelData.sess)
                                 sess: modelData.sess
                                 showHost: true
                             }
@@ -4474,7 +4491,7 @@ Item {
                             delegate: SessionCard {
                                 required property var modelData
                                 width: hostCol.width
-                                host: hostCol.modelData
+                                host: root.hostFor(hostCol.modelData, modelData)
                                 sess: modelData
                             }
                         }

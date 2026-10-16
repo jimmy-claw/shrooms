@@ -102,7 +102,10 @@ data class AgentHost(
     val lastSeen: Long = 0,
     /** Shown once under "all": every mesh it answers on (onMesh). */
     val meshes: List<String> = emptyList(),
-)
+) {
+    /** The machine as [s] is reached: on the mesh it is there for, under "all". */
+    fun of(s: AgentSession): AgentHost = if (s.at.isEmpty()) this else copy(address = s.at, mesh = s.atMesh)
+}
 
 /**
  * The list kept between rounds of finding, so a machine that misses a round —
@@ -172,8 +175,15 @@ fun onMesh(hosts: List<AgentHost>, mesh: String): List<AgentHost> =
     if (mesh.isNotEmpty()) hosts.filter { it.mesh == mesh }
     else hosts.groupBy { it.name }.map { (_, hs) ->
         // Once each, as it last answered (a mesh that stopped answering keeps
-        // an old copy), with every mesh it answers on.
-        hs.maxBy { it.lastSeen }.copy(meshes = hs.map { it.mesh }.filter { it.isNotEmpty() }.distinct().sorted())
+        // an old copy), with every mesh it answers on, and the sessions there
+        // only for another of them, reached there: a session for the home
+        // mesh alone was missing when the office copy was shown (k11, 2026-10-16).
+        val main = hs.maxBy { it.lastSeen }
+        val more = hs.filter { it !== main }.sortedByDescending { it.lastSeen }.flatMap { o ->
+            o.sessions.map { it.copy(at = o.address, atMesh = o.mesh) }
+        }.filter { s -> main.sessions.none { it.name == s.name } }.distinctBy { it.name }
+        main.copy(meshes = hs.map { it.mesh }.filter { it.isNotEmpty() }.distinct().sorted(),
+            sessions = if (more.isEmpty()) main.sessions else (main.sessions + more).sortedBy { it.name })
     }
 
 /**
@@ -466,7 +476,7 @@ fun AgentsScreen(peers: List<Peer>, onClose: () -> Unit, initial: OpenSession? =
         }
         BackHandler { if (creatingOn != null) creatingOn = null else onClose() }
         deleting?.let { (h, sess) ->
-            DeleteSessionDialog(h.name, h.address, sess, onDismiss = { deleting = null },
+            DeleteSessionDialog(h.name, h.of(sess).address, sess, onDismiss = { deleting = null },
                 onDeleted = { deleting = null; refresh++ })
         }
 
@@ -565,7 +575,7 @@ fun AgentsScreen(peers: List<Peer>, onClose: () -> Unit, initial: OpenSession? =
             fun star(h: AgentHost, sess: AgentSession) {
                 hosts = withStar(hosts.orEmpty(), h.name, sess.name, !sess.starred)
                 scope.launch {
-                    withContext(Dispatchers.IO) { runCatching { AgentClient(h.address).setStarred(sess.name, !sess.starred) } }
+                    withContext(Dispatchers.IO) { runCatching { AgentClient(h.of(sess).address).setStarred(sess.name, !sess.starred) } }
                         .onFailure { hosts = withStar(hosts.orEmpty(), h.name, sess.name, sess.starred) }
                 }
             }
@@ -577,7 +587,7 @@ fun AgentsScreen(peers: List<Peer>, onClose: () -> Unit, initial: OpenSession? =
                     }
                     itemsIndexed(starred, key = { _, p -> "s-" + p.first.name + "@" + p.first.mesh + "/" + p.second.name }) { _, (h, sess) ->
                         SessionRow(sess, where = h.name, reachable = HostCache.reachable(h, now), unread = unread(h, sess), onStar = { star(h, sess) }, onLongPress = { deleting = h to sess }) {
-                            open = OpenSession(h.address, h.name, h.mesh, sess.name)
+                            open = h.of(sess).let { OpenSession(it.address, h.name, it.mesh, sess.name) }
                         }
                     }
                 }
@@ -605,7 +615,7 @@ fun AgentsScreen(peers: List<Peer>, onClose: () -> Unit, initial: OpenSession? =
                     }
                     itemsIndexed(h.sessions, key = { _, s -> h.name + "@" + h.mesh + "/" + s.name }) { _, s ->
                         SessionRow(s, reachable = up, unread = unread(h, s), onStar = { star(h, s) }, onLongPress = { deleting = h to s }) {
-                            open = OpenSession(h.address, h.name, h.mesh, s.name)
+                            open = h.of(s).let { OpenSession(it.address, h.name, it.mesh, s.name) }
                         }
                     }
                 }

@@ -346,6 +346,15 @@ Item {
             var onHome = view.shownHosts.map(function(h) { return h.name + "@" + h.mesh }).join(",")
             view.pickMesh("")
             console.error("MESHPICK meshes=" + meshes + " home=" + onHome + " all=" + view.shownHosts.length + " switch=" + top.countVisible(view, "meshSwitch"))
+            // All: a session there for one mesh only stays under its machine,
+            // reached on that mesh.
+            var one = function(n) { return { name: n, state: "idle", pending: 0, running: true, last_seq: 0 } }
+            var merged = view.oneEach([{ name: "lap", mesh: "home", address: "fd7b::1", lastSeen: 5, sessions: [one("SPEL"), one("k11")] },
+                                       { name: "lap", mesh: "office", address: "fdb0::1", lastSeen: 9, sessions: [one("SPEL"), one("reviewer")] }])[0]
+            var k11 = merged.sessions.filter(function(x) { return x.name === "k11" })[0]
+            console.error("ALLMESH sessions=" + merged.sessions.map(function(x) { return x.name }).join(",")
+                          + " k11=" + view.hostFor(merged, k11).address + "@" + view.hostFor(merged, k11).mesh
+                          + " spel=" + view.hostFor(merged, merged.sessions[0]).address)
             // This machine first, and marked.
             var stKept = view.st
             view.st = Object.assign({}, stKept, { name: "k11" })

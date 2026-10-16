@@ -392,6 +392,7 @@ expect 'ACCEPTCAGED /v1/sessions/shrooms/settings {"accept_caged":true} said=ses
 nd=$(echo "$out" | sed -n 's/.*NODOUBLE before=\([0-9]*\) after=\([0-9]*\).*/\1 \2/p')
 [ -n "$nd" ] && [ "${nd% *}" = "${nd#* }" ] || { echo "FAIL: a read from where one had already read shows events twice (replies doubled, 2026-10-16): $nd"; exit 1; }
 expect 'STREAMONLY rebuilt=0 grew=true' "pieces of a streaming reply rebuild the whole conversation (85% of a core on the Duet while streaming)"
+expect 'ALLMESH sessions=SPEL,k11,reviewer k11=fd7b::1@home spel=fdb0::1' "a session on one mesh only is missing under all meshes"
 expect 'MESHPICK meshes=home,office home=k11@home,laptop@home all=2 switch=1' "the agents cannot be shown one mesh at a time"
 expect 'HERE first=k11:true second=laptop:false' "the machine Basecamp runs on is not first in the list, or not marked"
 expect 'COREEVENT read=true interval=3000 subscribed=shrooms_core/agentChanged' "the view does not subscribe to the core's agentChanged, read on it, or fall back to a slow safety-net poll"
