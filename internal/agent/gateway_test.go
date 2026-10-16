@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -145,10 +146,48 @@ func TestACagedPiReachesItsModelsThroughTheGateway(t *testing.T) {
 	if strings.Contains(string(b), "sk-or-real") || !strings.Contains(string(b), "GH_TOKEN=gh-real") {
 		t.Fatalf("the cage's environment:\n%s", b)
 	}
+	// A caged Claude session: through the gateway, with an empty credentials
+	// file over the owner's login in the cage.
 	c := &Session{dir: t.TempDir(), harness: Claude{}, cage: &Cage{Container: "d"}}
 	c.label.Store(&name)
-	if _, _, ok := m.gatewayFor(c); ok {
-		t.Error("a caged Claude session on the owner's login is gatewayed")
+	cenv, cfiles, ok := m.gatewayFor(c)
+	home, _ := os.UserHomeDir()
+	if !ok || cenv["ANTHROPIC_BASE_URL"] != GatewayBase("anthropic") || cfiles[filepath.Join(home, ".claude", ".credentials.json")] != "{}\n" {
+		t.Errorf("a caged Claude session is not gatewayed with its login hidden: %v %v %v", cenv, cfiles, ok)
+	}
+}
+
+// The gateway uses the owner's Claude login for Claude Code, read fresh from
+// the file each request, and says so when there is none.
+func TestTheGatewayUsesTheOwnersLogin(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	m := newTestManager(t, t.TempDir())
+	if _, err := m.claudeLogin(); err == nil {
+		t.Fatal("no login, and no error")
+	}
+	os.MkdirAll(filepath.Join(home, ".claude"), 0o700)
+	write := func(tok string) {
+		os.WriteFile(filepath.Join(home, ".claude", ".credentials.json"),
+			[]byte(fmt.Sprintf(`{"claudeAiOauth":{"accessToken":%q,"refreshToken":"r","expiresAt":%d}}`, tok, time.Now().Add(time.Hour).UnixMilli())), 0o600)
+	}
+	write("sk-ant-oat-one")
+	h := http.Header{}
+	if err := m.upstreams(false, "claude")["anthropic"].auth(h); err != nil || h.Get("Authorization") != "Bearer sk-ant-oat-one" {
+		t.Fatalf("%v %q", err, h.Get("Authorization"))
+	}
+	write("sk-ant-oat-two") // renewed by the owner's own Claude session
+	h = http.Header{}
+	m.upstreams(false, "claude")["anthropic"].auth(h)
+	if h.Get("Authorization") != "Bearer sk-ant-oat-two" || !strings.Contains(h.Get("Anthropic-Beta"), "oauth-2025-04-20") {
+		t.Fatalf("not read fresh: %q %q", h.Get("Authorization"), h.Get("Anthropic-Beta"))
+	}
+	// pi's anthropic provider uses the agent's API key, not the login.
+	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-api")
+	h = http.Header{}
+	m.upstreams(false, "pi")["anthropic"].auth(h)
+	if h.Get("X-Api-Key") != "sk-ant-api" || h.Get("Authorization") != "" {
+		t.Fatalf("pi: %v", h)
 	}
 }
 

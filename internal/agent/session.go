@@ -231,6 +231,8 @@ type Manager struct {
 	proxies  cageProxies
 	Machines func() ([]Machine, error)
 	agentAt  func(netip.Addr) string // tests: where an agent is
+	// One renewal of the owner's Claude login at a time (claudeLogin).
+	loginMu sync.Mutex
 	// Tests: the gateway's upstreams elsewhere, and its client (gateway.go).
 	upstreamBase func(name string) string
 	gatewayHTTP  *http.Client

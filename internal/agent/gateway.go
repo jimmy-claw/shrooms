@@ -7,14 +7,19 @@ package agent
 // which this serves at /llm/<upstream>/<path>.
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path"
+	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 )
 
 // GatewayListen is where the forwarder in a cage listens: on the cage's own
@@ -74,27 +79,38 @@ func bearer(base, env string) upstream {
 	}}
 }
 
-// upstreams are the model APIs a session's cage may reach. A sealed cage's
-// Anthropic is the machine's sealed token (ADR-045), sent as Claude Code
-// sends it; any other's, the agent's API key.
-func (m *Manager) upstreams(sealed bool) map[string]upstream {
+// upstreams are the model APIs a session's cage may reach. Anthropic, for
+// Claude Code: a sealed cage's is the machine's sealed token where there is
+// one (ADR-045), and otherwise the owner's own Claude login, read fresh from
+// ~/.claude on each request; neither is ever in the cage. For another
+// harness (pi's anthropic provider), the agent's API key.
+func (m *Manager) upstreams(sealed bool, harness string) map[string]upstream {
 	ups := map[string]upstream{
 		"openrouter": bearer("https://openrouter.ai/api/v1", "OPENROUTER_API_KEY"),
 		"venice":     bearer("https://api.venice.ai/api/v1", "VENICE_API_KEY"),
 		"openai":     bearer("https://api.openai.com/v1", "OPENAI_API_KEY"),
 	}
 	ups["anthropic"] = upstream{base: "https://api.anthropic.com", auth: func(h http.Header) error {
-		if sealed {
-			token, err := m.sealedToken()
-			if err != nil {
-				return err
-			}
+		bearer := func(token string) {
 			h.Set("Authorization", "Bearer "+token)
 			// What marks a request as made with a Claude subscription's token.
 			beta := h.Get("Anthropic-Beta")
 			if !strings.Contains(beta, "oauth-2025-04-20") {
 				h.Set("Anthropic-Beta", strings.TrimPrefix(beta+",oauth-2025-04-20", ","))
 			}
+		}
+		if sealed {
+			if token, err := m.sealedToken(); err == nil {
+				bearer(token)
+				return nil
+			}
+		}
+		if harness == "claude" {
+			token, err := m.claudeLogin()
+			if err != nil {
+				return err
+			}
+			bearer(token)
 			return nil
 		}
 		k := os.Getenv("ANTHROPIC_API_KEY")
@@ -130,7 +146,11 @@ func (m *Manager) gateway(s *Session) http.HandlerFunc {
 		s.mu.Lock()
 		sealed := s.cage != nil && s.cage.Sealed
 		s.mu.Unlock()
-		ups := m.upstreams(sealed)
+		harness := ""
+		if s.harness != nil {
+			harness = s.harness.Name()
+		}
+		ups := m.upstreams(sealed, harness)
 		name, rest := r.PathValue("upstream"), r.PathValue("path")
 		u, ok := ups[name]
 		if !ok {
@@ -211,4 +231,48 @@ func (m *Manager) gatewayClient() *http.Client {
 		return m.gatewayHTTP
 	}
 	return http.DefaultClient
+}
+
+// claudeLogin is the owner's Claude login's access token, as Claude Code
+// keeps it (~/.claude/.credentials.json), read fresh each time. The gateway
+// never renews it: renewing replaces the refresh token, and racing the
+// owner's own Claude sessions at it could log them out. When it is about to
+// run out, Claude Code is asked to renew it (claude auth status), with its
+// own locking, and the file is read again.
+func (m *Manager) claudeLogin() (string, error) {
+	read := func() (string, time.Time, error) {
+		home, _ := os.UserHomeDir()
+		b, err := os.ReadFile(filepath.Join(home, ".claude", ".credentials.json"))
+		if err != nil {
+			return "", time.Time{}, errors.New("this machine has no Claude login for the gateway to use (claude /login)")
+		}
+		var c struct {
+			OAuth struct {
+				AccessToken string `json:"accessToken"`
+				ExpiresAt   int64  `json:"expiresAt"`
+			} `json:"claudeAiOauth"`
+		}
+		if json.Unmarshal(b, &c) != nil || c.OAuth.AccessToken == "" {
+			return "", time.Time{}, errors.New("this machine's Claude login has no token the gateway can use")
+		}
+		return c.OAuth.AccessToken, time.UnixMilli(c.OAuth.ExpiresAt), nil
+	}
+	token, exp, err := read()
+	if err != nil || time.Until(exp) > 2*time.Minute {
+		return token, err
+	}
+	m.loginMu.Lock()
+	defer m.loginMu.Unlock()
+	if token, exp, err = read(); err != nil || time.Until(exp) > 2*time.Minute {
+		return token, err
+	}
+	if bin := m.binOf("claude"); bin != "" {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+		exec.CommandContext(ctx, bin, "auth", "status").Run()
+		cancel()
+	}
+	if token, exp, err = read(); err == nil && time.Until(exp) <= 0 {
+		return "", errors.New("this machine's Claude login has run out and was not renewed: run claude on it once, or claude /login")
+	}
+	return token, err
 }

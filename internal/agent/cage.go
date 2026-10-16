@@ -305,7 +305,7 @@ func (c *Cages) Status() CageStatus {
 	volumes := c.volumesPath()
 	c.mu.Lock()
 	st := CageStatus{Available: true, Image: c.Image, Building: c.building, Error: c.buildErr,
-		Images: []string{c.Image}, Nix: nixHere(), Sealed: tokenIn(c.SealedToken)}
+		Images: []string{c.Image}, Nix: nixHere(), Sealed: tokenIn(c.SealedToken) || claudeLoginHere()}
 	c.mu.Unlock()
 	for _, im := range []string{WorkbenchImage, DesktopImage} {
 		if im != c.Image {

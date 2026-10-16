@@ -65,8 +65,9 @@ func tokenIn(path string) bool {
 }
 
 // canSeal: whether a session of this harness, in this directory, can be
-// sealed here — Claude Code, with the machine's token, in a project of its
-// own.
+// sealed here: Claude Code, in a project of its own, with a credential the
+// gateway holds for it (ADR-059): the machine's sealed token, or the
+// owner's own Claude login. Neither goes into the cage.
 func (m *Manager) canSeal(harness, dir string) error {
 	if harness != "claude" {
 		return errors.New("sealed cages run Claude Code only: pi would need the owner's model keys")
@@ -74,8 +75,22 @@ func (m *Manager) canSeal(harness, dir string) error {
 	if err := sealableDir(dir); err != nil {
 		return err
 	}
+	if _, err := m.sealedToken(); err == nil {
+		return nil
+	}
+	if m.Self != "" && claudeLoginHere() {
+		return nil
+	}
 	_, err := m.sealedToken()
 	return err
+}
+
+// claudeLoginHere is whether this machine has a Claude login the gateway
+// can use for a sealed cage.
+func claudeLoginHere() bool {
+	home, _ := os.UserHomeDir()
+	b, err := os.ReadFile(filepath.Join(home, ".claude", ".credentials.json"))
+	return err == nil && strings.Contains(string(b), "accessToken")
 }
 
 // sealableDir refuses a directory a sealed cage must not have: its directory
@@ -231,10 +246,6 @@ func copyTree(src, dst string) error {
 // sealedEnv is all a sealed cage's harness is given: its token, who it is,
 // where its socket is. Nothing from the agent's environment.
 func (m *Manager) sealedEnv(s *Session) (map[string]string, error) {
-	token, err := m.sealedToken()
-	if err != nil {
-		return nil, err
-	}
 	env := map[string]string{
 		"HOME":                  sealedHome,
 		"CLAUDE_CONFIG_DIR":     sealedHome + "/.claude",
@@ -254,6 +265,12 @@ func (m *Manager) sealedEnv(s *Session) (map[string]string, error) {
 			env[k] = v
 		}
 		return env, nil
+	}
+	// No gateway (an agent without its binary in the cage): the token
+	// itself, as before ADR-059.
+	token, err := m.sealedToken()
+	if err != nil {
+		return nil, err
 	}
 	env["CLAUDE_CODE_OAUTH_TOKEN"] = token
 	return env, nil

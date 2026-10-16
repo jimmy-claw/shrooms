@@ -3,6 +3,8 @@ package agent
 import (
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sync/atomic"
 )
 
@@ -169,19 +171,23 @@ func (Claude) Args(o StartOptions) []string {
 }
 
 // GatewayEnv points Claude Code at the gateway (ADR-059): its API's base
-// URL and a key, which the gateway replaces with the real credential. In a
-// sealed cage only: there it runs on the machine's sealed token, which the
-// gateway holds. A caged session runs on the owner's own login, kept in
-// ~/.claude, which the gateway does not hold, and keeps it.
-func (Claude) GatewayEnv(sealed bool) map[string]string {
-	if !sealed {
-		return nil
-	}
+// URL and a key, which the gateway replaces with the real credential: the
+// sealed token, or the owner's own login.
+func (Claude) GatewayEnv(bool) map[string]string {
 	return map[string]string{"ANTHROPIC_BASE_URL": GatewayBase("anthropic"), "ANTHROPIC_API_KEY": GatewayKey}
 }
 
-// GatewayFiles: Claude Code needs none; the environment is enough.
-func (Claude) GatewayFiles(bool) map[string]string { return nil }
+// GatewayFiles: in a caged session, whose cage has the owner's ~/.claude
+// for its conversations, an empty credentials file laid over the owner's
+// login in it: the login stays with the gateway, out of the cage's reach. A
+// sealed cage has a .claude of its own, with no login in it.
+func (Claude) GatewayFiles(sealed bool) map[string]string {
+	if sealed {
+		return nil
+	}
+	home, _ := os.UserHomeDir()
+	return map[string]string{filepath.Join(home, ".claude", ".credentials.json"): "{}\n"}
+}
 
 func (Claude) TranscriptPath(id string) (string, error) { return transcriptPath(id) }
 func (Claude) ParseTranscriptLine(line []byte) (Said, bool) {

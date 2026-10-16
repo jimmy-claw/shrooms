@@ -6,8 +6,14 @@
 - **Phase 2:** caged pi sessions reach their cloud providers through it, and
   hold no model keys.
 
-Caged Claude Code sessions keep the owner's own login: it lives in
-`~/.claude`, which the gateway does not hold.
+- **Phase 3:** Claude Code in any cage, caged or sealed, reaches Anthropic
+  on the owner's own login, read fresh by the gateway, and the login is never
+  in the cage. A sealed cage no longer needs a token of its own: the gateway
+  uses the sealed token if there is one, and the owner's login if not.
+
+The difference between caged and sealed is the network: a sealed cage gets
+the internet and nothing local. Neither may leak the owner's credentials,
+and since phase 3 neither holds them.
 
 ## Context
 
@@ -78,6 +84,21 @@ caged sessions by default.
 - **pi's file replaces a mount, not adds one.** pi's `models.json` is one of
   its settings mounted read-only, and podman refuses two mounts at one place.
   The first live run found this.
+- **The owner's login, without racing it.** The gateway reads the access
+  token from `~/.claude/.credentials.json` on each request. It never renews
+  the token itself: renewing replaces the refresh token, and racing the
+  owner's own Claude sessions at it could log them out. When the token is
+  within 2 minutes of running out, it runs `claude auth status`, so that
+  Claude Code renews it with its own locking, then reads the file again.
+- **A caged Claude cage still mounts `~/.claude`** for its conversations,
+  with an empty `{}` laid over `.credentials.json` in it. The rest of
+  `~/.claude` (every session's conversations, memory, settings) is still
+  there to read. That is the next thing to narrow.
+- **Phase 3 tested live, 2026-10-16:** a caged and a sealed Claude session
+  answered on the owner's login, the sealed one with no token configured.
+  Neither cage held the access or the refresh token in its environment or
+  processes. The caged one saw `{}` for credentials, and the owner's file
+  was unchanged.
 - **Tested live, 2026-10-16, on OpenRouter:** a caged pi session answered
   through the gateway. The key was in none of its environment or processes,
   its `models.json` pointed OpenRouter at the gateway and kept the owner's
