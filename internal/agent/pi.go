@@ -93,8 +93,14 @@ func (Pi) CageMounts(f CageFacts) []mount {
 	return ms
 }
 
-// CageProgram: pi is one program, run where it is.
-func (Pi) CageProgram(f CageFacts) (string, error) { return f.Bin, nil }
+// CageProgram: the cage's own pi, by name. The image installs it
+// (workbench.Containerfile: npm install -g @earendil-works/pi-coding-agent),
+// so the name is found on the cage's PATH. The host's absolute path must NOT
+// be used: nothing of the host's is mounted for pi, so that path does not
+// exist in the cage — which is what returning f.Bin did, and it broke every
+// caged pi session at exec. Claude Code and OpenCode resolve their host binary
+// because their CageMounts mount its directory; pi mounts nothing for it.
+func (Pi) CageProgram(CageFacts) (string, error) { return "pi", nil }
 
 // CageTrust carries pi's trust in THIS project into the private home: its
 // .pi config, MCP servers and extensions load only in a trusted project.
