@@ -207,7 +207,25 @@ data class OpenSession(val address: String, val host: String, val mesh: String, 
  * with the laptop gone, nothing reached them and every one greyed (2026-10-04).
  */
 fun agentCandidates(handed: List<AgentHosts.Host>, seen: List<AgentHost>): List<AgentHosts.Host> =
-    (handed + seen.map { AgentHosts.Host(it.name, it.mesh, it.address) }).distinctBy { it.name }
+    // Per machine and mesh: kept once by name, a machine on two meshes was
+    // looked for on one of them only (the laptop, on office and not home).
+    (handed + seen.map { AgentHosts.Host(it.name, it.mesh, it.address) }).distinctBy { it.name + "@" + it.mesh }
+
+/**
+ * A mesh by its addresses, not its name: a mesh's name is each device's own
+ * (atlas calls the office mesh "default"), but its prefix, the first 48 bits
+ * of every address in it, is the same everywhere.
+ */
+fun meshPrefix(address: String): String {
+    val a = address.substringBefore('%').lowercase()
+    if (!a.contains(':')) return ""
+    val parts = a.split(':')
+    return if (parts.size >= 3 && parts[0].isNotEmpty()) parts.take(3).joinToString(":") else ""
+}
+
+/** Each host's mesh named as this phone names it, by its address's prefix. */
+fun meshesByPrefix(own: Map<String, String>, hosts: List<AgentHost>): List<AgentHost> =
+    hosts.map { h -> own[meshPrefix(h.address)]?.let { if (it != h.mesh) h.copy(mesh = it) else h } ?: h }
 
 suspend fun discoverAgents(peers: List<Peer>, byName: List<String> = emptyList(),
                            known: List<AgentHosts.Host> = emptyList()): List<AgentHost> =
@@ -238,7 +256,12 @@ suspend fun discoverAgents(peers: List<Peer>, byName: List<String> = emptyList()
                 }
             }
         }
-        val found = (fromPeers + handed + named).awaitAll().filterNotNull().distinctBy { it.name + "@" + it.mesh }
+        // This phone's own names for its meshes, by prefix: from its peers, and
+        // the machines the shrooms app handed over (both in this phone's names).
+        val own = (peers.map { p -> p.overlay to p.mesh } + known.map { it.address to it.mesh })
+            .filter { it.second.isNotEmpty() && meshPrefix(it.first).isNotEmpty() }
+            .associate { meshPrefix(it.first) to it.second }
+        val found = meshesByPrefix(own, (fromPeers + handed + named).awaitAll().filterNotNull()).distinctBy { it.name + "@" + it.mesh }
         // Then the mesh as each agent's machine sees it: a phone that knows one
         // agent finds the rest without being told (/v1/peers). One round, not
         // a crawl — every machine sees the same mesh.
@@ -248,7 +271,9 @@ suspend fun discoverAgents(peers: List<Peer>, byName: List<String> = emptyList()
             .map { (name, mesh, addr) ->
                 async { runCatching { AgentHost(name, mesh, addr, AgentClient(addr).sessions(3000)) }.getOrNull() }
             }
-        (found + via.awaitAll().filterNotNull()).sortedBy { it.name }
+        // Another agent's peers come with that machine's names for the
+        // meshes; named here as this phone names them.
+        (found + meshesByPrefix(own, via.awaitAll().filterNotNull())).distinctBy { it.name + "@" + it.mesh }.sortedBy { it.name }
     }
 
 /**

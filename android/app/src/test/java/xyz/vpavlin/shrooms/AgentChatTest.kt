@@ -380,6 +380,20 @@ class MeshPickTest {
         assertEquals(listOf("laptop:office:home,office", "k11:home:home"), all.map { it.name + ":" + it.mesh + ":" + it.meshes.joinToString(",") })
     }
 
+    // A mesh is its address prefix, named as this phone names it: pi5 learnt
+    // from atlas (whose name for the office mesh is "default") is on office.
+    @Test fun aMeshIsItsPrefix() {
+        assertEquals("fdb0:9afc:a5ef", meshPrefix("fdb0:9afc:a5ef:2dd7:df:64f1:8368:580b"))
+        assertEquals("", meshPrefix("192.168.1.2"))
+        val own = mapOf("fdb0:9afc:a5ef" to "office", "fd7b:15fb:5ec1" to "home")
+        val got = meshesByPrefix(own, listOf(AgentHost("pi5", "default", "fdb0:9afc:a5ef:2dd7::1", emptyList()),
+            AgentHost("k11", "home", "fd7b:15fb:5ec1:fc97::1", emptyList()), AgentHost("x", "elsewhere", "fd00:1:2:3::4", emptyList())))
+        assertEquals(listOf("pi5@office", "k11@home", "x@elsewhere"), got.map { it.name + "@" + it.mesh })
+        // And a machine handed over on two meshes is looked for on both.
+        val cands = agentCandidates(listOf(AgentHosts.Host("laptop", "office", "fdb0::1"), AgentHosts.Host("laptop", "home", "fd7b::1")), emptyList())
+        assertEquals(2, cands.size)
+    }
+
     // A machine answering on one mesh does not drop it from the other.
     @Test fun aMachineOnTwoMeshesIsKeptOnBoth() {
         val merged = HostCache.merge(listOf(host("laptop", "home", 1), host("laptop", "office", 1)), listOf(host("laptop", "office")), 2)
