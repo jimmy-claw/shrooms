@@ -70,5 +70,7 @@ of what the interface asks for.
   own in the cage.** OpenCode does, so a caged OpenCode session's conversations
   are the cage's: they are not in the owner's database and they go when the cage
   does. ADR-060 rejected copies, and mounting the owner's would put every other
-  project's conversation in the cage, so this is the only way to keep its line.
-  For Claude Code and pi the conversation is still the owner's file.
+  project's conversation in the cage, so this is the only way to keep its line —
+  which ADR-060 now says outright: its hard line is "no other conversations",
+  and where the two conflict, isolation wins. For Claude Code and pi the
+  conversation is still the owner's file.

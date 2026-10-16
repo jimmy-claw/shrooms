@@ -18,6 +18,15 @@ import (
 // have, since pi is installed in the image and nothing of the host's is
 // mounted for it — passed every test while breaking every caged pi session.
 // Found by review, not by the suite.
+//
+// What this does NOT see: Args(o), where a harness could embed a host path as
+// an ARGUMENT while CageProgram correctly returns a bare name — Claude Code's
+// does exactly that, putting the agent's own path (o.MCP) inside
+// --mcp-config's JSON. That one is safe, but for a different reason: it is
+// mounted by cageMounts' universal section, outside any harness's CageMounts.
+// So a future harness embedding an UNMOUNTED host path in Args would slip
+// past this test. Checking it here would mean teaching the test every shape a
+// harness's arguments can take, which is the same mistake as trusting a fake.
 func TestACageProgramMatchesWhatTheCageHas(t *testing.T) {
 	home := t.TempDir()
 	f := CageFacts{
@@ -55,18 +64,7 @@ func TestACageProgramMatchesWhatTheCageHas(t *testing.T) {
 			continue
 		}
 		// Absolute: CageMounts must have put its directory in the cage.
-		dir := filepath.Dir(prog)
-		var mounted bool
-		for _, m := range cg.CageMounts(f) {
-			at := m.at
-			if at == "" {
-				at = m.path
-			}
-			if at == dir || strings.HasPrefix(dir+"/", at+"/") || strings.HasPrefix(at+"/", dir+"/") {
-				mounted = true
-			}
-		}
-		if !mounted {
+		if !mountProvides(cg.CageMounts(f), filepath.Dir(prog)) {
 			t.Errorf("%s: CageProgram is %q, an absolute path, but CageMounts mounts nothing that provides it — the cage will fail at exec",
 				h.Name(), prog)
 		}
@@ -85,5 +83,50 @@ func TestAPiCageUsesTheImagesOwnPi(t *testing.T) {
 	}
 	if filepath.IsAbs(prog) {
 		t.Errorf("the host's path is not in the cage: %q", prog)
+	}
+}
+
+// mountProvides says whether these mounts put dir — and so a program in it —
+// inside the cage. The mount is dir itself, or dir is nested under it.
+//
+// NOT the reverse, and that is the whole point of having this in one place:
+// a mount of a SUBDIRECTORY of dir does not put dir's own files in the cage.
+// Review found the test's first version accepting /opt/app/plugins as
+// "providing" /opt/app/the-program, which would have made the next harness's
+// real breakage pass.
+func mountProvides(ms []mount, dir string) bool {
+	for _, m := range ms {
+		at := m.at
+		if at == "" {
+			at = m.path
+		}
+		if at == dir || strings.HasPrefix(dir+"/", at+"/") {
+			return true
+		}
+	}
+	return false
+}
+
+// The matcher, both ways round: a directory mount provides a program in it; a
+// mount of a subdirectory does not.
+func TestAMountProvidesOnlyWhatIsInIt(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		ms   []mount
+		dir  string
+		want bool
+	}{
+		{"the directory itself", []mount{{path: "/host/app", at: "/opt/app"}}, "/opt/app", true},
+		{"the directory, no at", []mount{{path: "/opt/app"}}, "/opt/app", true},
+		{"a parent of it", []mount{{path: "/host/bin", at: "/opt"}}, "/opt/app", true},
+		{"a subdirectory of it", []mount{{path: "/host/plugins", at: "/opt/app/plugins"}}, "/opt/app", false},
+		{"a sibling", []mount{{path: "/host/other", at: "/opt/other"}}, "/opt/app", false},
+		{"nothing", nil, "/opt/app", false},
+		// A prefix that is not a path boundary must not count.
+		{"a name that merely starts the same", []mount{{path: "/host/x", at: "/opt/app-extra"}}, "/opt/app", false},
+	} {
+		if got := mountProvides(tc.ms, tc.dir); got != tc.want {
+			t.Errorf("%s: %v", tc.name, got)
+		}
 	}
 }
