@@ -324,8 +324,8 @@ fun cageWords(c: SessionCage): String =
 
 /** What "in a cage" means, said beside it (Basecamp's cageNote). */
 fun cageNote(c: CageOffer): String {
-    val what = "root inside, and of this machine only the project, the files sent to it and the harness's settings; " +
-        "what it installs stays until the session is deleted"
+    // Caged, in one sentence (docs/agents/cages.md), as Basecamp says it.
+    val what = "your agent, kept in its folder: its project and its own conversations, none of your credentials, other conversations or the rest of your home; the network stays open and its memory and CPUs are limited. For code you do not trust, seal it"
     return when {
         c.error.isNotEmpty() -> "$what. The last build of the image failed: ${c.error}"
         c.building -> "$what. The image is being built (a few minutes)."

@@ -1464,7 +1464,9 @@ Item {
     property bool nsCage: false
     function cageNote(st) {
         if (!st) return ""
-        var what = "root inside, and of this machine only the project, the files sent to it and the harness's settings; what it installs stays until the session is deleted"
+        // Caged, in one sentence (docs/agents/cages.md): kept true, so the three
+        // choices (not caged, caged, sealed) stay easy to tell apart.
+        var what = "your agent, kept in its folder: its project and its own conversations, none of your credentials, other conversations or the rest of your home; the network stays open and its memory and CPUs are limited. For code you do not trust, seal it"
         if (st.error) return what + ". The last build of the image failed: " + st.error
         if (st.building) return what + ". The image is being built (a few minutes)."
         if (!st.ready) return what + ". The image is built with the first one (a few minutes)."

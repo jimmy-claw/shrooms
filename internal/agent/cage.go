@@ -498,18 +498,29 @@ func (m *Manager) cageMounts(s *Session, harness string) []mount {
 	if v := s.sharedFor(); v != "" {
 		ms = append(ms, mount{path: v, at: CageSharedDir, volume: true})
 	}
+	// The harness's directory: a private one of the cage's own, with the
+	// owner's settings in it read-only and the session's own conversations
+	// read-write, from the real folder for its project. Nothing else of the
+	// owner's: not other sessions' conversations, not the prompt history,
+	// running sessions' keys, backups of the config or an ssh key someone
+	// kept there, and no login. Built from what is let in rather than from
+	// what is kept out, so what lands there later is out by default. Caged
+	// is the owner's agent kept in its folder; sealed is for what nobody
+	// vouches for (docs/agents/cages.md).
 	switch harness {
 	case "claude":
 		dir := filepath.Join(home, ".claude")
-		ms = append(ms, mount{path: dir})
+		ms = append(ms, mount{path: m.privateHome(s.cage.Container, "claude"), at: dir})
 		ms = append(ms, readOnlyIn(dir, claudeHostCode)...)
+		ms = append(ms, ownConversations(filepath.Join(dir, "projects", claudeProjectName(s.dir))))
 		if bin, err := claudeProgram(m.binOf("claude")); err == nil {
 			ms = append(ms, mount{path: filepath.Dir(bin), ro: true})
 		}
 	case "pi":
 		dir := piAgentDir()
-		ms = append(ms, mount{path: dir})
+		ms = append(ms, mount{path: m.privateHome(s.cage.Container, "pi"), at: dir})
 		ms = append(ms, readOnlyIn(dir, piHostCode)...)
+		ms = append(ms, ownConversations(filepath.Join(dir, "sessions", piSessionsName(s.dir))))
 	}
 	if s.cage.Nix {
 		ms = append(ms, nixMounts(home)...)
@@ -972,6 +983,11 @@ func (c *Cages) remove(container string, stateDir string) {
 	defer cancel()
 	c.run(ctx, "rm", "-f", "-t", "3", container)
 	os.Remove(filepath.Join(stateDir, "cages", container+".env"))
+	// And what was the cage's alone: its harness's private home (its prompt
+	// history, caches) and the gateway's files. Its conversations are the
+	// owner's, in the real folder, and stay.
+	os.RemoveAll(filepath.Join(stateDir, "cages", container+".home"))
+	os.RemoveAll(filepath.Join(stateDir, "cages", container+".gw"))
 }
 
 // busy reports a command still running in the cage besides the harness and
@@ -1150,4 +1166,41 @@ func (m *Manager) writeGatewayFiles(s *Session, container string) error {
 		}
 	}
 	return nil
+}
+
+// privateHome is a cage's own directory for its harness's state, on the
+// machine (kept with the cage, deleted with it), where the harness writes
+// what is not its conversation: prompt history, todos, caches.
+func (m *Manager) privateHome(container, harness string) string {
+	d := filepath.Join(m.dir, "cages", container+".home", harness)
+	os.MkdirAll(d, 0o700)
+	return d
+}
+
+// ownConversations is the session's real conversation folder, read-write,
+// made if it is not there yet: its conversation is the owner's file as
+// before, which the terminal, the apps' history and moving it out of the
+// cage all find where they always did.
+func ownConversations(dir string) mount {
+	os.MkdirAll(dir, 0o700)
+	return mount{path: dir}
+}
+
+// claudeProjectName is Claude Code's folder for a working directory's
+// conversations: every character but a letter or a digit as a dash
+// ("/home/v/devel/github.com/x" → "-home-v-devel-github-com-x").
+func claudeProjectName(dir string) string {
+	return strings.Map(func(r rune) rune {
+		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' {
+			return r
+		}
+		return '-'
+	}, filepath.Clean(dir))
+}
+
+// piSessionsName is pi's folder for a working directory's sessions: the
+// path's slashes as dashes, between double dashes ("/home/v/k11" →
+// "--home-v-k11--").
+func piSessionsName(dir string) string {
+	return "--" + strings.ReplaceAll(strings.TrimPrefix(filepath.Clean(dir), "/"), "/", "-") + "--"
 }

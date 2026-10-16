@@ -12,6 +12,37 @@ your user and nothing more, and of your home directory it sees only what it
 needs: its project, and the settings of the harness that runs it. What it
 installs stays in the container until the session is deleted.
 
+## Not caged, caged, sealed
+
+Three choices, one sentence each, and kept true:
+
+- **Not caged:** your agent, with your machine. It can do what you can.
+- **Caged:** your agent, kept in its folder. It sees its project and its own
+  conversations, and nothing else of yours: no credentials, no other
+  conversations, nothing else of your home. The network stays open, and its
+  memory and CPUs are limited. This is against a careless agent, not a
+  hostile one.
+- **Sealed:** for code or content you do not trust. The internet and nothing
+  local, results only through its outbox (below).
+
+What makes "caged" true:
+- **A private harness home.** A caged session's `~/.claude` (or
+  `~/.pi/agent`) is a directory of the cage's own. Your settings, skills and
+  plugins are let into it read-only. Its own conversations are let in
+  read-write, from the real folder for its project: `~/.claude/projects/<its
+  folder>`, or pi's `sessions/<its folder>`. Nothing else is let in: not other
+  sessions' conversations, not `history.jsonl` (every prompt typed), not
+  running sessions' keys, backups of your config, or anything someone keeps
+  there later. It is built from what is let in, so what lands there later is
+  out by default.
+- **No login and no keys.** The cage reaches its model through the agent,
+  which adds the credential on the way out (ADR-059).
+
+Its conversation is still the real file in your `~/.claude`, so `claude
+--resume` in a terminal, the apps' history and taking the session out of the
+cage all work as before. Sessions in the same working folder share it: they
+see each other's conversations, as they would outside a cage.
+
 Why it is built this way is in
 [ADR-037](../adr/037-agents-in-cages.md); the research, and what comes after
 (micro-VMs, Akash, agents starting agents), is in
@@ -298,8 +329,11 @@ build. A caged agent cannot change its own limits.
 - the project, read-write;
 - the files sent to sessions (`uploads/` in the agent's state directory),
   read-only;
-- for Claude Code, `~/.claude` read-write and the directory of the machine's
-  `claude` program read-only; for pi, `~/.pi/agent` read-write;
+- for Claude Code, a private `~/.claude` of the cage's own, with your
+  settings, skills and plugins in it read-only and its own project's
+  conversations read-write, and the directory of the machine's `claude`
+  program read-only; for pi, the same with `~/.pi/agent` and its own
+  `sessions/` folder (above, "Not caged, caged, sealed");
 - `shrooms-agent` itself, for the shrooms MCP tools, and the cage's socket to
   its own agent at `/run/shrooms-agent/proxy.sock`, which they go through.
   **Not** the shrooms daemon's control socket: your user's tier on it can
