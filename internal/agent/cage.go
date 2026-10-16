@@ -25,6 +25,7 @@ import (
 	"crypto/sha256"
 	_ "embed"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -837,6 +838,9 @@ func (m *Manager) prepareCage(s *Session, bin string) (*cageRun, error) {
 	if err := m.writeGatewayFiles(s, name); err != nil {
 		return nil, err
 	}
+	if !s.cage.Sealed {
+		m.carryProjectTrust(s, name)
+	}
 	if s.cageGateway {
 		if _, err := c.run(ctx, "exec", "-d", name, m.Self, "llm-forward",
 			"--listen", GatewayListen, "--socket", CageProxyDir+"/proxy.sock"); err != nil {
@@ -1197,4 +1201,54 @@ func claudeProjectName(dir string) string {
 // "--home-v-k11--").
 func piSessionsName(dir string) string {
 	return "--" + strings.ReplaceAll(strings.TrimPrefix(filepath.Clean(dir), "/"), "/", "-") + "--"
+}
+
+// carryProjectTrust gives a caged session's private harness home what the
+// owner has decided about its own project, and about no other: pi's trust
+// in it (its .pi config, MCP servers and extensions load only in a trusted
+// project), and Claude Code's entry for it (the project's .mcp.json servers
+// approved, its trust dialog accepted). Without them the foray sessions on
+// proteus lost the foray tools their project's .pi/mcp.json gives them
+// (2026-10-16). Written at every start, so a decision made since is carried.
+func (m *Manager) carryProjectTrust(s *Session, container string) {
+	home, _ := os.UserHomeDir()
+	dir := filepath.Clean(s.dir)
+	switch s.harness.Name() {
+	case "pi":
+		var trust map[string]json.RawMessage
+		if b, err := os.ReadFile(filepath.Join(piAgentDir(), "trust.json")); err == nil && json.Unmarshal(b, &trust) == nil {
+			if v, ok := trust[dir]; ok {
+				b, _ := json.Marshal(map[string]json.RawMessage{dir: v})
+				os.WriteFile(filepath.Join(m.privateHome(container, "pi"), "trust.json"), b, 0o600)
+			}
+		}
+	case "claude":
+		var host struct {
+			Projects map[string]json.RawMessage `json:"projects"`
+		}
+		b, err := os.ReadFile(filepath.Join(home, ".claude.json"))
+		if err != nil || json.Unmarshal(b, &host) != nil {
+			return
+		}
+		entry, ok := host.Projects[dir]
+		if !ok {
+			return
+		}
+		// Into the cage's own config file (CLAUDE_CONFIG_DIR is its
+		// ~/.claude), keeping what Claude Code wrote there itself.
+		p := filepath.Join(m.privateHome(container, "claude"), ".claude.json")
+		cfg := map[string]json.RawMessage{}
+		if b, err := os.ReadFile(p); err == nil {
+			json.Unmarshal(b, &cfg)
+		}
+		projects := map[string]json.RawMessage{}
+		if raw, ok := cfg["projects"]; ok {
+			json.Unmarshal(raw, &projects)
+		}
+		projects[dir] = entry
+		cfg["projects"], _ = json.Marshal(projects)
+		if b, err := json.MarshalIndent(cfg, "", "  "); err == nil {
+			os.WriteFile(p, b, 0o600)
+		}
+	}
 }

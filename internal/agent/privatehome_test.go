@@ -80,3 +80,34 @@ func TestTheConversationFolderNames(t *testing.T) {
 		t.Errorf("pi: %s", got)
 	}
 }
+
+// A caged session's private home gets the owner's decisions about its own
+// project and no other: pi's trust in it, and Claude Code's entry for it.
+func TestACageCarriesItsOwnProjectsTrust(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("PI_CODING_AGENT_DIR", "")
+	state := t.TempDir()
+	m := newTestManager(t, state)
+	proj, other := filepath.Join(home, "foray-office"), filepath.Join(home, "secret-project")
+	os.MkdirAll(filepath.Join(home, ".pi", "agent"), 0o700)
+	os.WriteFile(filepath.Join(home, ".pi", "agent", "trust.json"), []byte(`{"`+proj+`":true,"`+other+`":true}`), 0o600)
+	os.WriteFile(filepath.Join(home, ".claude.json"), []byte(`{"oauthAccount":{"email":"me@x"},"projects":{"`+proj+`":{"enabledMcpjsonServers":["foray"]},"`+other+`":{"allowedTools":["x"]}}}`), 0o600)
+	name := "fo"
+	pi := &Session{dir: proj, harness: Pi{}, cage: &Cage{Container: "c1"}}
+	pi.label.Store(&name)
+	m.carryProjectTrust(pi, "c1")
+	b, _ := os.ReadFile(filepath.Join(state, "cages", "c1.home", "pi", "trust.json"))
+	if !strings.Contains(string(b), proj) || strings.Contains(string(b), other) {
+		t.Errorf("pi's trust in the cage: %s", b)
+	}
+	cl := &Session{dir: proj, harness: Claude{}, cage: &Cage{Container: "c2"}}
+	cl.label.Store(&name)
+	os.MkdirAll(filepath.Join(state, "cages", "c2.home", "claude"), 0o700)
+	os.WriteFile(filepath.Join(state, "cages", "c2.home", "claude", ".claude.json"), []byte(`{"numStartups":3}`), 0o600)
+	m.carryProjectTrust(cl, "c2")
+	b, _ = os.ReadFile(filepath.Join(state, "cages", "c2.home", "claude", ".claude.json"))
+	if !strings.Contains(string(b), `"foray"`) || strings.Contains(string(b), other) || strings.Contains(string(b), "me@x") || !strings.Contains(string(b), "numStartups") {
+		t.Errorf("Claude Code's config in the cage: %s", b)
+	}
+}
