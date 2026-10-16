@@ -128,6 +128,10 @@ object HostCache {
         return (fresh + kept).sortedWith(compareBy({ it.name }, { it.mesh }))
     }
 
+    /** [hosts] with each mesh named as [own] names it, a machine once on each: the freshest copy. */
+    fun renamed(own: Map<String, String>, hosts: List<AgentHost>): List<AgentHost> =
+        meshesByPrefix(own, hosts).sortedByDescending { it.lastSeen }.distinctBy { it.name + "@" + it.mesh }
+
     fun encode(hosts: List<AgentHost>): String = org.json.JSONArray(hosts.map { h ->
         JSONObject().put("name", h.name).put("mesh", h.mesh).put("address", h.address).put("seen", h.lastSeen)
             .put("sessions", org.json.JSONArray(h.sessions.map { s ->
@@ -233,12 +237,31 @@ fun meshPrefix(address: String): String {
     return if (parts.size >= 3 && parts[0].isNotEmpty()) parts.take(3).joinToString(":") else ""
 }
 
+/**
+ * This phone's names for its meshes, by prefix: its own peers', then the
+ * machines the shrooms app handed over, both in this phone's names. Machines
+ * found before only fill in a mesh neither names: they were often named by
+ * another machine (atlas calls the office mesh "default"), and taken first
+ * that name was kept and fed back every round, so pi5 stayed "default" on a
+ * phone with no such mesh (2026-10-16).
+ */
+fun meshNames(peers: List<Peer>, handed: List<AgentHosts.Host>, seen: List<AgentHosts.Host>): Map<String, String> {
+    val own = mutableMapOf<String, String>()
+    val named = peers.map { it.overlay to it.mesh } + handed.map { it.address to it.mesh } + seen.map { it.address to it.mesh }
+    for ((addr, mesh) in named) {
+        val p = meshPrefix(addr)
+        if (p.isNotEmpty() && mesh.isNotEmpty()) own.putIfAbsent(p, mesh)
+    }
+    return own
+}
+
 /** Each host's mesh named as this phone names it, by its address's prefix. */
 fun meshesByPrefix(own: Map<String, String>, hosts: List<AgentHost>): List<AgentHost> =
     hosts.map { h -> own[meshPrefix(h.address)]?.let { if (it != h.mesh) h.copy(mesh = it) else h } ?: h }
 
 suspend fun discoverAgents(peers: List<Peer>, byName: List<String> = emptyList(),
-                           known: List<AgentHosts.Host> = emptyList()): List<AgentHost> =
+                           known: List<AgentHosts.Host> = emptyList(),
+                           handed: List<AgentHosts.Host> = known): List<AgentHost> =
     withContext(Dispatchers.IO) {
         // One per machine AND mesh: a machine on two meshes is two places, and
         // each may show other sessions (ADR-049); the mesh switch shows one.
@@ -253,7 +276,7 @@ suspend fun discoverAgents(peers: List<Peer>, byName: List<String> = emptyList()
             }
         }
         // The peers the shrooms app handed over, when this is Shrooms Agents.
-        val handed = known.filter { k -> peers.none { it.name == k.name } }.map { k ->
+        val asked = known.filter { k -> peers.none { it.name == k.name } }.map { k ->
             async { runCatching { AgentHost(k.name, k.mesh, k.address, AgentClient(k.address).sessions(3000)) }.getOrNull() }
         }
         val named = byName.filter { n -> peers.none { it.name == n.substringBefore('.') } }.map { n ->
@@ -268,10 +291,8 @@ suspend fun discoverAgents(peers: List<Peer>, byName: List<String> = emptyList()
         }
         // This phone's own names for its meshes, by prefix: from its peers, and
         // the machines the shrooms app handed over (both in this phone's names).
-        val own = (peers.map { p -> p.overlay to p.mesh } + known.map { it.address to it.mesh })
-            .filter { it.second.isNotEmpty() && meshPrefix(it.first).isNotEmpty() }
-            .associate { meshPrefix(it.first) to it.second }
-        val found = meshesByPrefix(own, (fromPeers + handed + named).awaitAll().filterNotNull()).distinctBy { it.name + "@" + it.mesh }
+        val own = meshNames(peers, handed, known)
+        val found = meshesByPrefix(own, (fromPeers + asked + named).awaitAll().filterNotNull()).distinctBy { it.name + "@" + it.mesh }
         // Then the mesh as each agent's machine sees it: a phone that knows one
         // agent finds the rest without being told (/v1/peers). One round, not
         // a crawl — every machine sees the same mesh.
@@ -440,8 +461,12 @@ fun AgentsScreen(peers: List<Peer>, onClose: () -> Unit, initial: OpenSession? =
             // for machines rather than after it, which takes a while; not
             // while the tasks screen is open, which asks for itself.
             val tasks = if (tasksOpen) null else async { fetchTasks(taskTargets(hosts.orEmpty())) }
-            val found = discoverAgents(peers, named, agentCandidates(AgentHosts.peers(ctx), hosts.orEmpty()))
-            val merged = HostCache.merge(hosts.orEmpty(), found, System.currentTimeMillis())
+            val handed = AgentHosts.peers(ctx)
+            val cands = agentCandidates(handed, hosts.orEmpty())
+            val found = discoverAgents(peers, named, cands, handed)
+            // The ones kept from before named as now, too: a copy kept under
+            // another machine's name for a mesh would otherwise stay a week.
+            val merged = HostCache.merge(HostCache.renamed(meshNames(peers, handed, cands), hosts.orEmpty()), found, System.currentTimeMillis())
             hosts = merged
             cachePrefs.edit().putString("cache", HostCache.encode(merged)).apply()
             // The watcher keeps asking a machine that missed a round, too.

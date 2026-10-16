@@ -393,6 +393,18 @@ class MeshPickTest {
         assertEquals("fdb0::1@office", h.of(h.sessions.first()).let { it.address + "@" + it.mesh })
     }
 
+    // The phone's names win over a machine found before under another's
+    // name for the mesh, and a copy kept under that name is renamed.
+    @Test fun thePhonesNamesWin() {
+        val handed = listOf(AgentHosts.Host("laptop", "office", "fdb0:9afc:a5ef::1"))
+        val seen = listOf(AgentHosts.Host("pi5", "default", "fdb0:9afc:a5ef::5"), AgentHosts.Host("k11", "home", "fd7b:15fb:5ec1::2"))
+        assertEquals(mapOf("fdb0:9afc:a5ef" to "office", "fd7b:15fb:5ec1" to "home"), meshNames(emptyList(), handed, seen))
+        val kept = listOf(AgentHost("pi5", "default", "fdb0:9afc:a5ef::5", emptyList(), lastSeen = 1),
+            AgentHost("pi5", "office", "fdb0:9afc:a5ef::5", emptyList(), lastSeen = 9))
+        val got = HostCache.renamed(meshNames(emptyList(), handed, seen), kept)
+        assertEquals(listOf("pi5@office:9"), got.map { it.name + "@" + it.mesh + ":" + it.lastSeen })
+    }
+
     // An agent's peers come with its machine on each of its meshes.
     @Test fun peersCarryTheMachineItself() {
         val got = parsePeerList("""{"peers":[{"name":"k11","mesh":"home","overlay":"fd7b::2"}],
