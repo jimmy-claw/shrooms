@@ -219,7 +219,7 @@ echo "$out" | grep -qF "HOSTS=" || { echo "$out" | head -20; echo "FAIL: the vie
 if echo "$out" | grep -E "Main\.qml:[0-9]+:.*(TypeError|ReferenceError|is not a function|Cannot (read|assign)|Expected token|Unexpected token|SyntaxError|Expected a qualified name)"; then
     echo "FAIL: the view hit a script error"; exit 1
 fi
-expect "HOSTS=1 SESSIONS=2" "the agents were not listed"
+expect "HOSTS=1 SESSIONS=2 ENTRIES=2 MESHES=home,office" "the agents were not listed, or a machine on two meshes is not one machine on both (it showed on whichever answered first)"
 # The tasks panel's rows: grouped Needs you / Working / Stalled / Done unacked, with the
 # acked one gone, the ages right, and each row carrying what a person needs to judge it.
 expect "TASKROWS needs-you:m8:quiet 5m,blocked:m1:quiet 1h,blocked:m6:quiet 15m,working:m2:quiet 30m,working:m7:quiet 10m,stalled:m3:quiet 2h,unacked:m4:done 3h" "the task rows are not grouped and ordered as a person needs them: Needs you first, then oldest-first inside each group"
@@ -392,7 +392,8 @@ expect 'ACCEPTCAGED /v1/sessions/shrooms/settings {"accept_caged":true} said=ses
 nd=$(echo "$out" | sed -n 's/.*NODOUBLE before=\([0-9]*\) after=\([0-9]*\).*/\1 \2/p')
 [ -n "$nd" ] && [ "${nd% *}" = "${nd#* }" ] || { echo "FAIL: a read from where one had already read shows events twice (replies doubled, 2026-10-16): $nd"; exit 1; }
 expect 'STREAMONLY rebuilt=0 grew=true' "pieces of a streaming reply rebuild the whole conversation (85% of a core on the Duet while streaming)"
-expect 'MESHPICK meshes=home,office home=k11@home all=2 switch=1' "the agents cannot be shown one mesh at a time"
+expect 'MESHPICK meshes=home,office home=k11@home,laptop@home all=2 switch=1' "the agents cannot be shown one mesh at a time"
+expect 'HERE first=k11:true second=laptop:false' "the machine Basecamp runs on is not first in the list, or not marked"
 expect 'COREEVENT read=true interval=3000 subscribed=shrooms_core/agentChanged' "the view does not subscribe to the core's agentChanged, read on it, or fall back to a slow safety-net poll"
 expect 'POLL busy=300/true hidden=300/true' "the open session is not polled fast while it works, or stops when the host says the view is hidden (Basecamp 0.3.1 says so while it is on screen: 0.51.1 never listed an agent)"
 expect 'CAGELIMITS /v1/sessions/shrooms/cage/limits {"memory":"16g","cpus":"8"}' "a cage's memory and CPUs cannot be set"

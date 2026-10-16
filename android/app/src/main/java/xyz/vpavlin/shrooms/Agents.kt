@@ -100,6 +100,8 @@ data class AgentHost(
     val sessions: List<AgentSession>,
     /** When it last answered, epoch millis; 0 for "just now" (found this round). */
     val lastSeen: Long = 0,
+    /** Shown once under "all": every mesh it answers on (onMesh). */
+    val meshes: List<String> = emptyList(),
 )
 
 /**
@@ -167,7 +169,12 @@ object HostCache {
  * list. As Basecamp's switch.
  */
 fun onMesh(hosts: List<AgentHost>, mesh: String): List<AgentHost> =
-    if (mesh.isEmpty()) hosts else hosts.filter { it.mesh == mesh }
+    if (mesh.isNotEmpty()) hosts.filter { it.mesh == mesh }
+    else hosts.groupBy { it.name }.map { (_, hs) ->
+        // Once each, as it last answered (a mesh that stopped answering keeps
+        // an old copy), with every mesh it answers on.
+        hs.maxBy { it.lastSeen }.copy(meshes = hs.map { it.mesh }.filter { it.isNotEmpty() }.distinct().sorted())
+    }
 
 /**
  * The list as shown: starred sessions first, from every machine, by name;
@@ -550,7 +557,7 @@ fun AgentsScreen(peers: List<Peer>, onClose: () -> Unit, initial: OpenSession? =
                             Spacer(Modifier.width(10.dp))
                             Text(h.name, style = MaterialTheme.typography.titleMedium, color = Palette.Bone)
                             Spacer(Modifier.width(8.dp))
-                            Text(h.mesh, style = MaterialTheme.typography.labelSmall, color = meshColour(h.mesh, meshes))
+                            Text(h.meshes.ifEmpty { listOf(h.mesh) }.joinToString(" · "), style = MaterialTheme.typography.labelSmall, color = meshColour(h.mesh, meshes))
                             if (!up) {
                                 Spacer(Modifier.width(8.dp))
                                 Text("unreachable · seen ${whenSaid(h.lastSeen)}", style = MaterialTheme.typography.labelSmall,

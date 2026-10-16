@@ -258,7 +258,9 @@ Item {
     Timer {
         interval: 1500; running: true
         onTriggered: {
-            console.error("HOSTS=" + view.agentHosts.length + " SESSIONS=" + view.agentHosts[0].sessions.length)
+            // One machine on two meshes: an entry for each, shown once under "all" with both.
+            console.error("HOSTS=" + view.shownHosts.length + " SESSIONS=" + view.shownHosts[0].sessions.length
+                          + " ENTRIES=" + view.agentHosts.length + " MESHES=" + view.shownHosts[0].meshes.join(","))
             console.error("PROBED=" + top.lastFind)
             view.openSession(view.agentHosts[0], "shrooms")
         }
@@ -344,6 +346,11 @@ Item {
             var onHome = view.shownHosts.map(function(h) { return h.name + "@" + h.mesh }).join(",")
             view.pickMesh("")
             console.error("MESHPICK meshes=" + meshes + " home=" + onHome + " all=" + view.shownHosts.length + " switch=" + top.countVisible(view, "meshSwitch"))
+            // This machine first, and marked.
+            var stKept = view.st
+            view.st = Object.assign({}, stKept, { name: "k11" })
+            console.error("HERE first=" + view.shownHosts[0].name + ":" + view.shownHosts[0].here + " second=" + view.shownHosts[1].name + ":" + view.shownHosts[1].here)
+            view.st = stKept
             view.agentHosts = hostsKept
             // The core's event: read at once, and the poll only a safety net.
             var callsBefore = top.eventCalls
@@ -533,7 +540,7 @@ Item {
             // greyed once quiet a while; forgotten only after days.
             top.findNone = true
             view.refreshAgents()
-            var stayed = view.agentHosts.map(function(x) { return x.name + ":" + x.sessions.length }).join(",")
+            var stayed = view.meshHosts.map(function(x) { return x.name + ":" + x.sessions.length }).join(",")
             var kept = view.agentHosts[0]
             console.error("FLAKY stayed=" + stayed + " now=" + view.hostReachable(kept, Date.now())
                           + " later=" + view.hostReachable(kept, Date.now() + 30000)
@@ -1065,7 +1072,7 @@ Item {
                           + " edges=" + view.boardEdgeList.map(function(e) { return e.from + ">" + e.to + ":" + e.state }).join(",")
                           + " drawn=" + (links ? links.drawn : -1)
                           + " list=" + top.findByName(view, "agentList").visible + " flow=" + top.findByName(view, "boardFlow").visible
-                          + " tasks=" + view.agentHosts[0].tasks.length)
+                          + " tasks=" + view.meshHosts[0].tasks.length)
             top.grabToImage(function(img) {
                 img.saveToFile(top.out)
                 console.error("SAVED " + top.out)

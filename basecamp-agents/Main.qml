@@ -389,8 +389,36 @@ Item {
         }
         return out.sort()
     }
-    readonly property var shownHosts: meshPick === "" ? agentHosts
-        : agentHosts.filter(function(h) { return (h.mesh || "") === meshPick })
+    // This machine: the one this Basecamp runs on, first in the list and
+    // marked, since its agent is the one most often talked to from here.
+    function isHere(h) { return h.address === "local" || (!!root.st.name && h.name === root.st.name) }
+    // As shown: one mesh's entries, or with "all" each machine once, with
+    // every mesh it answers on; this machine first, then by name.
+    readonly property var shownHosts: {
+        var out = meshHosts.map(function(h) { return Object.assign({}, h, { here: isHere(h) }) })
+        out.sort(function(a, b) { return a.here !== b.here ? (a.here ? -1 : 1) : (a.name < b.name ? -1 : a.name > b.name ? 1 : 0) })
+        return out
+    }
+    // The same, in the board's and the tasks' order (by name): they lay
+    // themselves out by it, and this machine first would move every card.
+    readonly property var meshHosts: meshPick !== ""
+        ? agentHosts.filter(function(h) { return (h.mesh || "") === meshPick })
+        : oneEach(agentHosts)
+    // Each machine once, as it last answered, with every mesh it answers on
+    // (a mesh that stopped answering keeps an old copy, not the one to show).
+    function oneEach(hosts) {
+        var out = [], by = {}
+        for (var i = 0; i < hosts.length; i++) {
+            var h = hosts[i], cur = by[h.name]
+            if (!cur) { by[h.name] = Object.assign({}, h, { meshes: [] }); out.push(by[h.name]) }
+            else if ((h.lastSeen || 0) > (cur.lastSeen || 0)) {
+                by[h.name] = Object.assign({}, h, { meshes: cur.meshes })
+                out[out.indexOf(cur)] = by[h.name]
+            }
+            if (h.mesh && by[h.name].meshes.indexOf(h.mesh) < 0) by[h.name].meshes.push(h.mesh)
+        }
+        return out.map(function(x) { return Object.assign({}, x, { meshes: x.meshes.slice().sort() }) })
+    }
     function pickMesh(m) {
         root.meshPick = m
         savePref("agent_mesh", m)
@@ -494,10 +522,13 @@ Item {
         var hosts = [], seen = {}
         for (var i = 0; i < r.length; i++) {
             var h = r[i]
-            // One machine on several meshes answers on each of its addresses;
-            // it is one machine with one set of sessions.
-            if (seen[h.name]) continue
-            seen[h.name] = true
+            // One machine on several meshes answers on each of its addresses,
+            // and each mesh may see other sessions of it (ADR-049): one entry
+            // per machine and mesh. Kept once by name, a machine was listed on
+            // whichever mesh answered first ("default"), and the mesh switch
+            // could not find it on the others (2026-10-16).
+            if (seen[h.name + "@" + h.mesh]) continue
+            seen[h.name + "@" + h.mesh] = true
             // Without a mesh the machine is "this device" to the view but
             // its hostname to its sessions, which sign their tasks with it:
             // named as the agent says, so the board's links find their cards.
@@ -534,15 +565,15 @@ Item {
         var out = [], names = {}
         for (var i = 0; i < found.length; i++) {
             var h = Object.assign({}, found[i], { lastSeen: now })
-            names[h.name] = true
+            names[h.name + "@" + h.mesh] = true
             out.push(h)
         }
         for (i = 0; i < (prev || []).length; i++) {
             var p = prev[i]
-            if (names[p.name] || !(now - (p.lastSeen || 0) < forgetMs)) continue
+            if (names[p.name + "@" + p.mesh] || !(now - (p.lastSeen || 0) < forgetMs)) continue
             out.push(p)
         }
-        out.sort(function(a, b) { return a.name < b.name ? -1 : 1 })
+        out.sort(function(a, b) { return a.name < b.name ? -1 : a.name > b.name ? 1 : 0 })
         return out
     }
     function hostReachable(h, now) { return (now === undefined ? nowMs : now) - (h.lastSeen || 0) < staleMs }
@@ -1858,8 +1889,20 @@ Item {
         return to
     }
     // Where the session list is scrolled to; given y, scrolls it there.
+    // Where the list was scrolled to, kept across its rebuilds: each refresh
+    // hands it new hosts, its rows are made again, and for a moment it is
+    // empty and back at the top (it jumped to the top, 2026-10-07).
+    property real hostScrollKept: 0
+    onShownHostsChanged: {
+        if (typeof hostList === "undefined" || !hostList.contentItem) return
+        var y = hostList.contentItem.contentY
+        if (y > 0) root.hostScrollKept = y
+        Qt.callLater(function() {
+            if (root.hostScrollKept > 0 && hostList.contentItem.contentY === 0) hostList.contentItem.contentY = root.hostScrollKept
+        })
+    }
     function hostScroll(y) {
-        if (y !== undefined) hostList.contentItem.contentY = y
+        if (y !== undefined) { hostList.contentItem.contentY = y; root.hostScrollKept = y }
         return hostList.contentItem.contentY
     }
     // A2A tasks from other agents (the phone's AgentChat.taskNote and the
@@ -2028,8 +2071,11 @@ Item {
     }
     function openTaskRow(row) {
         if (!row || row.kind !== "task") return
-        for (var i = 0; i < agentHosts.length; i++) {
-            if (agentHosts[i].name !== row.machine) continue
+        // By name, among the machines as shown: a machine on two meshes is
+        // there once, as it last answered (meshHosts).
+        var hs = meshHosts
+        for (var i = 0; i < hs.length; i++) {
+            if (hs[i].name !== row.machine) continue
             // Arm the jump BEFORE the session loads: rebuildChat matches on the id as
             // soon as the events arrive, and falls back to the search if they never do.
             root.jumpRef = String(row.id || "")
@@ -2038,7 +2084,7 @@ Item {
             // negates it), which is ONE event - the session opened with a single line and
             // "N earlier events not loaded" (2026-10-10). The default tail is what opens a
             // session the way the list does.
-            openSession(agentHosts[i], row.session)
+            openSession(hs[i], row.session)
             return
         }
     }
@@ -2149,7 +2195,7 @@ Item {
         }
         return out
     }
-    readonly property var boardLinkData: boardLinkList(shownHosts)
+    readonly property var boardLinkData: boardLinkList(meshHosts)
     // What a session OWES and what it is WAITING FOR: the tasks it is working on,
     // and the tasks it asked others for. A card doing four things should say so.
     function cardLoad(hosts) {
@@ -2171,7 +2217,7 @@ Item {
         }
         return out
     }
-    readonly property var cardLoadData: cardLoad(shownHosts)
+    readonly property var cardLoadData: cardLoad(meshHosts)
     // A short label for a load count: "2 owed · 1 asked", and nothing when idle.
     function loadLabel(l) {
         if (!l) return ""
@@ -2428,7 +2474,7 @@ Item {
         })
         return out
     }
-    readonly property var taskRowList: taskRows(shownHosts)
+    readonly property var taskRowList: taskRows(meshHosts)
     // The panel's rows INCLUDING a header before each group that has something in
     // it. One flat list, because a QML Repeater cannot insert a header when a
     // value changes - and a group with nothing in it gets no header, so the
@@ -2512,7 +2558,7 @@ Item {
     // Where the link badges were drawn, so a tap on one can filter the panel to its
     // pair. Written by the canvas, read by the tap handler.
     property var badgeHit: []
-    readonly property var taskPanelList: taskPanelRows(shownHosts, linkFilter, showDone)
+    readonly property var taskPanelList: taskPanelRows(meshHosts, linkFilter, showDone)
 
     function edgeTint(state) {
         return state === "working" ? cPhosphor : state === "input-required" ? cAmber : state === "stalled" ? cRust : cAsh
@@ -2572,8 +2618,8 @@ Item {
         ctx.closePath(); ctx.fill()
         ctx.beginPath(); ctx.arc(p[0].x, p[0].y, width * 1.6, 0, 2 * Math.PI); ctx.fill()
     }
-    readonly property var boardCardList: boardCards(shownHosts)
-    readonly property var boardEdgeList: boardEdges(shownHosts)
+    readonly property var boardCardList: boardCards(meshHosts)
+    readonly property var boardEdgeList: boardEdges(meshHosts)
     function askDelete() { deleteDialog.open() }
     function dialogs() { return [usageDialog, voiceDialog, deleteDialog, renameDialog, modelDialog, restartDialog, readingDialog, cageDialog] }
     function closeDialogs() { dialogs().forEach(function(d) { d.close() }) }
@@ -2763,7 +2809,7 @@ Item {
         root.usageMissing = []
         root.usagePlans = []
         var since = usageSince(usageDays)
-        root.usageHosts = agentHosts.map(function(h) { return { name: h.name, address: h.address } })
+        root.usageHosts = oneEach(agentHosts).map(function(h) { return { name: h.name, address: h.address } })
         root.usageWaiting = usageHosts.map(function(h) { return h.name })
         if (usageHosts.length === 0) { root.usageRows = []; return }
         agentCall("agentGather", [usageHosts.map(function(h) { return h.address }).join("\n"),
@@ -4381,8 +4427,10 @@ Item {
                             spacing: 8
                             opacity: hostCol.up ? 1 : 0.45
                             Rectangle { width: root.sz(9); height: width; radius: width / 2; color: "transparent"; border.width: 2; border.color: root.meshTint(hostCol.modelData.mesh) }
-                            Text { text: hostCol.modelData.name; color: cBone; font.family: "monospace"; font.pixelSize: root.fs(14) }
-                            Text { text: hostCol.modelData.mesh; color: root.meshTint(hostCol.modelData.mesh); font.family: "monospace"; font.pixelSize: root.fs(10) }
+                            Text { text: hostCol.modelData.name; color: hostCol.modelData.here ? cPhosphor : cBone; font.family: "monospace"; font.pixelSize: root.fs(14) }
+                            Text { text: hostCol.modelData.meshes && hostCol.modelData.meshes.length ? hostCol.modelData.meshes.join(" · ") : hostCol.modelData.mesh
+                                   color: root.meshTint(hostCol.modelData.mesh); font.family: "monospace"; font.pixelSize: root.fs(10) }
+                            Text { visible: !!hostCol.modelData.here; objectName: "hereTag"; text: "THIS MACHINE"; color: cPhosphor; font.family: "monospace"; font.pixelSize: root.fs(9); font.letterSpacing: 1 }
                             Text { visible: !hostCol.up; text: "unreachable · seen " + root.clock(hostCol.modelData.lastSeen); color: cAsh; font.family: "monospace"; font.pixelSize: root.fs(10) }
                             Item { Layout.fillWidth: true }
                             Lnk { visible: hostCol.up; text: "+ session"; onClicked: {

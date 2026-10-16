@@ -375,7 +375,9 @@ class MeshPickTest {
     @Test fun aMeshShowsItsMachinesOnly() {
         val hs = listOf(host("laptop", "home"), host("laptop", "office"), host("k11", "home"), host("pi5", "office"))
         assertEquals(listOf("laptop", "k11"), onMesh(hs, "home").map { it.name })
-        assertEquals(4, onMesh(hs, "").size)
+        // All: each machine once, with all its meshes, as it last answered.
+        val all = onMesh(listOf(host("laptop", "home", 5), host("laptop", "office", 9), host("k11", "home")), "")
+        assertEquals(listOf("laptop:office:home,office", "k11:home:home"), all.map { it.name + ":" + it.mesh + ":" + it.meshes.joinToString(",") })
     }
 
     // A machine answering on one mesh does not drop it from the other.
