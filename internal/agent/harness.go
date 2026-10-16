@@ -27,8 +27,12 @@ type Harness interface {
 	// Args starts a session's process: a new conversation, or the one with
 	// the id given (from an earlier init message's session_id).
 	Args(o StartOptions) []string
-	// Codec is a fresh translator for one process.
-	Codec() Codec
+	// Codec is a fresh translator for one process. It is given the same
+	// StartOptions the process was started with, because not every harness
+	// takes them on its command line: Claude Code and pi read Resume, MCP
+	// and Note out of Args, but OpenCode's ACP server is started bare and
+	// told all three over the protocol, so its codec has to know them.
+	Codec(StartOptions) Codec
 	// Caps says what the harness can do, for the apps to offer.
 	Caps() Caps
 }
@@ -53,6 +57,10 @@ type StartOptions struct {
 	// Model is the one chosen for the session (SetModel); "" for the
 	// harness's default.
 	Model string
+	// Dir is the session's directory, absolute. It is also the process's
+	// working directory; a codec needs it by name when its protocol takes a
+	// path (OpenCode's ACP session/new wants one, and wants it absolute).
+	Dir string
 }
 
 // AgentNote is what every session is told about the agents around it.
@@ -102,6 +110,20 @@ type Codec interface {
 	Respond(requestID string, response map[string]any) []any
 }
 
+// Answering is a codec whose protocol needs a round trip before it can be
+// used, so it must write to its process WHILE decoding. OpenCode's ACP is that
+// shape: initialize is answered with session/new, and the id that comes back is
+// what every turn needs — so a turn that arrived before the session existed
+// goes out on that step. The codec queues what it must send and the read loop
+// writes it before the messages from the same line.
+//
+// Opt-in, like Transcripts and Gatewayed: Claude Code and pi write nothing
+// here, and their codecs do not carry a return value they would never use.
+type Answering interface {
+	// Decoding returns what this codec queued to write, and empties the queue.
+	Decoding() []any
+}
+
 // Transcripts is a harness whose conversations are kept on disk where the
 // agent can read them: what was said before a session came to the agent (in
 // a terminal, say), for its history and search.
@@ -119,11 +141,11 @@ type Transcripts interface {
 // own shape, so its codec passes lines through as they are.
 type Claude struct{}
 
-func (Claude) Name() string  { return "claude" }
-func (Claude) Title() string { return "Claude Code" }
-func (Claude) Bin() string   { return "claude" }
-func (Claude) Caps() Caps    { return Caps{Approve: true, Takeover: true} }
-func (Claude) Codec() Codec  { return claudeCodec{} }
+func (Claude) Name() string             { return "claude" }
+func (Claude) Title() string            { return "Claude Code" }
+func (Claude) Bin() string              { return "claude" }
+func (Claude) Caps() Caps               { return Caps{Approve: true, Takeover: true} }
+func (Claude) Codec(StartOptions) Codec { return claudeCodec{} }
 
 // Args is how a session's process is started.
 //
@@ -237,5 +259,5 @@ func (h missingHarness) Name() string               { return h.name }
 func (h missingHarness) Title() string              { return h.name }
 func (h missingHarness) Bin() string                { return "" }
 func (h missingHarness) Args(StartOptions) []string { return nil }
-func (h missingHarness) Codec() Codec               { return claudeCodec{} }
+func (h missingHarness) Codec(StartOptions) Codec   { return claudeCodec{} }
 func (h missingHarness) Caps() Caps                 { return Caps{} }

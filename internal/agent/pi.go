@@ -133,7 +133,7 @@ func (Pi) EnsureMCP(command string, extra ...string) error {
 	return os.Rename(tmp, path)
 }
 
-func (Pi) Codec() Codec { return &piCodec{ui: map[string]piDialog{}} }
+func (Pi) Codec(StartOptions) Codec { return &piCodec{ui: map[string]piDialog{}} }
 
 // piStateID is the id of the get_state sent at start; its answer carries the
 // conversation id and the model.

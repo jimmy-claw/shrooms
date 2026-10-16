@@ -961,6 +961,21 @@ func cageEnvAllowed(k string, harness []string) bool {
 
 // CageEnv is a harness that wants some of the agent's variables in its cage:
 // settings, never secrets (a cage's credentials come through the gateway).
+// cageableHarness refuses a harness that cannot run in a cage. Claude Code and
+// pi are set up for it by name — a private home, and the gateway for a sealed
+// one (ADR-059, ADR-060). OpenCode is not: the image has no opencode and there
+// is no home or gateway for it, so a cage would be made and then fail at exec.
+// Better refused where it is asked for.
+//
+// AdoptCaged needs no check of its own: it requires a Transcripts harness, and
+// OpenCode is not one.
+func cageableHarness(harness string) error {
+	if harness == "opencode" {
+		return errors.New("OpenCode is not caged yet (ADR-061)")
+	}
+	return nil
+}
+
 type CageEnv interface {
 	CageEnv() []string
 }
@@ -1032,6 +1047,12 @@ func (m *Manager) SetCage(name string, cage *Cage, by string) (Info, error) {
 	s, ok := m.Get(name)
 	if !ok {
 		return Info{}, fmt.Errorf("no session called %q", name)
+	}
+	if cage != nil {
+		// Before the podman check, for the same reason as CreateCaged.
+		if err := cageableHarness(s.harness.Name()); err != nil {
+			return Info{}, err
+		}
 	}
 	if cage != nil && m.Cages == nil {
 		return Info{}, errors.New("this machine has no podman to cage sessions with")

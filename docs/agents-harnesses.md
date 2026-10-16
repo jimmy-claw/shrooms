@@ -40,9 +40,30 @@ frequent — for a handful of machines it is a once-a-year chore.
 ## 2. Harnesses: Claude Code, pi, and the next one
 
 Decided 2026-10-04: the open ones matter — pi and OpenCode — then Claude Code
-and Codex; the agent is pluggable so anybody can add the one they use. Built
-so far: the plug-in point, Claude Code moved behind it, and **pi**, the worked
-example below. OpenCode and Codex are not built.
+and Codex; the agent is pluggable so anybody can add the one they use. Built:
+the plug-in point, Claude Code moved behind it, **pi**, and **OpenCode**
+(ADR-061). Codex is not built.
+
+**OpenCode** is spoken to over its ACP server (`opencode acp`) — a long-lived
+JSON-RPC server on stdin/stdout, the same shape as Claude Code's and pi's, and
+not `opencode serve` as once expected. `opencode run` is the other one and does
+not fit a session: the message is an argument, the process exits, and its
+`--format json` emits one text event per completed part, so a reply arrives
+whole instead of growing. Three things are worth knowing before starting a
+session on it:
+
+- **It never asks permission**, so auto-approve is not offered for it — its
+  own `permission` config decides what may run. Measured, not assumed: it
+  wrote a file with no prompt both through `run` without `--auto` and over
+  ACP.
+- **The model is the session's to choose**, from the apps' model setting, as
+  for any harness. `-opencode-model` is only this machine's default for
+  sessions that name none, and it is empty out of the box so OpenCode's own
+  config decides. It is deliberately not defaulted to a free model: most of
+  OpenCode's free ones are stealth — unreleased and anonymous, free "for a
+  limited time" — and a default naming one would rot.
+- **It cannot be caged yet** (ADR-061), and is refused rather than made and
+  then failed at exec.
 
 ### How it fits together
 
@@ -78,6 +99,13 @@ apps ──HTTP/SSE──▶ shrooms-agent ── Session ── proc ──stdi
   offer the choice in "+ session" when there is more than Claude Code, name
   the harness on its sessions, and hide auto-approve where `caps.approve` is
   false.
+
+One codec writes while decoding. ACP's session does not exist until
+`initialize` is answered with `session/new`, and every turn needs the id that
+comes back — so a codec that speaks it must answer its process *while* reading
+from it. That is the opt-in `Answering` interface: the codec queues what it
+must send, and the read loop writes it before the messages from the same line.
+Claude Code and pi do not implement it, and their codecs carry nothing for it.
 
 ### The event shape a codec must produce
 
@@ -171,15 +199,10 @@ Things pi does differently, known:
   line; the agent adds only `--pi-args`.
 - Cost is pi's own figure (0 for a local model).
 
-### Next: OpenCode and Codex (not built)
+### Next: Codex (not built)
 
-Starting points, not yet checked against the programs:
+A starting point, not yet checked against the program:
 
 - **Codex** has a JSON-RPC app server over stdio (`codex app-server`) with
   approvals, which fits a Codec as pi's RPC mode does; `codex exec --json`
   is the simpler one-shot form, one process per turn, resuming by id.
-- **OpenCode** is built around a local HTTP server (`opencode serve`, with
-  server-sent events). The agent's processes are stdio only today; a harness
-  that is a server needs a second kind of process — start the server, then
-  speak HTTP to it — behind the same Codec idea. That is the one change to
-  the plug-in point these two are likely to ask for.
