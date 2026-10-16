@@ -62,9 +62,13 @@ process needs:
 - **opencode or codex:** whatever each one reads. The cage code doesn't
   change.
 
-**Then no keys go into the cage.** A cage whose harness plugs in gets no
-`*_API_KEY` or `*_TOKEN` from the agent. Sealed cages come first, then
-caged sessions by default.
+**Then no keys go into the cage, and nothing else unasked for.** A caged
+session gets, of the agent's own environment, only what is named: the time
+zone, the locale, the proxies, and the settings its harness asks for
+(`CageEnv`, e.g. Claude Code's model choices). Everything else stays out,
+whatever it is called, including what is added to the agent later. A
+filter of key-like names was tried first and missed `VENICE_INFERENCE_KEY`
+on proteus (2026-10-16). Sealed cages never passed any.
 
 ## Consequences
 

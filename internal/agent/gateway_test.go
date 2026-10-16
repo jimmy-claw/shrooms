@@ -144,7 +144,7 @@ func TestACagedPiReachesItsModelsThroughTheGateway(t *testing.T) {
 		t.Fatal(err)
 	}
 	b, _ := os.ReadFile(path)
-	if strings.Contains(string(b), "sk-or-real") || strings.Contains(string(b), "vn-real-inference") || !strings.Contains(string(b), "GH_TOKEN=gh-real") {
+	if strings.Contains(string(b), "sk-or-real") || strings.Contains(string(b), "vn-real-inference") || strings.Contains(string(b), "gh-real") {
 		t.Fatalf("the cage's environment:\n%s", b)
 	}
 	// A caged Claude session: through the gateway, with an empty credentials

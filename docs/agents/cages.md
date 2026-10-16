@@ -369,19 +369,21 @@ home directory, goes to `~/.claude/.claude.json` instead
 
 **Environment.** The cage gets its own `PATH` (the image's, with your nix
 profile in front when it has nix), `SHROOMS_AGENT_SESSION`, `IS_SANDBOX=1`,
-and from the agent's own environment:
+the gateway's base URL and a dummy key (ADR-059), and of the agent's own
+environment only what is named:
 
-- anything starting `ANTHROPIC_`, `PI_`, `OLLAMA_`, `OPENAI_`, `VENICE_`,
-  `OPENROUTER_`, `GEMINI_` or `GOOGLE_API`;
-- anything ending `_API_KEY`, `_TOKEN` or `_BASE_URL` — but GitHub's
-  (`GH_*`, `GITHUB_*`) only with the GitHub login;
-- `CLAUDE_CODE_OAUTH_TOKEN`, `CLAUDE_CODE_USE_BEDROCK`,
-  `CLAUDE_CODE_USE_VERTEX`;
-- the proxy variables, `TZ` and `LANG`.
+- `TZ`, `LANG`, `LANGUAGE` and `LC_*`;
+- the proxy variables (`HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`, `ALL_PROXY`,
+  in either case);
+- the settings its harness asks for: for Claude Code, its model choices
+  (`ANTHROPIC_MODEL` and the like), output and thinking limits, and its
+  telemetry switches.
 
-Nothing else passes: not your `PATH`, `DISPLAY`, `SSH_AUTH_SOCK`, `USER` or
-the other `CLAUDE_CODE_` variables of a Claude Code session the agent itself
-might run under. The variables are written to a file only you can read
+Nothing else passes, whatever its name: no key or token (its model is
+reached through the agent, which holds them), not your `PATH`, `DISPLAY`,
+`SSH_AUTH_SOCK` or `USER`, and nothing added to the agent's environment
+later. A GitHub login reaches a cage only as the `gh` login mounted
+read-only. The variables are written to a file only you can read
 (`cages/<container>.env` in the agent's state directory,
 `~/.local/share/shrooms-agent` by default) rather than on podman's command
 line, so keys do not show up in the process list.

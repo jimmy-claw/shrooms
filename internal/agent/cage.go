@@ -892,13 +892,14 @@ func (m *Manager) cageEnv(s *Session) (string, error) {
 			vars["NIX_REMOTE"] = "daemon"
 		}
 	}
+	// Of the agent's own environment, only what is named here: a cage gets
+	// what it is given, not whatever the agent happens to carry. Its model
+	// is reached through the gateway (ADR-059), so no key need go in, and a
+	// variable added to the agent later stays out by default.
+	allowed := cageHarnessEnv(s.harness)
 	for _, kv := range os.Environ() {
 		k, v, _ := strings.Cut(kv, "=")
-		// Through the gateway, no model's key goes in (ADR-059).
-		if s.cageGateway && modelCredential(k) {
-			continue
-		}
-		if passedToCage(k, s.cage.GitHub) {
+		if cageEnvAllowed(k, allowed) {
 			vars[k] = v
 		}
 	}
@@ -933,35 +934,38 @@ func (m *Manager) writeCageEnv(s *Session, vars map[string]string) (string, erro
 	return p, os.WriteFile(p, []byte(b.String()), 0o600)
 }
 
-// passedToCage: the agent's environment variables a caged harness is given —
-// the keys and settings of models and providers, not the machine's own (its
-// PATH, its desktop, its user).
-func passedToCage(k string, github bool) bool {
-	// GitHub's tokens only to a cage given the GitHub login: otherwise the
-	// *_TOKEN rule below handed the owner's GitHub to every cage.
-	if strings.HasPrefix(k, "GH_") || strings.HasPrefix(k, "GITHUB_") {
-		return github
-	}
-	// Claude Code's own CLAUDE_CODE_ variables, when the agent runs under
-	// it, are about that session — its id, its socket — not this one's.
-	if strings.HasPrefix(k, "CLAUDE_CODE_") {
-		return k == "CLAUDE_CODE_OAUTH_TOKEN" || k == "CLAUDE_CODE_USE_BEDROCK" || k == "CLAUDE_CODE_USE_VERTEX"
-	}
-	for _, p := range []string{"ANTHROPIC_", "PI_", "OLLAMA_", "OPENAI_", "VENICE_", "OPENROUTER_", "GEMINI_", "GOOGLE_API"} {
-		if strings.HasPrefix(k, p) {
-			return true
-		}
-	}
-	for _, s := range []string{"_API_KEY", "_TOKEN", "_BASE_URL"} {
-		if strings.HasSuffix(k, s) {
-			return true
-		}
-	}
+// cageEnvAllowed is whether a variable of the agent's goes into a cage: the
+// time zone, the locale and the proxies, and the settings its harness asks
+// for (CageEnv). Nothing else: not keys or tokens of any name, and not the
+// machine's own (its PATH, its desktop, its user, its ssh agent).
+func cageEnvAllowed(k string, harness []string) bool {
 	switch k {
-	case "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "no_proxy", "TZ", "LANG":
+	case "TZ", "LANG", "LANGUAGE",
+		"HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "no_proxy", "all_proxy":
 		return true
 	}
+	if strings.HasPrefix(k, "LC_") {
+		return true
+	}
+	for _, h := range harness {
+		if k == h {
+			return true
+		}
+	}
 	return false
+}
+
+// CageEnv is a harness that wants some of the agent's variables in its cage:
+// settings, never secrets (a cage's credentials come through the gateway).
+type CageEnv interface {
+	CageEnv() []string
+}
+
+func cageHarnessEnv(h Harness) []string {
+	if c, ok := h.(CageEnv); ok {
+		return c.CageEnv()
+	}
+	return nil
 }
 
 // command is the harness's process, run in the cage.
@@ -1122,23 +1126,6 @@ func (m *Manager) SetCageLimits(name, memory, cpus, by string) (Info, error) {
 		}
 	}
 	return s.Info(), nil
-}
-
-// modelCredential is a variable that holds a key to a model: kept out of a
-// cage that reaches its model through the gateway. A GitHub token is not
-// one; it goes with the GitHub login, as before.
-func modelCredential(k string) bool {
-	if strings.HasPrefix(k, "GH_") || strings.HasPrefix(k, "GITHUB_") {
-		return false
-	}
-	// Any name that says key, token or secret: proteus's Venice key is
-	// VENICE_INFERENCE_KEY, which "_API_KEY" let through (2026-10-16).
-	for _, s := range []string{"_KEY", "_TOKEN", "_SECRET", "_PASSWORD"} {
-		if strings.HasSuffix(k, s) {
-			return true
-		}
-	}
-	return strings.Contains(k, "API_KEY") || strings.Contains(k, "APIKEY")
 }
 
 // gatewayFile is where on the machine a cage's gateway file is kept, to be

@@ -189,6 +189,14 @@ func (Claude) GatewayFiles(sealed bool) map[string]string {
 	return map[string]string{filepath.Join(home, ".claude", ".credentials.json"): "{}\n"}
 }
 
+// CageEnv: Claude Code's settings that may follow it into a cage, which
+// choose models and limits, none of them a credential.
+func (Claude) CageEnv() []string {
+	return []string{"ANTHROPIC_MODEL", "ANTHROPIC_SMALL_FAST_MODEL", "ANTHROPIC_DEFAULT_OPUS_MODEL", "ANTHROPIC_DEFAULT_SONNET_MODEL",
+		"ANTHROPIC_DEFAULT_HAIKU_MODEL", "CLAUDE_CODE_MAX_OUTPUT_TOKENS", "MAX_THINKING_TOKENS", "DISABLE_TELEMETRY",
+		"DISABLE_ERROR_REPORTING", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"}
+}
+
 func (Claude) TranscriptPath(id string) (string, error) { return transcriptPath(id) }
 func (Claude) ParseTranscriptLine(line []byte) (Said, bool) {
 	return parseTranscriptLine(line)

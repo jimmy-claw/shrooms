@@ -157,9 +157,12 @@ func TestACagedSessionRunsInItsOwnContainer(t *testing.T) {
 		t.Fatalf("the agent port is not closed in the cage before the harness runs: %q", cs)
 	}
 
-	// What the harness is given: its keys and who it is, not the machine's.
+	// What the harness is given: who it is and where things are; no keys, and nothing of the machine's.
 	env, _ := os.ReadFile(filepath.Join(state, "cages", name[1]+".env"))
-	for _, want := range []string{"ANTHROPIC_API_KEY=sk-test\n", "IS_SANDBOX=1\n", "SHROOMS_AGENT_SESSION=box\n", "HOME=" + home + "\n",
+	if strings.Contains(string(env), "sk-test") {
+		t.Errorf("the agent's API key is in the cage, which reaches its model through the gateway:\n%s", env)
+	}
+	for _, want := range []string{"IS_SANDBOX=1\n", "SHROOMS_AGENT_SESSION=box\n", "HOME=" + home + "\n",
 		"SHROOMS_AGENT_PROXY=" + CageProxyDir + "/proxy.sock\n"} {
 		if !strings.Contains(string(env), want) {
 			t.Errorf("the cage's environment lacks %q:\n%s", want, env)
@@ -259,15 +262,22 @@ func TestWorkLeftRunningInACage(t *testing.T) {
 	}
 }
 
+// Only what is named goes into a cage: the locale, the time zone, the
+// proxies and its harness's settings; no key or token of any name, and none
+// of the machine's own.
 func TestWhatACageIsGiven(t *testing.T) {
-	if passedToCage("GH_TOKEN", false) || passedToCage("GITHUB_TOKEN", false) || !passedToCage("GITHUB_TOKEN", true) {
-		t.Error("GitHub's tokens reach a cage without the GitHub login, or not with it")
-	}
-	for k, want := range map[string]bool{"ANTHROPIC_API_KEY": true, "VENICE_API_KEY": true, "CLAUDE_CODE_OAUTH_TOKEN": true,
-		"CLAUDE_CODE_SESSION_ID": false, "CLAUDE_CODE_MESSAGING_TOKEN": false, "PATH": false, "HOME": false, "SSH_AUTH_SOCK": false, "DISPLAY": false, "DBUS_SESSION_BUS_ADDRESS": false} {
-		if passedToCage(k, false) != want {
+	claude := cageHarnessEnv(Claude{})
+	for k, want := range map[string]bool{"TZ": true, "LANG": true, "LC_ALL": true, "HTTPS_PROXY": true, "no_proxy": true,
+		"ANTHROPIC_MODEL": true, "ANTHROPIC_API_KEY": false, "ANTHROPIC_AUTH_TOKEN": false, "VENICE_API_KEY": false,
+		"VENICE_INFERENCE_KEY": false, "OPENROUTER_API_KEY": false, "CLAUDE_CODE_OAUTH_TOKEN": false, "GH_TOKEN": false,
+		"GITHUB_TOKEN": false, "MY_SECRET": false, "SOME_NEW_THING": false, "CLAUDE_CODE_SESSION_ID": false, "PATH": false,
+		"HOME": false, "SSH_AUTH_SOCK": false, "DISPLAY": false, "DBUS_SESSION_BUS_ADDRESS": false} {
+		if cageEnvAllowed(k, claude) != want {
 			t.Errorf("%s given to a cage: %v, want %v", k, !want, want)
 		}
+	}
+	if cageEnvAllowed("ANTHROPIC_MODEL", cageHarnessEnv(Pi{})) {
+		t.Error("Claude Code's settings go to pi's cage")
 	}
 }
 
