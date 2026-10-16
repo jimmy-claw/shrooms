@@ -66,17 +66,53 @@ func gatewayPathAllowed(method, p string) bool {
 	return false
 }
 
-// bearer is an upstream that takes its key as a bearer token, read from the
-// agent's environment.
-func bearer(base, env string) upstream {
+// bearer is an upstream that takes its key as a bearer token: from the
+// agent's environment, or where the owner keeps it for pi (piProviderKey).
+func bearer(base, env, provider string) upstream {
 	return upstream{base: base, auth: func(h http.Header) error {
 		k := os.Getenv(env)
 		if k == "" {
-			return fmt.Errorf("this machine's agent has no %s to reach it with", env)
+			k = piProviderKey(provider)
+		}
+		if k == "" {
+			return fmt.Errorf("this machine's agent has no %s, and pi's models.json no key for %s, to reach it with", env, provider)
 		}
 		h.Set("Authorization", "Bearer "+k)
 		return nil
 	}}
+}
+
+// piProviderKey is a provider's key as the owner keeps it in pi's
+// models.json (providers.<name>.apiKey): a key, or the name of a variable
+// that holds one, as pi reads it. On proteus the Venice key lives there and
+// nowhere else, and a cage made with the gateway no longer sees the file.
+func piProviderKey(provider string) string {
+	b, err := os.ReadFile(filepath.Join(piAgentDir(), "models.json"))
+	if err != nil {
+		return ""
+	}
+	var cfg struct {
+		Providers map[string]struct {
+			APIKey string `json:"apiKey"`
+		} `json:"providers"`
+	}
+	if json.Unmarshal(b, &cfg) != nil {
+		return ""
+	}
+	k := strings.TrimSpace(cfg.Providers[provider].APIKey)
+	if k == "" || k == GatewayKey {
+		return ""
+	}
+	// A variable, as pi reads it: NAME, $NAME or ${NAME} (proteus has
+	// "$VENICE_INFERENCE_KEY", set from ~/.pi/agent/.env).
+	name := strings.TrimSuffix(strings.TrimPrefix(strings.TrimPrefix(k, "$"), "{"), "}")
+	if v := os.Getenv(name); v != "" {
+		return v
+	}
+	if strings.HasPrefix(k, "$") {
+		return "" // a variable this agent does not have: not a key to send
+	}
+	return k
 }
 
 // upstreams are the model APIs a session's cage may reach. Anthropic, for
@@ -86,9 +122,9 @@ func bearer(base, env string) upstream {
 // harness (pi's anthropic provider), the agent's API key.
 func (m *Manager) upstreams(sealed bool, harness string) map[string]upstream {
 	ups := map[string]upstream{
-		"openrouter": bearer("https://openrouter.ai/api/v1", "OPENROUTER_API_KEY"),
-		"venice":     bearer("https://api.venice.ai/api/v1", "VENICE_API_KEY"),
-		"openai":     bearer("https://api.openai.com/v1", "OPENAI_API_KEY"),
+		"openrouter": bearer("https://openrouter.ai/api/v1", "OPENROUTER_API_KEY", "openrouter"),
+		"venice":     bearer("https://api.venice.ai/api/v1", "VENICE_API_KEY", "venice"),
+		"openai":     bearer("https://api.openai.com/v1", "OPENAI_API_KEY", "openai"),
 	}
 	ups["anthropic"] = upstream{base: "https://api.anthropic.com", auth: func(h http.Header) error {
 		bearer := func(token string) {

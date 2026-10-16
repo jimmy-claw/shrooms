@@ -126,6 +126,7 @@ func TestACagedPiReachesItsModelsThroughTheGateway(t *testing.T) {
 	t.Setenv("PI_CODING_AGENT_DIR", agentDir)
 	os.WriteFile(filepath.Join(agentDir, "models.json"), []byte(`{"providers":{"k11":{"baseUrl":"http://ai.k11.home.mesh/v1","api":"openai-completions","apiKey":"lemonade","models":[{"id":"q"}]},"openrouter":{"headers":{"X-Title":"mine"}}}}`), 0o600)
 	t.Setenv("OPENROUTER_API_KEY", "sk-or-real")
+	t.Setenv("VENICE_INFERENCE_KEY", "vn-real-inference")
 	t.Setenv("GH_TOKEN", "gh-real")
 	m := newTestManager(t, t.TempDir())
 	m.Self = "/usr/local/bin/shrooms-agent"
@@ -143,7 +144,7 @@ func TestACagedPiReachesItsModelsThroughTheGateway(t *testing.T) {
 		t.Fatal(err)
 	}
 	b, _ := os.ReadFile(path)
-	if strings.Contains(string(b), "sk-or-real") || !strings.Contains(string(b), "GH_TOKEN=gh-real") {
+	if strings.Contains(string(b), "sk-or-real") || strings.Contains(string(b), "vn-real-inference") || !strings.Contains(string(b), "GH_TOKEN=gh-real") {
 		t.Fatalf("the cage's environment:\n%s", b)
 	}
 	// A caged Claude session: through the gateway, with an empty credentials
@@ -232,5 +233,28 @@ func TestACagedPiCageIsMadeWithTheGateway(t *testing.T) {
 	env, _ := os.ReadFile(filepath.Join(m.dir, "cages", s.cage.Container+".env"))
 	if strings.Contains(string(env), "sk-or-real") {
 		t.Fatalf("the key is in the cage:\n%s", env)
+	}
+}
+
+// A provider's key kept in pi's models.json (as on proteus) is the gateway's
+// to use when the agent's environment has none: a key, or a variable's name.
+func TestTheGatewayFindsAKeyInPisModels(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PI_CODING_AGENT_DIR", dir)
+	t.Setenv("VENICE_API_KEY", "")
+	t.Setenv("MY_OR_KEY", "sk-or-from-var")
+	t.Setenv("OPENROUTER_API_KEY", "")
+	t.Setenv("MY_OAI", "sk-oai-from-dollar")
+	os.WriteFile(filepath.Join(dir, "models.json"), []byte(`{"providers":{"venice":{"apiKey":"vn-literal"},"openrouter":{"apiKey":"MY_OR_KEY"},"openai":{"apiKey":"$MY_OAI"}}}`), 0o600)
+	m := newTestManager(t, t.TempDir())
+	for name, want := range map[string]string{"venice": "Bearer vn-literal", "openrouter": "Bearer sk-or-from-var", "openai": "Bearer sk-oai-from-dollar"} {
+		h := http.Header{}
+		if err := m.upstreams(false, "pi")[name].auth(h); err != nil || h.Get("Authorization") != want {
+			t.Errorf("%s: %v %q", name, err, h.Get("Authorization"))
+		}
+	}
+	t.Setenv("MY_OAI", "")
+	if err := m.upstreams(false, "pi")["openai"].auth(http.Header{}); err == nil {
+		t.Error("a variable nobody set was sent as the key")
 	}
 }

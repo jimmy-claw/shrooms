@@ -1131,7 +1131,14 @@ func modelCredential(k string) bool {
 	if strings.HasPrefix(k, "GH_") || strings.HasPrefix(k, "GITHUB_") {
 		return false
 	}
-	return strings.HasSuffix(k, "_API_KEY") || strings.HasSuffix(k, "_TOKEN") || k == "ANTHROPIC_AUTH_TOKEN"
+	// Any name that says key, token or secret: proteus's Venice key is
+	// VENICE_INFERENCE_KEY, which "_API_KEY" let through (2026-10-16).
+	for _, s := range []string{"_KEY", "_TOKEN", "_SECRET", "_PASSWORD"} {
+		if strings.HasSuffix(k, s) {
+			return true
+		}
+	}
+	return strings.Contains(k, "API_KEY") || strings.Contains(k, "APIKEY")
 }
 
 // gatewayFile is where on the machine a cage's gateway file is kept, to be
