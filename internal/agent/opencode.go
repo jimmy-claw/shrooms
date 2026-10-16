@@ -378,7 +378,22 @@ func (c *openCodec) Decode(line json.RawMessage) ([]json.RawMessage, []any) {
 			msgs := c.flushText()
 			var res struct {
 				StopReason string `json:"stopReason"`
-				Usage      struct {
+				// ACP's own end-turn usage RFD says "omission and null are
+				// equivalent. Both mean the agent is not reporting that
+				// category" — NOT zero. Measured: 1.19.2 reported
+				// cachedReadTokens on one turn and omitted it entirely on the
+				// next. An omitted field is read as 0 here, and 0 is a real
+				// value: the running cache-read totals (usage.go, metrics.go)
+				// ADD this figure, so an unreported turn undercounts them
+				// rather than being marked unknown. Deliberate — carrying a
+				// previous turn's figure forward would fabricate a number,
+				// which is worse for an accounting total than a documented
+				// undercount. Worth knowing when a cache_read total looks low.
+				//
+				// The RFD is still Draft (and gated behind an unstable
+				// feature flag), so this is the protocol's stated intent
+				// rather than a promise about what opencode does.
+				Usage struct {
 					InputTokens      uint64 `json:"inputTokens"`
 					OutputTokens     uint64 `json:"outputTokens"`
 					CachedReadTokens uint64 `json:"cachedReadTokens"`
