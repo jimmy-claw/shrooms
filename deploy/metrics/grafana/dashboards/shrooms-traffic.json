@@ -647,7 +647,7 @@
    "targets": [
     {
      "refId": "A",
-     "expr": "1 - sum by (node) (rate(shrooms_host_cpu_seconds_total{mode=\"idle\"}[5m])) / sum by (node) (rate(shrooms_host_cpu_seconds_total[5m]))",
+     "expr": "1 - max by (node) (sum by (node, job) (rate(shrooms_host_cpu_seconds_total{mode=\"idle\"}[5m]))) / max by (node) (sum by (node, job) (rate(shrooms_host_cpu_seconds_total[5m])))",
      "legendFormat": "{{node}}",
      "datasource": {
       "type": "prometheus",
@@ -683,7 +683,7 @@
    "targets": [
     {
      "refId": "A",
-     "expr": "shrooms_host_load{window=\"5m\"} / on (node) shrooms_host_cpus",
+     "expr": "max by (node) (shrooms_host_load{window=\"5m\"}) / max by (node) (shrooms_host_cpus)",
      "legendFormat": "{{node}}",
      "datasource": {
       "type": "prometheus",
@@ -715,7 +715,7 @@
    "targets": [
     {
      "refId": "A",
-     "expr": "1 - shrooms_host_memory_bytes{kind=\"available\"} / on (node) shrooms_host_memory_bytes{kind=\"total\"}",
+     "expr": "1 - max by (node) (shrooms_host_memory_bytes{kind=\"available\"}) / max by (node) (shrooms_host_memory_bytes{kind=\"total\"})",
      "legendFormat": "{{node}}",
      "datasource": {
       "type": "prometheus",
@@ -758,7 +758,7 @@
    "targets": [
     {
      "refId": "A",
-     "expr": "shrooms_host_disk_bytes{kind=\"free\"}",
+     "expr": "max by (node) (shrooms_host_disk_bytes{kind=\"free\"})",
      "legendFormat": "{{node}}",
      "datasource": {
       "type": "prometheus",
@@ -801,7 +801,7 @@
    "targets": [
     {
      "refId": "A",
-     "expr": "shrooms_host_cpus",
+     "expr": "max by (node) (shrooms_host_cpus)",
      "legendFormat": "{{node}}",
      "datasource": {
       "type": "prometheus",
@@ -1035,6 +1035,135 @@
    }
   },
   {
+   "type": "bargauge",
+   "title": "Cost so far, by provider",
+   "description": "Everything in the sessions' logs, from before metrics were scraped too. The 24 h panels count only what was added since.",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "h": 8,
+    "w": 8,
+    "x": 0,
+    "y": 81
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "currencyUSD"
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "sum by (provider) (shrooms_agent_cost_usd_total)",
+     "legendFormat": "{{provider}}",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     }
+    }
+   ],
+   "options": {
+    "orientation": "horizontal",
+    "displayMode": "gradient",
+    "showUnfilled": true,
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "values": false
+    }
+   }
+  },
+  {
+   "type": "bargauge",
+   "title": "Tokens so far, by provider",
+   "description": "",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "h": 8,
+    "w": 8,
+    "x": 8,
+    "y": 81
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short"
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "sum by (provider) (shrooms_agent_tokens_total)",
+     "legendFormat": "{{provider}}",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     }
+    }
+   ],
+   "options": {
+    "orientation": "horizontal",
+    "displayMode": "gradient",
+    "showUnfilled": true,
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "values": false
+    }
+   }
+  },
+  {
+   "type": "bargauge",
+   "title": "Cost so far, by session (top 12)",
+   "description": "",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "h": 8,
+    "w": 8,
+    "x": 16,
+    "y": 81
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "currencyUSD"
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "topk(12, sum by (node, session) (shrooms_agent_cost_usd_total))",
+     "legendFormat": "{{node}}/{{session}}",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     }
+    }
+   ],
+   "options": {
+    "orientation": "horizontal",
+    "displayMode": "gradient",
+    "showUnfilled": true,
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "values": false
+    }
+   }
+  },
+  {
    "type": "timeseries",
    "title": "Model speed (output tokens/s of the last turn)",
    "description": "Measured by each agent from the reply's stream: the writing speed, not the wait for the first token.",
@@ -1046,7 +1175,7 @@
     "h": 8,
     "w": 12,
     "x": 0,
-    "y": 81
+    "y": 89
    },
    "fieldConfig": {
     "defaults": {
@@ -1082,7 +1211,7 @@
     "h": 8,
     "w": 12,
     "x": 0,
-    "y": 81
+    "y": 89
    },
    "fieldConfig": {
     "defaults": {

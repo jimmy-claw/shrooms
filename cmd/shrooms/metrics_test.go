@@ -1,6 +1,8 @@
 package main
 
 import (
+	"github.com/vpavlin/shrooms/internal/hostload"
+
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -127,7 +129,7 @@ func TestTheMachinesLoadIsExported(t *testing.T) {
 	mem := filepath.Join(d, "meminfo")
 	os.WriteFile(mem, []byte("MemTotal:       16000000 kB\nMemFree:  1000 kB\nMemAvailable:    8000000 kB\n"), 0o600)
 	var b strings.Builder
-	hostLoad(&expo{w: &b}, hostPaths{stat: stat, loadavg: load, meminfo: mem, root: d})
+	hostLoad(&expo{w: &b}, hostload.Paths{Stat: stat, Loadavg: load, Meminfo: mem, Root: d})
 	out := b.String()
 	for _, want := range []string{
 		`shrooms_host_cpu_seconds_total{mode="user"} 10`,

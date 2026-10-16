@@ -7,6 +7,8 @@ package agent
 // reads only what each log gained since the last one.
 
 import (
+	"github.com/vpavlin/shrooms/internal/hostload"
+
 	"fmt"
 	"io"
 	"net/http"
@@ -123,6 +125,10 @@ func (h *handler) metrics(w http.ResponseWriter, r *http.Request) {
 				"harness", in.Harness, "model", in.Model, "provider", providerOf(in.Model, in.Harness))
 		}
 	}
+	// The machine's load too: it is here on every machine with an agent, and
+	// the dashboard takes it from whichever of the agent and the daemon has it.
+	hostload.Write(e, hostload.Real)
+
 	e.family("shrooms_agent_sessions", "gauge", "Sessions on this machine, by state.")
 	for _, st := range []State{Idle, Working, Waiting} {
 		e.sample("shrooms_agent_sessions", float64(states[st]), "machine", machine, "state", string(st))
@@ -152,3 +158,7 @@ func (e *promWriter) sample(name string, v float64, labels ...string) {
 	}
 	fmt.Fprintf(e.w, "%s %s\n", b.String(), strconv.FormatFloat(v, 'f', -1, 64))
 }
+
+// Family and Sample let hostload write through it.
+func (e *promWriter) Family(name, typ, help string)                   { e.family(name, typ, help) }
+func (e *promWriter) Sample(name string, v float64, labels ...string) { e.sample(name, v, labels...) }

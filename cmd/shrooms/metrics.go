@@ -23,6 +23,8 @@ package main
 // library for a few dozen lines.
 
 import (
+	"github.com/vpavlin/shrooms/internal/hostload"
+
 	"bufio"
 	"context"
 	"encoding/json"
@@ -61,14 +63,14 @@ type metricsServer struct {
 	log      *slog.Logger
 	delivery string // the delivery node's metrics URL; "" for none
 	netdev   string // /proc/net/dev; a test's fixture
-	host     hostPaths
+	host     hostload.Paths
 
 	mu sync.Mutex
 	ls map[string]net.Listener
 }
 
 func newMetricsServer(port uint16, snapshot func() statusPayload, log *slog.Logger) *metricsServer {
-	m := &metricsServer{port: port, snapshot: snapshot, log: log, netdev: "/proc/net/dev", host: realHost, ls: map[string]net.Listener{}}
+	m := &metricsServer{port: port, snapshot: snapshot, log: log, netdev: "/proc/net/dev", host: hostload.Real, ls: map[string]net.Listener{}}
 	if deliveryMetricsPort != 0 {
 		m.delivery = fmt.Sprintf("http://127.0.0.1:%d/metrics", deliveryMetricsPort)
 	}

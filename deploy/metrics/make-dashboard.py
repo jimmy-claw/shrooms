@@ -96,21 +96,23 @@ for p in panels:
                                                                 "renameByName": {"Value #A": "up", "Value #B": "relayed"}}}]
 advance(8)
 
+# The load comes from the agent and from the daemon alike, whichever a
+# machine runs: max by node takes one of the two, not their sum.
 row("Machines — how loaded they are")
 panel("timeseries", "CPU busy per machine",
-      [('1 - sum by (node) (rate(shrooms_host_cpu_seconds_total{mode="idle"}[5m])) / sum by (node) (rate(shrooms_host_cpu_seconds_total[5m]))', "{{node}}")],
+      [('1 - max by (node) (sum by (node, job) (rate(shrooms_host_cpu_seconds_total{mode="idle"}[5m]))) / max by (node) (sum by (node, job) (rate(shrooms_host_cpu_seconds_total[5m])))', "{{node}}")],
       12, 8, unit="percentunit", desc="Share of all its CPUs' time each machine spent on something, not idle.")
 panel("timeseries", "Load per CPU (5 min)",
-      [('shrooms_host_load{window="5m"} / on (node) shrooms_host_cpus', "{{node}}")],
+      [('max by (node) (shrooms_host_load{window="5m"}) / max by (node) (shrooms_host_cpus)', "{{node}}")],
       12, 8, unit="short", desc="Above 1, a machine has more runnable work than CPUs.")
 advance(8)
 panel("bargauge", "Memory used",
-      [('1 - shrooms_host_memory_bytes{kind="available"} / on (node) shrooms_host_memory_bytes{kind="total"}', "{{node}}")],
+      [('1 - max by (node) (shrooms_host_memory_bytes{kind="available"}) / max by (node) (shrooms_host_memory_bytes{kind="total"})', "{{node}}")],
       8, 7, unit="percentunit")
 panel("bargauge", "Root disk free",
-      [('shrooms_host_disk_bytes{kind="free"}', "{{node}}")], 8, 7, x=8, unit="bytes")
+      [('max by (node) (shrooms_host_disk_bytes{kind="free"})', "{{node}}")], 8, 7, x=8, unit="bytes")
 panel("bargauge", "CPUs",
-      [('shrooms_host_cpus', "{{node}}")], 8, 7, x=16, unit="short")
+      [('max by (node) (shrooms_host_cpus)', "{{node}}")], 8, 7, x=16, unit="short")
 advance(7)
 
 row("Agents — what the models did")
@@ -128,6 +130,14 @@ panel("bargauge", "Last 24 h, tokens by session (top 12)",
 panel("bargauge", "Last 24 h, cost by provider",
       [('sum by (provider) (increase(shrooms_agent_cost_usd_total[24h]))', "{{provider}}")], 8, 8, x=16, unit="currencyUSD",
       desc="As each harness prices its turns; 0 for a local model.")
+advance(8)
+panel("bargauge", "Cost so far, by provider",
+      [('sum by (provider) (shrooms_agent_cost_usd_total)', "{{provider}}")], 8, 8, unit="currencyUSD",
+      desc="Everything in the sessions' logs, from before metrics were scraped too. The 24 h panels count only what was added since.")
+panel("bargauge", "Tokens so far, by provider",
+      [('sum by (provider) (shrooms_agent_tokens_total)', "{{provider}}")], 8, 8, x=8, unit="short")
+panel("bargauge", "Cost so far, by session (top 12)",
+      [('topk(12, sum by (node, session) (shrooms_agent_cost_usd_total))', "{{node}}/{{session}}")], 8, 8, x=16, unit="currencyUSD")
 advance(8)
 panel("timeseries", "Model speed (output tokens/s of the last turn)",
       [('shrooms_agent_tokens_per_second', "{{node}}/{{session}} · {{model}}")],
