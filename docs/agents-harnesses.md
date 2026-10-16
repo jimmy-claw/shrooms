@@ -63,7 +63,35 @@ session on it:
   OpenCode's free ones are stealth — unreleased and anonymous, free "for a
   limited time" — and a default naming one would rot.
 - **It cannot be caged yet** (ADR-061), and is refused rather than made and
-  then failed at exec.
+  then failed at exec. Caging it is the next work on it (ADR-062).
+
+### What a harness must do (ADR-062)
+
+A harness is offered with every feature a session has, or the missing one is
+refused by name. It is never offered and then fails partway. A new harness is
+not merged without caged and sealed.
+
+| Feature | Required | How a harness provides it |
+|---|---|---|
+| Sessions, streamed turns, interrupt | yes | `Harness`, `Codec` |
+| The mesh's tools and the session's note | yes | `StartOptions.MCP`, `Note` |
+| The model, per session | yes | `StartOptions.Model` |
+| Usage: tokens, cost (0 when free) | yes | the `result` event's `usage` |
+| Caged | yes | `Cageable`, `CageEnv` |
+| Sealed | yes | `Gatewayed`: no key in the cage |
+| Out of quota, and until when | where the provider says so | `Limits` (to come) |
+| Approve before a tool runs | where the harness can ask | `Caps.Approve`; if not, say so here |
+| Takeover of a terminal's conversation | where the harness keeps them | `Transcripts`, `Caps.Takeover` |
+
+For a cage, a harness says:
+- where its home is, which of it is the owner's settings (read-only in the
+  cage's private home) and where one project's conversations live
+  (read-write; docs/agents/cages.md);
+- the program to run in the cage;
+- what the owner has decided about the project, to carry in;
+- the variables it needs, and how it is pointed at the gateway.
+
+Every caged harness has a real-cage test (podman), not only the fake.
 
 ### How it fits together
 
