@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io/fs"
 	"log/slog"
+	"net/http"
 	"net/netip"
 	"os"
 	"path/filepath"
@@ -219,6 +220,9 @@ type Manager struct {
 	proxies  cageProxies
 	Machines func() ([]Machine, error)
 	agentAt  func(netip.Addr) string // tests: where an agent is
+	// Tests: the gateway's upstreams elsewhere, and its client (gateway.go).
+	upstreamBase func(name string) string
+	gatewayHTTP  *http.Client
 	// Meshes are this machine's meshes, by label and address (meshes.go).
 	Meshes func() []MeshInfo
 	// Socket is this agent's own unix socket (local.go): how LocalAddr, this

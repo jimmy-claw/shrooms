@@ -787,6 +787,15 @@ func (m *Manager) prepareCage(s *Session, bin string) (*cageRun, error) {
 		c.run(ctx, "stop", "-t", "3", name)
 		return nil, err
 	}
+	// The forwarder to the gateway, on the cage's loopback, before the
+	// harness that will use it (ADR-059). It holds no secret; a second one
+	// in a cage that kept running finds the port taken and goes.
+	if m.gatewayed(s) {
+		if _, err := c.run(ctx, "exec", "-d", name, m.Self, "llm-forward",
+			"--listen", GatewayListen, "--socket", CageProxyDir+"/proxy.sock"); err != nil {
+			return nil, fmt.Errorf("the cage's way to its model: %w", err)
+		}
+	}
 	env, err := m.cageEnv(s)
 	if err != nil {
 		return nil, err

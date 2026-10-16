@@ -149,6 +149,8 @@ func isDrop(path string) bool {
 // cageProxy is a caged session's socket.
 func (m *Manager) cageProxy(s *Session) http.Handler {
 	mux := http.NewServeMux()
+	// Its model, through the agent, which holds the credentials (ADR-059).
+	mux.HandleFunc("/llm/{upstream}/{path...}", m.gateway(s))
 	mux.HandleFunc("GET /machines", func(w http.ResponseWriter, r *http.Request) {
 		ms, err := m.machines()
 		if err != nil {

@@ -235,17 +235,35 @@ func (m *Manager) sealedEnv(s *Session) (map[string]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	return map[string]string{
-		"HOME":                    sealedHome,
-		"CLAUDE_CONFIG_DIR":       sealedHome + "/.claude",
-		"CLAUDE_CODE_OAUTH_TOKEN": token,
-		"IS_SANDBOX":              "1",
-		"SHROOMS_AGENT_SESSION":   s.Name(),
-		"SHROOMS_AGENT_PROXY":     CageProxyDir + "/proxy.sock",
-		"SHROOMS_OUTBOX":          SealedOutboxIn,
-		"PATH":                    cagePath(sealedHome, false),
-		"LANG":                    "C.UTF-8",
-	}, nil
+	env := map[string]string{
+		"HOME":                  sealedHome,
+		"CLAUDE_CONFIG_DIR":     sealedHome + "/.claude",
+		"IS_SANDBOX":            "1",
+		"SHROOMS_AGENT_SESSION": s.Name(),
+		"SHROOMS_AGENT_PROXY":   CageProxyDir + "/proxy.sock",
+		"SHROOMS_OUTBOX":        SealedOutboxIn,
+		"PATH":                  cagePath(sealedHome, false),
+		"LANG":                  "C.UTF-8",
+	}
+	// Through the gateway when the harness can be pointed there (ADR-059):
+	// the token stays with the agent, and code nobody vouches for cannot
+	// read it out of the cage's environment.
+	if g, ok := s.harness.(Gatewayed); ok && m.Self != "" {
+		for k, v := range g.GatewayEnv(true) {
+			env[k] = v
+		}
+		return env, nil
+	}
+	env["CLAUDE_CODE_OAUTH_TOKEN"] = token
+	return env, nil
+}
+
+// gatewayed is whether a session's cage reaches its model through the
+// gateway: sealed, its harness can be pointed there, and there is an agent
+// binary in the cage to forward with.
+func (m *Manager) gatewayed(s *Session) bool {
+	_, ok := s.harness.(Gatewayed)
+	return ok && s.cage != nil && s.cage.Sealed && m.Self != ""
 }
 
 // cageRules is the nftables ruleset set inside a cage from outside. Every

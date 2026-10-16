@@ -168,6 +168,15 @@ func (Claude) Args(o StartOptions) []string {
 	return args
 }
 
+// GatewayEnv points Claude Code at the gateway (ADR-059): its API's base
+// URL and a key, which the gateway replaces with the real credential.
+func (Claude) GatewayEnv(bool) map[string]string {
+	return map[string]string{"ANTHROPIC_BASE_URL": GatewayBase("anthropic"), "ANTHROPIC_API_KEY": GatewayKey}
+}
+
+// GatewayFiles: Claude Code needs none; the environment is enough.
+func (Claude) GatewayFiles(bool) map[string]string { return nil }
+
 func (Claude) TranscriptPath(id string) (string, error) { return transcriptPath(id) }
 func (Claude) ParseTranscriptLine(line []byte) (Said, bool) {
 	return parseTranscriptLine(line)

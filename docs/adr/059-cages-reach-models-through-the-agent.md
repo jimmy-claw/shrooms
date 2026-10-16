@@ -1,6 +1,8 @@
 # 059. Cages reach their models through the agent, and hold no keys
 
-**Status:** accepted 2026-10-16; being built.
+**Status:** accepted 2026-10-16. Phase 1 built the same day: sealed cages
+running Claude Code reach Anthropic through the gateway and hold no token.
+Phase 2 next: pi, then caged sessions by default.
 
 ## Context
 
@@ -57,7 +59,10 @@ caged sessions by default.
 
 - Sealed cages no longer hold the machine's Claude token. A 2026-10-16
   spike showed Claude Code working with only a dummy key, through a proxy
-  that added the token: `POST /v1/messages` → 200.
+  that added the token: `POST /v1/messages` → 200. The same day a real
+  sealed cage answered through the gateway, and the token was in none of
+  its environment, processes or files; a request for Anthropic's API keys
+  through it was refused (403).
 - One place to add what the keys never had: a per-session spending cap, a
   log of usage, an allowlist of models.
 - A harness that does not plug in keeps working as before, with the keys
