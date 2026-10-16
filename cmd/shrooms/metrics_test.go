@@ -115,3 +115,32 @@ func TestMetricsWithoutTheDeliveryNode(t *testing.T) {
 		t.Fatalf("unexpected:\n%s", b.String())
 	}
 }
+
+// The machine's load, from /proc and statfs: CPU time by mode, the CPUs,
+// the load averages, memory and the root disk.
+func TestTheMachinesLoadIsExported(t *testing.T) {
+	d := t.TempDir()
+	stat := filepath.Join(d, "stat")
+	os.WriteFile(stat, []byte("cpu  1000 20 300 50000 40 0 6 0 0 0\ncpu0 500 10 150 25000 20 0 3 0 0 0\ncpu1 500 10 150 25000 20 0 3 0 0 0\nintr 1\n"), 0o600)
+	load := filepath.Join(d, "loadavg")
+	os.WriteFile(load, []byte("1.50 0.75 0.25 2/300 4242\n"), 0o600)
+	mem := filepath.Join(d, "meminfo")
+	os.WriteFile(mem, []byte("MemTotal:       16000000 kB\nMemFree:  1000 kB\nMemAvailable:    8000000 kB\n"), 0o600)
+	var b strings.Builder
+	hostLoad(&expo{w: &b}, hostPaths{stat: stat, loadavg: load, meminfo: mem, root: d})
+	out := b.String()
+	for _, want := range []string{
+		`shrooms_host_cpu_seconds_total{mode="user"} 10`,
+		`shrooms_host_cpu_seconds_total{mode="idle"} 500`,
+		`shrooms_host_cpus 2`,
+		`shrooms_host_load{window="1m"} 1.5`,
+		`shrooms_host_load{window="15m"} 0.25`,
+		`shrooms_host_memory_bytes{kind="total"} 16384000000`,
+		`shrooms_host_memory_bytes{kind="available"} 8192000000`,
+		`shrooms_host_disk_bytes{kind="size"}`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("no %s in:\n%s", want, out)
+		}
+	}
+}

@@ -34,6 +34,8 @@ func Handler(log *slog.Logger, m *Manager, who Who) http.Handler {
 	mux.HandleFunc("GET /v1/meshes", h.meshList)
 	// What the model did, turn by turn, by day, session, the device that asked
 	// and model (usage.go); ?since=2006-01-02 limits it.
+	// For Prometheus, beside the daemon's own (metrics.go).
+	mux.HandleFunc("GET /metrics", h.metrics)
 	mux.HandleFunc("GET /v1/usage", func(w http.ResponseWriter, r *http.Request) {
 		host, _ := os.Hostname()
 		// Rows first: reading them is what brings the limits up to date.
