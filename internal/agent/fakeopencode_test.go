@@ -69,9 +69,40 @@ func fakeOpenCode() {
 
 		case "session/new", "session/load":
 			var p struct {
-				SessionID string `json:"sessionId"`
+				SessionID  string `json:"sessionId"`
+				McpServers []struct {
+					Name    string   `json:"name"`
+					Type    string   `json:"type"`
+					Command string   `json:"command"`
+					Args    []string `json:"args"`
+					Env     *[]any   `json:"env"`
+				} `json:"mcpServers"`
 			}
 			json.Unmarshal(req.Params, &p)
+			// What we were asked, for a test to read.
+			if f := os.Getenv("FAKE_OPENCODE_NEW_PARAMS"); f != "" {
+				if h, err := os.OpenFile(f, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600); err == nil {
+					h.WriteString(line + "\n")
+					h.Close()
+				}
+			}
+			if os.Getenv("FAKE_OPENCODE_NO_NEW") == "1" && req.Method == "session/new" {
+				// Exactly what opencode 1.19.2 answers when the mcpServers
+				// entry has no discriminator — measured, not imagined.
+				emit(map[string]any{"jsonrpc": "2.0", "id": req.ID,
+					"error": map[string]any{"code": -32602, "message": "Invalid params"}})
+				continue
+			}
+			// The real one validates this with a discriminated union and
+			// refuses the entry without "type", so the fake does too: a fake
+			// that accepts what the real one rejects is worse than none.
+			for _, s := range p.McpServers {
+				if s.Type == "" {
+					emit(map[string]any{"jsonrpc": "2.0", "id": req.ID,
+						"error": map[string]any{"code": -32602, "message": "Invalid params"}})
+					continue
+				}
+			}
 			if req.Method == "session/load" {
 				if os.Getenv("FAKE_OPENCODE_NO_RESUME") == "1" {
 					emit(map[string]any{"jsonrpc": "2.0", "id": req.ID,

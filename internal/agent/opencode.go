@@ -87,7 +87,8 @@ type openCodec struct {
 	// the codec knows which of its own steps it is being answered about.
 	nextID   int
 	initID   int
-	openID   int // session/new or session/load
+	openID   int
+	opened   string // acpNewSession or acpLoad: only a failed LOAD may fall back // session/new or session/load
 	setID    int
 	promptID int
 
@@ -132,7 +133,12 @@ func (c *openCodec) mcpServers() []any {
 		return []any{}
 	}
 	args := append([]string{"mcp"}, c.mcpArgs...)
-	return []any{map[string]any{"name": "shrooms", "command": c.mcp, "args": args}}
+	// OpenCode validates this with a discriminated union, so the entry is
+	// rejected outright without "type" — and it wants "env" as a list.
+	// Measured against opencode 1.19.2: without them, session/new answers
+	// -32602 "Invalid params" and no session is ever opened.
+	return []any{map[string]any{
+		"name": "shrooms", "type": "stdio", "command": c.mcp, "args": args, "env": []any{}}}
 }
 
 // Start opens the protocol: initialize first, and the session itself once
@@ -154,6 +160,7 @@ func (c *openCodec) open() []any {
 		params["sessionId"] = c.resume
 	}
 	c.openID = c.nextID + 1
+	c.opened = method
 	return []any{c.request(method, params)}
 }
 
@@ -281,10 +288,23 @@ func (c *openCodec) Decode(line json.RawMessage) ([]json.RawMessage, []any) {
 
 		case c.openID:
 			if m.Error != nil {
-				// A conversation this machine no longer has: start a new one
-				// rather than leaving the session unable to take a message.
-				c.resume = ""
-				return nil, c.open()
+				if c.opened == acpLoad {
+					// A conversation this machine no longer has: start a new
+					// one rather than leaving the session unable to take a
+					// message. Only a LOAD may fall back like this.
+					c.resume = ""
+					return nil, c.open()
+				}
+				// The session could not be opened at all. Falling back here
+				// would ask again for the same thing that was just refused,
+				// which is a spin, not a retry: a session/new that fails
+				// fails again. Say why and fail the turn.
+				c.failed = true
+				c.ready = false
+				c.pending = nil
+				return []json.RawMessage{out(map[string]any{
+					"type": "result", "subtype": "error_during_execution", "session_id": "",
+					"error": "opencode would not open a session: " + m.Error.Message})}, nil
 			}
 			var res struct {
 				SessionID     string `json:"sessionId"`

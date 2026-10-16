@@ -3,6 +3,7 @@ package agent
 import (
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -204,6 +205,13 @@ func TestTheMeshToolsAreOfferedOverACP(t *testing.T) {
 		!strings.Contains(got, `"mcp","-x"`) {
 		t.Errorf("the MCP server: %s", got)
 	}
+	// OpenCode validates this entry with a discriminated union and refuses it
+	// outright without "type" — measured against 1.19.2, where session/new
+	// answered -32602 and no session was ever opened. "env" it wants as a
+	// list. Sending an entry the real one rejects is not "offering the tools".
+	if !strings.Contains(got, `"type":"stdio"`) || !strings.Contains(got, `"env":[]`) {
+		t.Errorf("the entry must carry the discriminator and env, or it is refused: %s", got)
+	}
 	without := OpenCode{}.Codec(StartOptions{}).(*openCodec)
 	if strings.Contains(mustJSON(without.open()[0]), "shrooms") {
 		t.Errorf("a server was offered with nothing to run: %s", mustJSON(without.open()[0]))
@@ -232,6 +240,39 @@ func TestAFailedResumeOpensANewConversation(t *testing.T) {
 	}
 	if opened != acpNewSession {
 		t.Fatalf("a failed load must fall back to a new session, got: %s", mustJSON(write))
+	}
+}
+
+// A session/new that is refused must fail the turn — and must NOT be asked
+// again. The fallback a failed LOAD gets exists because a conversation can be
+// gone from a machine; a session/new that fails fails the same way every time,
+// so asking again is a spin, not a retry. This was a real bug, found by
+// running it: a malformed mcpServers entry made opencode 1.19.2 answer -32602,
+// and the session asked again forever at 127% CPU with nothing said to anyone.
+func TestARefusedNewSessionFailsTheTurnAndIsNotRetried(t *testing.T) {
+	count := filepath.Join(t.TempDir(), "new-requests")
+	t.Setenv("FAKE_OPENCODE_NO_NEW", "1")
+	t.Setenv("FAKE_OPENCODE_NEW_PARAMS", count)
+	_, s := newOpenCodeSession(t)
+	got, _ := runTurn(t, s, "hello")
+
+	last := got[len(got)-1]
+	if !strings.Contains(string(last.Data), "error_during_execution") {
+		t.Errorf("a refused session/new ended as: %s", last.Data)
+	}
+	all := make([]json.RawMessage, 0, len(got))
+	for _, e := range got {
+		all = append(all, e.Data)
+	}
+	if !strings.Contains(joinRaw(all), "would not open a session") {
+		t.Errorf("the reason was not shown: %s", joinRaw(all))
+	}
+	b, err := os.ReadFile(count)
+	if err != nil {
+		t.Fatalf("the fake never saw a request: %v", err)
+	}
+	if n := strings.Count(string(b), "session/new"); n != 1 {
+		t.Errorf("session/new was asked %d time(s), want 1 — asking again is a spin", n)
 	}
 }
 
