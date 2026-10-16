@@ -27,8 +27,12 @@ type Harness interface {
 	// Args starts a session's process: a new conversation, or the one with
 	// the id given (from an earlier init message's session_id).
 	Args(o StartOptions) []string
-	// Codec is a fresh translator for one process.
-	Codec() Codec
+	// Codec is a fresh translator for one process. It is given the same
+	// StartOptions the process was started with, because not every harness
+	// takes them on its command line: Claude Code and pi read Resume, MCP
+	// and Note out of Args, but OpenCode's ACP server is started bare and
+	// told all three over the protocol, so its codec has to know them.
+	Codec(StartOptions) Codec
 	// Caps says what the harness can do, for the apps to offer.
 	Caps() Caps
 }
@@ -90,8 +94,17 @@ type Codec interface {
 	// Start is what to write as soon as the process is up (nil for nothing).
 	Start() []any
 	// Decode turns one line the process wrote into zero or more stream-json
-	// messages. A line that means nothing to the apps yields none.
-	Decode(line json.RawMessage) []json.RawMessage
+	// messages, and into anything that must be written BACK to the process
+	// before those messages are acted on.
+	//
+	// The second return is not decoration: a harness whose protocol needs a
+	// round trip to become usable has to answer its process while decoding.
+	// OpenCode's ACP session is created that way — initialize is answered
+	// with session/new, and the session id from that is what every turn
+	// needs — so a turn that arrived before the session existed goes out on
+	// that same step. Claude Code and pi write nothing here: what they send
+	// is decided before the process starts, or by a turn.
+	Decode(line json.RawMessage) (msgs []json.RawMessage, write []any)
 	// Turn is a user turn, sent whether or not a turn is in progress.
 	Turn(text string) []any
 	// Interrupt stops the turn in progress.
@@ -119,11 +132,11 @@ type Transcripts interface {
 // own shape, so its codec passes lines through as they are.
 type Claude struct{}
 
-func (Claude) Name() string  { return "claude" }
-func (Claude) Title() string { return "Claude Code" }
-func (Claude) Bin() string   { return "claude" }
-func (Claude) Caps() Caps    { return Caps{Approve: true, Takeover: true} }
-func (Claude) Codec() Codec  { return claudeCodec{} }
+func (Claude) Name() string             { return "claude" }
+func (Claude) Title() string            { return "Claude Code" }
+func (Claude) Bin() string              { return "claude" }
+func (Claude) Caps() Caps               { return Caps{Approve: true, Takeover: true} }
+func (Claude) Codec(StartOptions) Codec { return claudeCodec{} }
 
 // Args is how a session's process is started.
 //
@@ -209,7 +222,13 @@ type claudeCodec struct{}
 var interrupts atomic.Uint64
 
 func (claudeCodec) Start() []any { return nil }
-func (claudeCodec) Decode(line json.RawMessage) []json.RawMessage {
+func (claudeCodec) Decode(line json.RawMessage) ([]json.RawMessage, []any) {
+	return claudeDecode(line), nil
+}
+
+// claudeDecode is the pass-through, kept separate so the interface's second
+// return does not thread through every branch of it.
+func claudeDecode(line json.RawMessage) []json.RawMessage {
 	return []json.RawMessage{line}
 }
 func (claudeCodec) Turn(text string) []any {
@@ -237,5 +256,5 @@ func (h missingHarness) Name() string               { return h.name }
 func (h missingHarness) Title() string              { return h.name }
 func (h missingHarness) Bin() string                { return "" }
 func (h missingHarness) Args(StartOptions) []string { return nil }
-func (h missingHarness) Codec() Codec               { return claudeCodec{} }
+func (h missingHarness) Codec(StartOptions) Codec   { return claudeCodec{} }
 func (h missingHarness) Caps() Caps                 { return Caps{} }

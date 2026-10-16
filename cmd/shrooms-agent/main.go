@@ -70,6 +70,9 @@ func run() error {
 	sttThreads := flag.Int("stt-threads", 0, "threads for transcription (default: this machine's cores, up to 12)")
 	piBin := flag.String("pi", "pi", "pi (pi.dev), offered for new sessions when found; \"\" to leave it out")
 	piArgs := flag.String("pi-args", "", "extra arguments for every pi session, e.g. \"--provider ollama --model qwen3\"")
+	openCodeBin := flag.String("opencode", "opencode", "OpenCode (opencode.ai), offered for new sessions when found; \"\" to leave it out")
+	openCodeModel := flag.String("opencode-model", "opencode/deepseek-v4.1-flash-free",
+		"the model every OpenCode session uses; it is free, and a free model can be withdrawn without notice, so name one that exists")
 	agentSock := flag.String("agent-socket", agent.SocketPath(), "this agent's own unix socket, for this machine's user only (ADR-056)")
 	mcp := flag.Bool("mcp", true, "give every session the mesh's agents as MCP tools (shrooms-agent mcp) and tell it how to use them")
 	flag.Parse()
@@ -188,6 +191,12 @@ func run() error {
 					log.Warn("pi will not have the mesh's agents as tools", "err", err)
 				}
 			}
+		}
+	}
+	if *openCodeBin != "" {
+		if bin, err := exec.LookPath(*openCodeBin); err == nil {
+			m.Register(agent.OpenCode{Model: *openCodeModel}, bin)
+			log.Info("harness", "name", "opencode", "bin", bin, "model", *openCodeModel)
 		}
 	}
 	if _, err := os.Stat(*sttModel); err != nil {

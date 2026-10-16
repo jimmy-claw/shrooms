@@ -76,7 +76,7 @@ func startProc(ctx context.Context, log *slog.Logger, h Harness, bin, dir string
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("start %s: %w", bin, err)
 	}
-	p := &proc{cmd: cmd, codec: h.Codec(), stdin: stdin, out: make(chan json.RawMessage, 64),
+	p := &proc{cmd: cmd, codec: h.Codec(o), stdin: stdin, out: make(chan json.RawMessage, 64),
 		done: make(chan struct{}), read: make(chan struct{}), cage: cage}
 
 	go func() {
@@ -97,7 +97,17 @@ func startProc(ctx context.Context, log *slog.Logger, h Harness, bin, dir string
 				log.Debug(h.Name()+" wrote a line that is not JSON", "line", string(line))
 				continue
 			}
-			for _, m := range p.codec.Decode(append(json.RawMessage(nil), line...)) {
+			msgs, write := p.codec.Decode(append(json.RawMessage(nil), line...))
+			// Anything the codec must answer with goes first: for OpenCode it
+			// is the request that opens the session, and the messages below
+			// only make sense once it has.
+			if len(write) > 0 {
+				if err := p.writeAll(write); err != nil {
+					p.err = err
+					break
+				}
+			}
+			for _, m := range msgs {
 				p.out <- m
 			}
 		}

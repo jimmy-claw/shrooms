@@ -40,9 +40,22 @@ frequent — for a handful of machines it is a once-a-year chore.
 ## 2. Harnesses: Claude Code, pi, and the next one
 
 Decided 2026-10-04: the open ones matter — pi and OpenCode — then Claude Code
-and Codex; the agent is pluggable so anybody can add the one they use. Built
-so far: the plug-in point, Claude Code moved behind it, and **pi**, the worked
-example below. OpenCode and Codex are not built.
+and Codex; the agent is pluggable so anybody can add the one they use. Built:
+the plug-in point, Claude Code moved behind it, **pi**, and **OpenCode**
+(ADR-061). Codex is not built.
+
+**OpenCode** is spoken to over its ACP server (`opencode acp`), the only
+transport of its that fits a session: `opencode run` is one-shot and exits.
+Two things about it are worth knowing before starting a session on it:
+
+- **It never asks permission**, so auto-approve is not offered for it — its
+  own `permission` config decides what may run. Measured, not assumed: it
+  wrote a file with no prompt both through `run` without `--auto` and over
+  ACP.
+- **The model is a session setting** (`-opencode-model`), defaulting to
+  `opencode/deepseek-v4.1-flash-free`. Most of OpenCode's free models are
+  stealth — free "for a limited time" — so a session meant to last should
+  name a model that is not a codename.
 
 ### How it fits together
 
@@ -171,15 +184,24 @@ Things pi does differently, known:
   line; the agent adds only `--pi-args`.
 - Cost is pi's own figure (0 for a local model).
 
-### Next: OpenCode and Codex (not built)
+### Next: Codex (not built)
 
-Starting points, not yet checked against the programs:
+A starting point, not yet checked against the program:
 
 - **Codex** has a JSON-RPC app server over stdio (`codex app-server`) with
   approvals, which fits a Codec as pi's RPC mode does; `codex exec --json`
   is the simpler one-shot form, one process per turn, resuming by id.
-- **OpenCode** is built around a local HTTP server (`opencode serve`, with
-  server-sent events). The agent's processes are stdio only today; a harness
-  that is a server needs a second kind of process — start the server, then
-  speak HTTP to it — behind the same Codec idea. That is the one change to
-  the plug-in point these two are likely to ask for.
+
+**OpenCode was predicted wrong here.** This section used to say it is built
+around a local HTTP server (`opencode serve`), so a harness for it would need
+a second kind of process — start the server, then speak HTTP to it. It does
+not. `opencode acp` is a long-lived JSON-RPC server **on stdin/stdout**, the
+same shape as Claude Code's and pi's, and it streams; ADR-061 built it that
+way. `opencode serve` was never needed, and no second kind of process was.
+
+What the plug-in point *did* have to be told, once OpenCode was tried, was
+something else: a codec may need to **write while decoding**. ACP's session
+does not exist until `initialize` is answered with `session/new`, and every
+turn needs the id that comes back — so `Decode` returns messages and requests
+to write, not only messages. Codex may well ask for the same, or not; that is
+for when it is tried rather than guessed at.
