@@ -238,6 +238,38 @@ func TestACagedPiCageIsMadeWithTheGateway(t *testing.T) {
 
 // A provider's key kept in pi's models.json (as on proteus) is the gateway's
 // to use when the agent's environment has none: a key, or a variable's name.
+// OpenCode's free models need no credential: measured against 1.19.2, with no
+// key set it sends the literal "Bearer public", which is how atlas runs them
+// with no key and no auth.json. A bearer() upstream would fail here, and every
+// caged or sealed free-model turn would answer 502 — the case the upstream
+// exists for. Found by the repo owner, who had run it on atlas.
+func TestTheGatewayReachesOpenCodesFreeModelsWithNoKey(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("OPENCODE_API_KEY", "")
+	t.Setenv("PI_CODING_AGENT_DIR", filepath.Join(home, ".pi", "agent"))
+	m := newTestManager(t, t.TempDir())
+
+	// No key anywhere: it must not fail, and the public token goes on.
+	h := http.Header{}
+	if err := m.upstreams(false, "opencode")["opencode"].auth(h); err != nil {
+		t.Fatalf("free models need no key, so this must not fail: %v", err)
+	}
+	if got := h.Get("Authorization"); got != "Bearer "+OpenCodePublicToken {
+		t.Errorf("with no key: %q, want the public token", got)
+	}
+
+	// A key of the owner's is used when there is one.
+	t.Setenv("OPENCODE_API_KEY", "sk-own")
+	h = http.Header{}
+	if err := m.upstreams(false, "opencode")["opencode"].auth(h); err != nil {
+		t.Fatal(err)
+	}
+	if got := h.Get("Authorization"); got != "Bearer sk-own" {
+		t.Errorf("with the owner's key: %q", got)
+	}
+}
+
 func TestTheGatewayFindsAKeyInPisModels(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("PI_CODING_AGENT_DIR", dir)

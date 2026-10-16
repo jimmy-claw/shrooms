@@ -845,12 +845,16 @@ func (m *Manager) prepareCage(s *Session, bin string) (*cageRun, error) {
 		return nil, err
 	}
 	r := &cageRun{c: c, container: name, dir: s.dir, envFile: env, bin: s.harness.Bin()}
-	// The program to run inside is the harness's to say: Claude Code's is
-	// resolved through its symlinks, pi's is where it is.
+	// The program to run inside is the harness's to say. A harness that
+	// cannot name one is refused here rather than quietly falling back to the
+	// host's name, which may be a path the cage does not have — the bug that
+	// broke every caged pi session (2026-10-16).
 	if cg, ok := s.harness.(Cageable); ok {
-		if p, err := cg.CageProgram(m.cageFacts(s, s.harness.Name())); err == nil {
-			r.bin = p
+		p, err := cg.CageProgram(m.cageFacts(s, s.harness.Name()))
+		if err != nil {
+			return nil, fmt.Errorf("%s cannot be caged: %w", s.harness.Title(), err)
 		}
+		r.bin = p
 	}
 	return r, nil
 }
@@ -1196,7 +1200,6 @@ func (m *Manager) cageFacts(s *Session, harness string) CageFacts {
 		Dir:         s.dir,
 		PrivateHome: m.privateHome(s.cage.Container, harness),
 		Bin:         m.binOf(harness),
-		Container:   s.cage.Container,
 	}
 }
 

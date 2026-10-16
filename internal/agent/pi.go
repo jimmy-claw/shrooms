@@ -78,11 +78,6 @@ func (p Pi) Args(o StartOptions) []string {
 	return args
 }
 
-// EnsureMCP puts the shrooms MCP server — command, run as "command mcp" —
-// in pi's user-level MCP servers (~/.pi/agent/mcp.json), where pi reads them:
-// it takes none on its command line (pi 1.0.0). Added when missing, and
-// moved along when the binary moved; an entry of the person's own under that
-// name, or anything else in the file, is left as it is.
 // CageMounts: pi's own agent directory, a private one of the cage's with the
 // owner's settings read-only over it and this project's sessions read-write.
 func (Pi) CageMounts(f CageFacts) []mount {
@@ -119,6 +114,11 @@ func (Pi) CageTrust(f CageFacts) error {
 	return os.WriteFile(filepath.Join(f.PrivateHome, "trust.json"), out, 0o600)
 }
 
+// EnsureMCP puts the shrooms MCP server — command, run as "command mcp" —
+// in pi's user-level MCP servers (~/.pi/agent/mcp.json), where pi reads them:
+// it takes none on its command line (pi 1.0.0). Added when missing, and
+// moved along when the binary moved; an entry of the person's own under that
+// name, or anything else in the file, is left as it is.
 func (Pi) EnsureMCP(command string, extra ...string) error {
 	dir := os.Getenv("PI_CODING_AGENT_DIR")
 	if dir == "" {

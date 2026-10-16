@@ -85,9 +85,18 @@ func openCodeConfigDir(home string) string { return filepath.Join(home, ".config
 func openCodeDataDir(home string) string   { return filepath.Join(home, ".local", "share", "opencode") }
 
 // openCodeHostCode is what of the owner's config comes into the cage read-only.
-// Not a credential: opencode's key is OPENCODE_API_KEY or its own auth store,
-// and CageEnv names neither, so neither can get in.
-var openCodeHostCode = []string{"opencode.jsonc", "opencode.json", "AGENTS.md", "package.json", "node_modules"}
+//
+// NOT opencode.jsonc or opencode.json, and that is the point: those are where a
+// provider apiKey lives (provider.<name>.options.apiKey, the same file as the
+// settings), so mounting them read-only would put a credential in the cage —
+// which a cage does not get (ADR-059, ADR-060). The cost is real and stated:
+// the owner's non-secret settings do not reach a caged OpenCode session. Its
+// config comes from OPENCODE_CONFIG_CONTENT instead, which is where the
+// gateway puts the model it should reach.
+//
+// What is left cannot hold a credential: instructions, and the packages its
+// extensions are made of.
+var openCodeHostCode = []string{"AGENTS.md", "package.json", "node_modules"}
 
 // openCodeProgram is OpenCode itself, symlinks followed: a single file with its
 // runtime inside it.

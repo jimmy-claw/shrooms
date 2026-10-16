@@ -48,8 +48,6 @@ project's conversations in ONE store cannot be given this project's without
 giving it all the others (OpenCode, ADR-062, is the case). There the cage gets
 a store of its own — never a copy kept in step, which is what the paragraph
 above rejects — and the session's conversation is the cage's, gone with it.
-Written down because this priority had to be re-derived from the Context rather
-than read off the Decision, twice, before it was.
 
 **Its credentials come through the agent** (ADR-059), never into the cage.
 

@@ -1,9 +1,16 @@
 # 062. A harness comes with everything a session has, cages included
 
 **Status:** accepted 2026-10-16, and built the same day. `Cageable` is the
-interface, Claude Code and pi moved behind it unchanged (their tests, untouched,
-are what shows it), and OpenCode implements it, `CageEnv` and `Gatewayed`, with
-a real-podman test.
+interface, Claude Code and pi moved behind it unchanged, and OpenCode implements
+it, `CageEnv` and `Gatewayed`, with a real-podman test.
+
+**Untouched tests were not enough to show "unchanged", and that is worth
+recording.** They passed while caged pi was broken: nothing in the suite
+executes a caged pi, and no test read what a cage is started with, so the one
+behaviour that changed was the one no test looked at. What catches it now is a
+rule tested for every cageable harness — a cage program is either an absolute
+path the mounts provide, or a bare name on the cage's PATH — and a real-podman
+test that execs each harness's program in the cages' own image.
 
 ## Context
 

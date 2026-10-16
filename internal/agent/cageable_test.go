@@ -1,7 +1,9 @@
 package agent
 
 import (
+	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -34,7 +36,6 @@ func TestACageProgramMatchesWhatTheCageHas(t *testing.T) {
 		Dir:         filepath.Join(home, "proj"),
 		PrivateHome: filepath.Join(home, "private"),
 		Bin:         "/opt/host-only/bin/the-program",
-		Container:   "c1",
 	}
 	os.MkdirAll(f.PrivateHome, 0o700)
 
@@ -128,5 +129,76 @@ func TestAMountProvidesOnlyWhatIsInIt(t *testing.T) {
 		if got := mountProvides(tc.ms, tc.dir); got != tc.want {
 			t.Errorf("%s: %v", tc.name, got)
 		}
+	}
+}
+
+// With real podman: every cageable harness's CageProgram actually RUNS in the
+// cage. The unit test above proves the program and the mounts agree; only a
+// container proves the thing resolves and starts — which is exactly what the
+// host-path bug did not.
+//
+// Run before releases, with the image the cages are really made from (the
+// workbench, which installs pi), because a harness whose program comes from
+// the image cannot be tested against an image that has none.
+func TestARealCageRunsEachCageablesProgram(t *testing.T) {
+	if os.Getenv("SHROOMS_REAL_CAGE") != "1" {
+		t.Skip("SHROOMS_REAL_CAGE=1 runs it")
+	}
+	image := os.Getenv("SHROOMS_CAGE_TEST_IMAGE")
+	if image == "" {
+		t.Skip("SHROOMS_CAGE_TEST_IMAGE=<the cages' own image> runs it")
+	}
+	c := NewCages("")
+	if c == nil {
+		t.Fatal("no podman")
+	}
+	c.Memory, c.CPUs, c.Pids = "", "", 0
+	ctx := context.Background()
+
+	home := t.TempDir()
+	if real, err := os.UserHomeDir(); err == nil {
+		t.Setenv("XDG_DATA_HOME", filepath.Join(real, ".local", "share"))
+	}
+	t.Setenv("HOME", home)
+	f := CageFacts{Home: home, Dir: filepath.Join(home, "proj"), PrivateHome: filepath.Join(home, "private"),
+		Bin: "/usr/bin/nothing-here"}
+	os.MkdirAll(f.PrivateHome, 0o700)
+
+	ran := 0
+	for _, h := range []Harness{Claude{}, Pi{}, OpenCode{}} {
+		cg, ok := h.(Cageable)
+		if !ok {
+			t.Errorf("%s is not cageable", h.Name())
+			continue
+		}
+		// The harness's own binary on this machine, as Register would find it.
+		bin := h.Bin()
+		if p, err := exec.LookPath(bin); err == nil {
+			bin = p
+		}
+		f.Bin = bin
+		prog, err := cg.CageProgram(f)
+		if err != nil {
+			t.Logf("%s: no program on this machine (%v) — skipped", h.Name(), err)
+			continue
+		}
+		name := "shrooms-progtest-" + h.Name() + "-" + filepath.Base(t.TempDir())
+		// keepMounts, as the real path does: a mount whose source is not there is
+		// dropped, not handed to podman.
+		args := c.createArgs(name, "progtest", image, keepMounts(cg.CageMounts(f)))
+		args = append(args[:len(args)-2], "sh", "-c", "command -v "+prog+" && "+prog+" --version")
+		args[0] = "run"
+		args = append([]string{args[0], "--rm"}, args[1:]...)
+		out, err := c.run(ctx, args...)
+		c.run(ctx, "rm", "-f", name)
+		if err != nil {
+			t.Errorf("%s: %q does not run in the cage: %s %v", h.Name(), prog, out, err)
+			continue
+		}
+		ran++
+		t.Logf("%s: %s", h.Name(), strings.TrimSpace(out))
+	}
+	if ran == 0 {
+		t.Error("no harness's program could be run, so this proves nothing")
 	}
 }

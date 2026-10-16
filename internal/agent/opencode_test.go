@@ -362,8 +362,17 @@ func TestAnOpenCodeCageGetsItsOwnDataDirectory(t *testing.T) {
 	if !strings.Contains(joined, cfg+" <- "+filepath.Join(priv, "config")) {
 		t.Errorf("the owner's config should be a private copy:\n%s", joined)
 	}
-	if !strings.Contains(joined, filepath.Join(cfg, "opencode.jsonc")+":ro") {
-		t.Errorf("the owner's own config should come in read-only:\n%s", joined)
+	// The owner's config does NOT come in: it is where a provider apiKey lives,
+	// in the same file as the settings, so a cage must not get it.
+	for _, x := range m.cageMounts(s, "opencode") {
+		for _, n := range []string{"opencode.jsonc", "opencode.json"} {
+			if x.path == filepath.Join(cfg, n) {
+				t.Errorf("the owner's %s can hold a provider key and must not be in a cage:\n%s", n, joined)
+			}
+		}
+	}
+	if strings.Contains(joined, filepath.Join(cfg, "opencode.jsonc")) {
+		t.Errorf("the owner's config reached the cage:\n%s", joined)
 	}
 	if !strings.Contains(joined, data+" <- "+filepath.Join(priv, "data")) {
 		t.Errorf("the cage's data directory should be its own:\n%s", joined)
@@ -622,7 +631,10 @@ func TestARealOpenCodeCageSeesItsOwnDataOnly(t *testing.T) {
 	data := filepath.Join(home, ".local", "share", "opencode")
 	os.MkdirAll(cfg, 0o700)
 	os.MkdirAll(data, 0o700)
-	os.WriteFile(filepath.Join(cfg, "opencode.jsonc"), []byte("{\"mine\":true}\n"), 0o600)
+	// The owner's config, WITH a provider key in it — the case the owner of the
+	// repo raised: it must not be in the cage at all.
+	os.WriteFile(filepath.Join(cfg, "opencode.jsonc"),
+		[]byte(`{"provider":{"opencode":{"options":{"apiKey":"OWNERS-SECRET-KEY"}}}}`+"\n"), 0o600)
 	// The owner's conversations: one database, every project.
 	os.WriteFile(filepath.Join(data, "opencode.db"), []byte("OWNERS-OTHER-PROJECTS"), 0o600)
 
@@ -633,14 +645,16 @@ func TestARealOpenCodeCageSeesItsOwnDataOnly(t *testing.T) {
 	// Absolute paths: this runs the container directly, without the env file
 	// that sets HOME to the owner's home in a real cage.
 	script := `set -e
-cat ` + filepath.Join(cfg, "opencode.jsonc") + `
+if grep -rq OWNERS-SECRET-KEY ` + cfg + ` 2>/dev/null; then
+  echo "THE-OWNERS-KEY-IS-IN-THE-CAGE"
+fi
+if [ -e ` + filepath.Join(cfg, "opencode.jsonc") + ` ]; then
+  echo "THE-OWNERS-CONFIG-IS-IN-THE-CAGE"
+fi
 if grep -q OWNERS-OTHER-PROJECTS ` + filepath.Join(data, "opencode.db") + ` 2>/dev/null; then
   echo "THE-OWNERS-DATABASE-IS-IN-THE-CAGE"
 fi
 echo "data: $(ls -A ` + data + ` | tr '\n' ' ')"
-if echo x >> ` + filepath.Join(cfg, "opencode.jsonc") + ` 2>/dev/null; then
-  echo "THE-OWNERS-CONFIG-IS-WRITABLE"
-fi
 echo DONE`
 	name := "shrooms-octest-" + filepath.Base(t.TempDir())
 	args := c.createArgs(name, "octest", image, m.cageMounts(s, "opencode"))
@@ -652,14 +666,14 @@ echo DONE`
 	if err != nil {
 		t.Fatalf("%s: %v", out, err)
 	}
-	if !strings.Contains(out, `{"mine":true}`) {
-		t.Errorf("the owner's settings should be in the cage:\n%s", out)
+	if strings.Contains(out, "THE-OWNERS-KEY-IS-IN-THE-CAGE") {
+		t.Errorf("the owner's provider key reached the cage:\n%s", out)
+	}
+	if strings.Contains(out, "THE-OWNERS-CONFIG-IS-IN-THE-CAGE") {
+		t.Errorf("the owner's config file, which can hold a key, reached the cage:\n%s", out)
 	}
 	if strings.Contains(out, "THE-OWNERS-DATABASE-IS-IN-THE-CAGE") {
 		t.Errorf("the owner's conversation database reached the cage:\n%s", out)
-	}
-	if strings.Contains(out, "THE-OWNERS-CONFIG-IS-WRITABLE") {
-		t.Errorf("the owner's settings must be read-only:\n%s", out)
 	}
 	if !strings.Contains(out, "DONE") {
 		t.Errorf("the cage did not finish:\n%s", out)
