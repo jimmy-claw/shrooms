@@ -1899,19 +1899,31 @@ Item {
     // Where the list was scrolled to, kept across its rebuilds: each refresh
     // hands it new hosts, its rows are made again, and for a moment it is
     // empty and back at the top (it jumped to the top, 2026-10-07).
+    // Where the reader is: every move of theirs, the top included, but not
+    // what a rebuild does to it. Keeping only positions below the top (as
+    // first written) "restored" an old place after the reader had scrolled
+    // up to the top: the list jumped down under them (2026-10-16).
     property real hostScrollKept: 0
+    property bool hostRebuilding: false
+    Connections {
+        target: typeof hostList !== "undefined" && hostList.contentItem ? hostList.contentItem : null
+        ignoreUnknownSignals: true
+        function onContentYChanged() { if (!root.hostRebuilding) root.hostScrollKept = hostList.contentItem.contentY }
+    }
     onShownHostsChanged: {
         if (typeof hostList === "undefined" || !hostList.contentItem) return
-        var y = hostList.contentItem.contentY
-        if (y > 0) root.hostScrollKept = y
+        root.hostRebuilding = true
         Qt.callLater(function() {
             if (root.hostScrollKept > 0 && hostList.contentItem.contentY === 0) hostList.contentItem.contentY = root.hostScrollKept
+            root.hostRebuilding = false
         })
     }
     function hostScroll(y) {
         if (y !== undefined) { hostList.contentItem.contentY = y; root.hostScrollKept = y }
         return hostList.contentItem.contentY
     }
+    // For the harness: scrolled as the reader scrolls, nothing else set.
+    function hostScrollByHand(y) { hostList.contentItem.contentY = y }
     // A2A tasks from other agents (the phone's AgentChat.taskNote and the
     // session list's lines).
     function taskNote(id, state, summary) { return "task " + id + " " + String(state).replace(/_/g, " ") + (summary ? " — " + summary : "") }

@@ -302,7 +302,7 @@ Item {
     Timer {
         interval: 3500; running: true
         onTriggered: {
-            console.error("HOSTSCROLL=" + top.hostScrollSeen)
+            console.error("HOSTSCROLL=" + top.hostScrollSeen + " TOP=" + top.hostScrollTop)
             var kinds = []
             for (var i = 0; i < chatCount(); i++) kinds.push(view.chatModelAt(i).kind)
             console.error("ROWS=" + kinds.join(","))
@@ -1116,10 +1116,17 @@ Item {
                 view.agentHosts = many.slice()
                 // Read two passes later, once the list has been rebuilt —
                 // before the view's own poll can replace the hosts.
-                Qt.callLater(function() { Qt.callLater(function() { top.hostScrollSeen = Math.round(view.hostScroll()) }) })
+                Qt.callLater(function() { Qt.callLater(function() {
+                    top.hostScrollSeen = Math.round(view.hostScroll())
+                    // The reader scrolls up to the top: a refresh leaves them there.
+                    view.hostScrollByHand(0)
+                    view.agentHosts = many.slice()
+                    Qt.callLater(function() { Qt.callLater(function() { top.hostScrollTop = Math.round(view.hostScroll()) }) })
+                }) })
             })
         }
     }
     property int hostScrollSeen: -1
+    property int hostScrollTop: -1
     function chatCount() { return view.chatModelCount() }
 }
