@@ -499,7 +499,7 @@ func (m *Manager) CreateCaged(name, dir, harness string, cage *Cage) (Info, erro
 	if cage != nil {
 		// Before the podman check: whether a harness can be caged at all does
 		// not depend on this machine having podman.
-		if err := cageableHarness(harness); err != nil {
+		if err := cageableHarness(h); err != nil {
 			return Info{}, err
 		}
 		if m.Cages == nil {

@@ -62,8 +62,13 @@ session on it:
   config decides. It is deliberately not defaulted to a free model: most of
   OpenCode's free ones are stealth — unreleased and anonymous, free "for a
   limited time" — and a default naming one would rot.
-- **It cannot be caged yet** (ADR-061), and is refused rather than made and
-  then failed at exec. Caging it is the next work on it (ADR-062).
+- **It can be caged and sealed** (ADR-062). It keeps every project's
+  conversations in one database, so a caged session gets a database of its
+  own: the owner's is never mounted, which is ADR-060's line, and the
+  consequence is that the cage's conversations are the cage's. Its config file
+  is not mounted either — it is where a provider apiKey lives, in the same
+  file as the settings — so a caged session's config comes from
+  OPENCODE_CONFIG_CONTENT, and the owner's non-secret settings do not reach it.
 
 ### What a harness must do (ADR-062)
 
@@ -179,6 +184,21 @@ account, jimmy-crib say, can serve sessions to the whole mesh.
      (`PI_CODING_AGENT_DIR`, `PI_CODING_AGENT_SESSION_DIR` respected); its
      message entries are read as history. A pi session is a tree, and lines
      of an abandoned branch are read too.
+   - `Cageable` (ADR-062), or the harness is refused caging: `CageMounts` is
+     its `~/.pi/agent` as a private copy, the owner's settings over it
+     read-only, and `sessions/<this project>` read-write; `CageProgram` is the
+     bare name `pi`, because the image installs it and nothing of the host's is
+     mounted for it — the host's absolute path is not in the cage, and
+     returning it is what broke every caged pi session; `CageTrust` carries the
+     owner's `trust.json` entry for this project and no other. A harness whose conversations are ONE database for
+     every project (as OpenCode's are) must give the cage a database of its
+     own instead — mounting the owner's would put every other project's
+     conversation in the cage, and copying one is what ADR-060 rejected.
+   - `Gatewayed` for a sealed cage (ADR-059): the environment that points it
+     at the agent's gateway, so no key is ever in the cage. If the override has
+     to go in a config file, check which one the harness actually reads — for
+     OpenCode, `opencode.jsonc` wins over `opencode.json`, so a gateway file
+     named the latter would be silently ignored.
 3. **The codec** — `piCodec`, the whole translation:
    - start: `get_state`; its answer becomes the `init` message (session id,
      `provider/model`, and the context window, kept for the turn's `result`);

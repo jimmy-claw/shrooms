@@ -82,6 +82,20 @@ func bearer(base, env, provider string) upstream {
 	}}
 }
 
+// OpenCodePublicToken is what opencode sends when it has no key of its own —
+// measured against 1.19.2, which sends exactly this and is answered. Its free
+// models need no credential.
+const OpenCodePublicToken = "public"
+
+// openCodeKey is the owner's own OpenCode key, from the environment or where pi
+// keeps it, or "" — the free models need none.
+func openCodeKey() string {
+	if k := os.Getenv("OPENCODE_API_KEY"); k != "" {
+		return k
+	}
+	return piProviderKey("opencode")
+}
+
 // piProviderKey is a provider's key as the owner keeps it in pi's
 // models.json (providers.<name>.apiKey): a key, or the name of a variable
 // that holds one, as pi reads it. On proteus the Venice key lives there and
@@ -125,6 +139,29 @@ func (m *Manager) upstreams(sealed bool, harness string) map[string]upstream {
 		"openrouter": bearer("https://openrouter.ai/api/v1", "OPENROUTER_API_KEY", "openrouter"),
 		"venice":     bearer("https://api.venice.ai/api/v1", "VENICE_API_KEY", "venice"),
 		"openai":     bearer("https://api.openai.com/v1", "OPENAI_API_KEY", "openai"),
+		// OpenCode's free models go through its own inference endpoint, whose
+		// key is OPENCODE_API_KEY (measured from its model catalog: the
+		// provider "opencode" is https://opencode.ai/inference/openai/v1).
+		// Without /v1 here: the client appends it, and a cage's request
+		// arrives as /llm/opencode/v1/chat/completions.
+		//
+		// NOT bearer(): its free models need no credential at all. Measured
+		// with no key set, opencode sends the literal "Bearer public" — which
+		// is how atlas runs them with no key and no auth.json. A bearer()
+		// here fails when the machine has no OPENCODE_API_KEY, so every caged
+		// or sealed free-model turn would answer 502 — the one case this
+		// upstream exists for. The owner's own key is used when there is one
+		// (paid models); otherwise the public token passes through.
+		"opencode": upstream{base: "https://opencode.ai/inference/openai", auth: func(h http.Header) error {
+			if k := openCodeKey(); k != "" {
+				h.Set("Authorization", "Bearer "+k)
+				return nil
+			}
+			if h.Get("Authorization") == "" {
+				h.Set("Authorization", "Bearer "+OpenCodePublicToken)
+			}
+			return nil
+		}},
 	}
 	ups["anthropic"] = upstream{base: "https://api.anthropic.com", auth: func(h http.Header) error {
 		bearer := func(token string) {

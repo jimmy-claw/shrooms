@@ -41,6 +41,14 @@ deleted with it. Into it come:
 Nothing else comes in, so whatever lands in the owner's harness directory
 later is out by default.
 
+**The hard line is "no other conversations"; the folder above is how that is
+kept, not a promise that the conversation is always the owner's own file.**
+The two can conflict, and then isolation wins: a harness that keeps every
+project's conversations in ONE store cannot be given this project's without
+giving it all the others (OpenCode, ADR-062, is the case). There the cage gets
+a store of its own — never a copy kept in step, which is what the paragraph
+above rejects — and the session's conversation is the cage's, gone with it.
+
 **Its credentials come through the agent** (ADR-059), never into the cage.
 
 **Caged stops here.** Anything that needs more than this is sealed's job:

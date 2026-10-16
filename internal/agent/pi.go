@@ -78,6 +78,42 @@ func (p Pi) Args(o StartOptions) []string {
 	return args
 }
 
+// CageMounts: pi's own agent directory, a private one of the cage's with the
+// owner's settings read-only over it and this project's sessions read-write.
+func (Pi) CageMounts(f CageFacts) []mount {
+	dir := piAgentDir()
+	ms := []mount{{path: f.PrivateHome, at: dir}}
+	ms = append(ms, readOnlyIn(dir, piHostCode)...)
+	ms = append(ms, ownConversations(filepath.Join(dir, "sessions", piSessionsName(f.Dir))))
+	return ms
+}
+
+// CageProgram: the cage's own pi, by name. The image installs it
+// (workbench.Containerfile: npm install -g @earendil-works/pi-coding-agent),
+// so the name is found on the cage's PATH. The host's absolute path must NOT
+// be used: nothing of the host's is mounted for pi, so that path does not
+// exist in the cage — which is what returning f.Bin did, and it broke every
+// caged pi session at exec. Claude Code and OpenCode resolve their host binary
+// because their CageMounts mount its directory; pi mounts nothing for it.
+func (Pi) CageProgram(CageFacts) (string, error) { return "pi", nil }
+
+// CageTrust carries pi's trust in THIS project into the private home: its
+// .pi config, MCP servers and extensions load only in a trusted project.
+func (Pi) CageTrust(f CageFacts) error {
+	var trust map[string]json.RawMessage
+	b, err := os.ReadFile(filepath.Join(piAgentDir(), "trust.json"))
+	if err != nil || json.Unmarshal(b, &trust) != nil {
+		return nil
+	}
+	dir := filepath.Clean(f.Dir)
+	v, ok := trust[dir]
+	if !ok {
+		return nil
+	}
+	out, _ := json.Marshal(map[string]json.RawMessage{dir: v})
+	return os.WriteFile(filepath.Join(f.PrivateHome, "trust.json"), out, 0o600)
+}
+
 // EnsureMCP puts the shrooms MCP server — command, run as "command mcp" —
 // in pi's user-level MCP servers (~/.pi/agent/mcp.json), where pi reads them:
 // it takes none on its command line (pi 1.0.0). Added when missing, and

@@ -97,18 +97,14 @@ on the first prompt as a block of its own, once.
   naming one would rot into a support call.
 - Nothing about Claude Code or pi changes at all: `Codec` gains nothing, and
   neither of their codecs implements `Answering`.
-- **OpenCode cannot be caged yet**, and asking for it is refused where it is
-  asked for — `CreateCaged` and `SetCage` — rather than making a cage that fails
-  at exec. Its image has no `opencode`, and it has no private home or gateway
-  there (ADR-059 and ADR-060 are by name, for Claude Code and pi). `AdoptCaged`
-  needs no check of its own: it requires `Transcripts`, which OpenCode is not.
+- **OpenCode is caged and sealed** (ADR-062, which this ADR left as the next
+  work on it): the owner's config read-only, a data directory of the cage's own,
+  and its model reached through the gateway. `AdoptCaged` still needs no check
+  of its own: it requires `Transcripts`, which OpenCode is not.
 
 ## What was not verified
 
 - `opencode serve`'s HTTP/SSE API, which might stream more finely than ACP. Not
   needed: ACP already streams, which was the point.
-- Cages. A caged session on OpenCode would need the binary and its own config
-  inside the image, and a private home or a gateway to reach its model. That is
-  a separate piece of work; until then it is refused (see Consequences). That is
-  not the same as `missingHarness`, which covers a machine without the binary,
-  not a cage without it.
+- Cages: built since (ADR-062), with a real-podman test that shows the owner's
+  conversation database does not reach the cage.

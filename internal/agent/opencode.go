@@ -2,6 +2,9 @@ package agent
 
 import (
 	"encoding/json"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 )
@@ -72,6 +75,103 @@ func (o OpenCode) Codec(s StartOptions) Codec {
 		note:    s.Note,
 	}
 }
+
+// --- in a cage (ADR-062) ------------------------------------------------------
+
+// openCodeConfigDir and openCodeDataDir are where opencode 1.19.2 keeps the
+// owner's settings and its conversations. Measured, not assumed: it honours
+// XDG_CONFIG_HOME and XDG_DATA_HOME, and with neither set they are these.
+func openCodeConfigDir(home string) string { return filepath.Join(home, ".config", "opencode") }
+func openCodeDataDir(home string) string   { return filepath.Join(home, ".local", "share", "opencode") }
+
+// openCodeHostCode is what of the owner's config comes into the cage read-only.
+//
+// NOT opencode.jsonc or opencode.json, and that is the point: those are where a
+// provider apiKey lives (provider.<name>.options.apiKey, the same file as the
+// settings), so mounting them read-only would put a credential in the cage —
+// which a cage does not get (ADR-059, ADR-060). The cost is real and stated:
+// the owner's non-secret settings do not reach a caged OpenCode session. Its
+// config comes from OPENCODE_CONFIG_CONTENT instead, which is where the
+// gateway puts the model it should reach.
+//
+// What is left cannot hold a credential: instructions, and the packages its
+// extensions are made of.
+var openCodeHostCode = []string{"AGENTS.md", "package.json", "node_modules"}
+
+// openCodeProgram is OpenCode itself, symlinks followed: a single file with its
+// runtime inside it.
+func openCodeProgram(bin string) (string, error) {
+	p, err := exec.LookPath(bin)
+	if err != nil {
+		return "", err
+	}
+	return filepath.EvalSymlinks(p)
+}
+
+// CageMounts: the owner's config read-only into a private copy, and a data
+// directory of the CAGE's own.
+//
+// The data directory has to be the cage's own. OpenCode keeps every project's
+// conversations in ONE SQLite database (~/.local/share/opencode/opencode.db,
+// measured; sessions carry their directory in a column but the file is one),
+// so mounting the owner's would put every other project's conversation in the
+// cage — ADR-060's line, which is that a cage sees its own and nothing else of
+// the owner's. With one database the only way to keep that line is to give the
+// cage a database of its own. A filtered copy was considered and rejected by
+// ADR-060 for the same shape ("two copies of a conversation ... can lose part
+// of one"); here the consequence is stated rather than hidden — a caged
+// OpenCode session's conversations are the cage's, they are not in the owner's
+// database, and they go when the cage does. The session's own history in the
+// apps is the agent's event log, which is unaffected.
+func (OpenCode) CageMounts(f CageFacts) []mount {
+	cfg, data := openCodeConfigDir(f.Home), openCodeDataDir(f.Home)
+	// Made here, because a mount whose source is not there is dropped: the
+	// private home itself is made by the agent, these two are the harness's.
+	privCfg, privData := filepath.Join(f.PrivateHome, "config"), filepath.Join(f.PrivateHome, "data")
+	os.MkdirAll(privCfg, 0o700)
+	os.MkdirAll(privData, 0o700)
+	ms := []mount{{path: privCfg, at: cfg}}
+	ms = append(ms, readOnlyIn(cfg, openCodeHostCode)...)
+	ms = append(ms, mount{path: privData, at: data})
+	// Its program, one file.
+	if bin, err := openCodeProgram(f.Bin); err == nil {
+		ms = append(ms, mount{path: filepath.Dir(bin), ro: true})
+	}
+	return ms
+}
+
+func (OpenCode) CageProgram(f CageFacts) (string, error) { return openCodeProgram(f.Bin) }
+
+// CageTrust: nothing to carry. OpenCode has no per-project trust — what a
+// session may run is its own permission config, which is the owner's settings
+// and comes in read-only.
+func (OpenCode) CageTrust(CageFacts) error { return nil }
+
+// CageEnv: nothing of the owner's environment. Its key is not named, so it
+// cannot come in, and its config and data are found at their default paths,
+// which in the cage are the private copies CageMounts put there.
+func (OpenCode) CageEnv() []string { return nil }
+
+// GatewayEnv points OpenCode at the gateway (ADR-059): its own provider's base
+// URL and a key the gateway replaces with the real one.
+//
+// Measured, and it matters: OPENCODE_CONFIG_CONTENT is read and WINS over the
+// owner's opencode.jsonc. A gateway FILE named opencode.json would be silently
+// ignored, because opencode.jsonc takes precedence over opencode.json — which
+// is what the owner has. So the override goes in the environment, and the
+// owner's settings are not shadowed by it.
+func (OpenCode) GatewayEnv(bool) map[string]string {
+	cfg, err := json.Marshal(map[string]any{"provider": map[string]any{
+		"opencode": map[string]any{"options": map[string]any{
+			"baseURL": GatewayBase("opencode") + "/v1", "apiKey": GatewayKey}}}})
+	if err != nil {
+		return nil
+	}
+	return map[string]string{"OPENCODE_CONFIG_CONTENT": string(cfg)}
+}
+
+// GatewayFiles: none. The whole of it is the environment above.
+func (OpenCode) GatewayFiles(bool) map[string]string { return nil }
 
 // --- the codec ---------------------------------------------------------------
 

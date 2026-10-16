@@ -1,7 +1,16 @@
 # 062. A harness comes with everything a session has, cages included
 
-**Status:** accepted 2026-10-16. The cage interface is not built yet; OpenCode
-is the first harness held to this.
+**Status:** accepted 2026-10-16, and built the same day. `Cageable` is the
+interface, Claude Code and pi moved behind it unchanged, and OpenCode implements
+it, `CageEnv` and `Gatewayed`, with a real-podman test.
+
+**Untouched tests were not enough to show "unchanged", and that is worth
+recording.** They passed while caged pi was broken: nothing in the suite
+executes a caged pi, and no test read what a cage is started with, so the one
+behaviour that changed was the one no test looked at. What catches it now is a
+rule tested for every cageable harness — a cage program is either an absolute
+path the mounts provide, or a bare name on the cage's PATH — and a real-podman
+test that execs each harness's program in the cages' own image.
 
 ## Context
 
@@ -51,8 +60,9 @@ A harness that doesn't implement it is refused caging. That replaces
 `cageableHarness`'s check by name. Claude Code and pi move behind it first,
 unchanged, with their tests showing they are; then OpenCode.
 
-**A new harness isn't merged without caged and sealed.** OpenCode is already
-in, so it is the exception, and its caging is the next work on it.
+**A new harness isn't merged without caged and sealed.** OpenCode came in before
+this rule and was the exception; it is caged now, and it is the worked example
+of what the interface asks for.
 
 ## Consequences
 
@@ -63,3 +73,11 @@ in, so it is the exception, and its caging is the next work on it.
 - Until OpenCode is caged, its sessions run uncaged only, and the apps say so.
 - Each caged harness needs a real-cage test (podman, as the shared folder's
   has), not only the fake: a cage is where fakes have lied before.
+- **A harness that keeps every project in one database gets a database of its
+  own in the cage.** OpenCode does, so a caged OpenCode session's conversations
+  are the cage's: they are not in the owner's database and they go when the cage
+  does. ADR-060 rejected copies, and mounting the owner's would put every other
+  project's conversation in the cage, so this is the only way to keep its line —
+  which ADR-060 now says outright: its hard line is "no other conversations",
+  and where the two conflict, isolation wins. For Claude Code and pi the
+  conversation is still the owner's file.
