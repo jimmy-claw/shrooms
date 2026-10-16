@@ -85,20 +85,21 @@ type openCodec struct {
 	mu sync.Mutex
 	// nextID numbers the requests we send. Responses are matched by it, so
 	// the codec knows which of its own steps it is being answered about.
-	nextID    int
-	initID    int
-	openID    int
-	opened    string // acpNewSession or acpLoad: only a failed LOAD may fall back
-	cancelled bool   // a turn cancelled before the session existed // session/new or session/load
-	setID     int
-	promptID  int
+	nextID   int
+	initID   int
+	openID   int
+	opened   string // acpNewSession or acpLoad: only a failed LOAD may fall back
+	setID    int
+	promptID int
 
 	sessionID string
 	ready     bool
 	// pending holds turns that arrived before the session existed: a device
 	// can send a message the moment a session starts, and the ACP session is
-	// created a round trip later.
-	pending []string
+	// created a round trip later. Each carries whether it was cancelled while
+	// it waited, so an interrupt touches the turns it was pressed for and not
+	// one that arrives afterwards.
+	pending []ocTurn
 	// sent remembers the turns we wrote, so the same text coming back as a
 	// user message is recognised as ours and not reported as outside.
 	sent []string
@@ -165,6 +166,12 @@ func (c *openCodec) open() []any {
 	return []any{c.request(method, params)}
 }
 
+// ocTurn is a turn waiting for the session to exist.
+type ocTurn struct {
+	text      string
+	cancelled bool
+}
+
 // Turn is a user turn. Before the session exists it is queued: the ACP
 // session id arrives a round trip after the process starts, and a device
 // that sends at once must not have its message dropped.
@@ -173,7 +180,7 @@ func (c *openCodec) Turn(text string) []any {
 	defer c.mu.Unlock()
 	c.sent = append(c.sent, text)
 	if !c.ready {
-		c.pending = append(c.pending, text)
+		c.pending = append(c.pending, ocTurn{text: text})
 		return nil
 	}
 	return []any{c.prompt(text)}
@@ -193,14 +200,25 @@ func (c *openCodec) prompt(text string) map[string]any {
 	return c.request(acpPrompt, map[string]any{"sessionId": c.sessionID, "prompt": blocks})
 }
 
-// flush drains the queued turns. Called with the lock held.
-func (c *openCodec) flush() []any {
-	out := []any{}
+// drainQueue sends what is queued and ends what was cancelled, in the order
+// the turns arrived. Called with the lock held.
+//
+// The cancelled ones are ENDED, each with its own result: a turn the codec
+// drops without one leaves the session reading as working for ever. The order
+// matters too — a result that arrives before an earlier turn's prompt would
+// report the turns out of order.
+func (c *openCodec) drainQueue() (msgs []json.RawMessage, write []any) {
 	for _, t := range c.pending {
-		out = append(out, c.prompt(t))
+		if t.cancelled {
+			msgs = append(msgs, out(map[string]any{"type": "result",
+				"subtype": "error_during_execution", "session_id": c.sessionID,
+				"error": "the turn was cancelled before the session was open"}))
+			continue
+		}
+		write = append(write, c.prompt(t.text))
 	}
 	c.pending = nil
-	return out
+	return msgs, write
 }
 
 func (c *openCodec) Interrupt() []any {
@@ -212,9 +230,12 @@ func (c *openCodec) Interrupt() []any {
 		// that does nothing. It is dropped here, and the turn is ENDED when
 		// the session opens: a dropped turn with no result would leave the
 		// session working for ever.
-		if len(c.pending) > 0 {
-			c.cancelled = true
-			c.pending = nil
+		// Each turn waiting here is marked, NOT the session: a turn that
+		// arrives after the cancel must still go. Marking the session instead
+		// swallowed it too, and told the person their message was cancelled
+		// when nobody had cancelled it (found by review).
+		for i := range c.pending {
+			c.pending[i].cancelled = true
 		}
 		return nil
 	}
@@ -338,20 +359,12 @@ func (c *openCodec) Decode(line json.RawMessage) ([]json.RawMessage, []any) {
 				write = append(write, c.request(acpSetConfig, map[string]any{
 					"sessionId": c.sessionID, "configId": "model", "value": c.model}))
 			}
-			if c.cancelled {
-				// The turn was cancelled while it waited for this session.
-				// It never went out, and it has to END: a turn the codec
-				// quietly drops is a session that reads as working for ever.
-				c.cancelled = false
-				c.ready = true
-				msgs = append(msgs, out(map[string]any{"type": "result",
-					"subtype": "error_during_execution", "session_id": c.sessionID,
-					"error": "the turn was cancelled before the session was open"}))
-				return msgs, write
-			}
-			// The session is open: anything a device sent meanwhile goes now,
-			// and the init event above tells the apps it did.
-			write = append(write, c.flush()...)
+			// The session is open: anything a device sent meanwhile goes now —
+			// or is ended, if it was cancelled while it waited — and the init
+			// event above tells the apps the session is up.
+			qmsgs, qwrite := c.drainQueue()
+			msgs = append(msgs, qmsgs...)
+			write = append(write, qwrite...)
 			c.ready = true
 			return msgs, write
 

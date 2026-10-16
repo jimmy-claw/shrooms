@@ -47,6 +47,7 @@ func fakeOpenCode() {
 				"content": map[string]any{"type": "text", "text": text}}}})
 	}
 
+scan:
 	for in.Scan() {
 		line := strings.TrimSpace(in.Text())
 		if line == "" {
@@ -96,11 +97,16 @@ func fakeOpenCode() {
 			// The real one validates this with a discriminated union and
 			// refuses the entry without "type", so the fake does too: a fake
 			// that accepts what the real one rejects is worse than none.
+			//
+			// `continue scan`, not a bare continue: a bare one continues the
+			// INNER range, so the refusal was followed by the success reply
+			// for the same id — refusing and then accepting. Found by review,
+			// which piped a type-less request in and got two replies.
 			for _, s := range p.McpServers {
 				if s.Type == "" {
 					emit(map[string]any{"jsonrpc": "2.0", "id": req.ID,
 						"error": map[string]any{"code": -32602, "message": "Invalid params"}})
-					continue
+					continue scan
 				}
 			}
 			if req.Method == "session/load" {

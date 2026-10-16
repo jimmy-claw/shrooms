@@ -303,6 +303,35 @@ func TestAnInterruptBeforeTheSessionExistsEndsTheWaitingTurn(t *testing.T) {
 	}
 }
 
+// An interrupt cancels the turns that were waiting for it — not the session.
+// A turn that arrives AFTER the cancel must still go: marking the session
+// swallowed it too, and told the person their message was cancelled when
+// nobody had cancelled it. Found by review, which mutated one step past my own
+// two assertions and noticed that `c.pending = nil` was doing nothing.
+func TestATurnAfterAnInterruptIsStillSent(t *testing.T) {
+	c := OpenCode{}.Codec(StartOptions{}).(*openCodec)
+	c.Turn("first")  // waits for the session
+	c.Interrupt()    // ... and is the one that is cancelled
+	c.Turn("second") // typed after the cancel: it must go
+	_, _ = c.Decode(rawJSON(ack(c.Start()[0], map[string]any{})))
+	msgs, write := c.Decode(rawJSON(ackID(c.openID, map[string]any{
+		"sessionId": "ses_x", "configOptions": []any{}})))
+
+	if got := strings.Count(joinRaw(msgs), "cancelled before the session was open"); got != 1 {
+		t.Errorf("one cancelled turn should end with exactly one result, got %d: %s", got, joinRaw(msgs))
+	}
+	if strings.Contains(joinRaw(msgs), "first") {
+		t.Errorf("the cancelled turn was sent anyway: %s", joinRaw(msgs))
+	}
+	sent := mustJSON(write)
+	if !strings.Contains(sent, "session/prompt") || !strings.Contains(sent, "second") {
+		t.Errorf("the turn that arrived after the cancel must still go: %s", sent)
+	}
+	if strings.Contains(sent, "first") {
+		t.Errorf("only the turn that was waiting is cancelled: %s", sent)
+	}
+}
+
 // Usage is THIS TURN's, not a running total. Every other harness reports the
 // turn's own figures and the mesh reads them that way — rate.go divides
 // output_tokens by the turn's own generating time, so a cumulative figure
