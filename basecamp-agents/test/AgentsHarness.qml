@@ -553,8 +553,10 @@ Item {
             view.refreshAgents()
             var stayed = view.meshHosts.map(function(x) { return x.name + ":" + x.sessions.length }).join(",")
             var kept = view.agentHosts[0]
-            console.error("FLAKY stayed=" + stayed + " now=" + view.hostReachable(kept, Date.now())
-                          + " later=" + view.hostReachable(kept, Date.now() + 30000)
+            view.refreshAgents()
+            var twice = view.agentHosts[0]
+            console.error("FLAKY stayed=" + stayed + " now=" + view.hostReachable(kept)
+                          + " later=" + view.hostReachable(twice)
                           + " forgotten=" + view.mergeHosts([{ name: "old", lastSeen: 1, sessions: [] }], [], Date.now()).length)
             top.findNone = false
             view.refreshAgents()

@@ -109,8 +109,13 @@ class AgentChatTest {
         assertEquals(listOf("atlas", "vps"), merged.map { it.name })
         assertEquals("found this round: seen now", now, merged[1].lastSeen)
         assertEquals("missed it: as last seen", listOf("a"), merged[0].sessions.map { it.name })
-        assertTrue("five seconds quiet is still reachable", HostCache.reachable(merged[0], now))
-        assertFalse("half a minute quiet is not", HostCache.reachable(merged[0], now + 30_000))
+        // Offline by rounds missed, not by time: one missed round is a flaky
+        // moment, two in a row is offline, and an answer brings it back.
+        assertTrue("one round missed is still reachable", HostCache.reachable(merged[0]))
+        val twice = HostCache.merge(merged, found, now + 10_000)
+        assertFalse("two in a row is not", HostCache.reachable(twice[0]))
+        assertTrue("an answer brings it back", HostCache.reachable(HostCache.merge(twice, prev.take(1), now + 20_000)[0]))
+        assertTrue("however long ago it last answered", HostCache.reachable(prev[0].copy(lastSeen = 0)))
         // Kept across a restart of the app, as it was.
         assertEquals(merged, HostCache.decode(HostCache.encode(merged)))
         assertEquals(emptyList<AgentHost>(), HostCache.decode("not json"))

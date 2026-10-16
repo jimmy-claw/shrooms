@@ -573,27 +573,29 @@ Item {
     // The list kept between rounds of finding — the phone's HostCache: a
     // machine that misses a round stays where it is, with its sessions as last
     // seen, rather than vanishing, coming back, and moving everything under
-    // the reader. Greyed once quiet for staleMs; forgotten after forgetMs.
-    readonly property double staleMs: 25000
+    // the reader. Offline once it has missed missedRounds rounds in a row,
+    // by rounds and not by time (the phone's, 2026-10-16); forgotten after
+    // forgetMs.
+    readonly property int missedRounds: 2
     readonly property double forgetMs: 7 * 24 * 3600 * 1000
     property double nowMs: Date.now()
     property double lastHostsSave: 0
     function mergeHosts(prev, found, now) {
         var out = [], names = {}
         for (var i = 0; i < found.length; i++) {
-            var h = Object.assign({}, found[i], { lastSeen: now })
+            var h = Object.assign({}, found[i], { lastSeen: now, missed: 0 })
             names[h.name + "@" + h.mesh] = true
             out.push(h)
         }
         for (i = 0; i < (prev || []).length; i++) {
             var p = prev[i]
             if (names[p.name + "@" + p.mesh] || !(now - (p.lastSeen || 0) < forgetMs)) continue
-            out.push(p)
+            out.push(Object.assign({}, p, { missed: (p.missed || 0) + 1 }))
         }
         out.sort(function(a, b) { return a.name < b.name ? -1 : a.name > b.name ? 1 : 0 })
         return out
     }
-    function hostReachable(h, now) { return (now === undefined ? nowMs : now) - (h.lastSeen || 0) < staleMs }
+    function hostReachable(h) { return (h.missed || 0) < missedRounds }
 
     // Replies not yet seen in this Basecamp, per session (the phone's Unread):
     // the session's turns — one per reply, counted by the agent — less those
@@ -3615,7 +3617,7 @@ Item {
         property bool showHost: false
         readonly property bool up: root.hostReachable(srow.host)
         // Dimmed too while it cannot work for want of quota (QuotaTag).
-        opacity: !up ? 0.5 : (sess.limited ? 0.6 : 1)
+        opacity: sess.limited ? 0.6 : 1
 
         readonly property bool isOpen: root.agentOpen !== null && root.agentOpen.address === srow.host.address && root.agentOpen.session === srow.sess.name
         height: sCol.implicitHeight + root.sz(16)
@@ -3645,8 +3647,8 @@ Item {
                 Pulse { visible: srow.up && srow.sess.state !== "idle"; tint: srow.sess.state === "waiting" ? cAmber : cPhosphor }
                 Text {
                     Layout.rightMargin: root.sz(22)
-                    text: !srow.up ? "unreachable" : srow.sess.state === "waiting" ? "NEEDS YOU" : (srow.sess.state === "working" ? "WORKING" : (srow.sess.running ? "idle" : "asleep"))
-                    color: !srow.up ? cAsh : srow.sess.state === "waiting" ? cAmber : (srow.sess.state === "working" ? cPhosphor : cAsh)
+                    text: !srow.up ? "offline" : srow.sess.state === "waiting" ? "NEEDS YOU" : (srow.sess.state === "working" ? "WORKING" : (srow.sess.running ? "idle" : "asleep"))
+                    color: !srow.up ? cAmber : srow.sess.state === "waiting" ? cAmber : (srow.sess.state === "working" ? cPhosphor : cAsh)
                     font.family: "monospace"; font.pixelSize: root.fs(9); font.letterSpacing: 1
                 }
             }
@@ -3842,7 +3844,7 @@ Item {
         readonly property bool up: root.hostReachable(bcard.host)
         readonly property int tailLines: 6
         // Dimmed too while it cannot work for want of quota (QuotaTag).
-        opacity: !up ? 0.5 : (sess.limited ? 0.6 : 1)
+        opacity: sess.limited ? 0.6 : 1
         height: bCol.implicitHeight + root.sz(16)
         radius: root.sz(8)
         color: cPanel
@@ -3879,8 +3881,8 @@ Item {
                 Text { text: bcard.host.name; color: root.meshTint(bcard.host.mesh); font.family: "monospace"; font.pixelSize: root.fs(10); elide: Text.ElideRight; Layout.fillWidth: true }
                 Pulse { visible: bcard.up && bcard.sess.state !== "idle"; tint: bcard.sess.state === "waiting" ? cAmber : cPhosphor }
                 Text {
-                    text: !bcard.up ? "unreachable" : bcard.sess.state === "waiting" ? "NEEDS YOU" : (bcard.sess.state === "working" ? "WORKING" : (bcard.sess.running ? "idle" : "asleep"))
-                    color: !bcard.up ? cAsh : bcard.sess.state === "waiting" ? cAmber : (bcard.sess.state === "working" ? cPhosphor : cAsh)
+                    text: !bcard.up ? "offline" : bcard.sess.state === "waiting" ? "NEEDS YOU" : (bcard.sess.state === "working" ? "WORKING" : (bcard.sess.running ? "idle" : "asleep"))
+                    color: !bcard.up ? cAmber : bcard.sess.state === "waiting" ? cAmber : (bcard.sess.state === "working" ? cPhosphor : cAsh)
                     font.family: "monospace"; font.pixelSize: root.fs(9); font.letterSpacing: 1
                 }
             }
@@ -4464,13 +4466,12 @@ Item {
                         RowLayout {
                             width: parent.width
                             spacing: 8
-                            opacity: hostCol.up ? 1 : 0.45
                             Rectangle { width: root.sz(9); height: width; radius: width / 2; color: "transparent"; border.width: 2; border.color: root.meshTint(hostCol.modelData.mesh) }
                             Text { text: hostCol.modelData.name; color: hostCol.modelData.here ? cPhosphor : cBone; font.family: "monospace"; font.pixelSize: root.fs(14) }
                             Text { text: hostCol.modelData.meshes && hostCol.modelData.meshes.length ? hostCol.modelData.meshes.join(" · ") : hostCol.modelData.mesh
                                    color: root.meshTint(hostCol.modelData.mesh); font.family: "monospace"; font.pixelSize: root.fs(10) }
                             Text { visible: !!hostCol.modelData.here; objectName: "hereTag"; text: "THIS MACHINE"; color: cPhosphor; font.family: "monospace"; font.pixelSize: root.fs(9); font.letterSpacing: 1 }
-                            Text { visible: !hostCol.up; text: "unreachable · seen " + root.clock(hostCol.modelData.lastSeen); color: cAsh; font.family: "monospace"; font.pixelSize: root.fs(10) }
+                            Text { visible: !hostCol.up; text: "offline · seen " + root.clock(hostCol.modelData.lastSeen); color: cAmber; font.family: "monospace"; font.pixelSize: root.fs(10) }
                             Item { Layout.fillWidth: true }
                             Lnk { visible: hostCol.up; text: "+ session"; onClicked: {
                                 newSession.host = hostCol.modelData

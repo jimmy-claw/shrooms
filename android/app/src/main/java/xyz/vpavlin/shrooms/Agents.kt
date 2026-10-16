@@ -102,6 +102,8 @@ data class AgentHost(
     val lastSeen: Long = 0,
     /** Shown once under "all": every mesh it answers on (onMesh). */
     val meshes: List<String> = emptyList(),
+    /** Rounds of finding in a row it did not answer (HostCache). */
+    val missed: Int = 0,
 ) {
     /** The machine as [s] is reached: on the mesh it is there for, under "all". */
     fun of(s: AgentSession): AgentHost = if (s.at.isEmpty()) this else copy(address = s.at, mesh = s.atMesh)
@@ -111,20 +113,25 @@ data class AgentHost(
  * The list kept between rounds of finding, so a machine that misses a round —
  * a moment of a flaky network — stays where it is with its sessions as last
  * seen, rather than vanishing and coming back and moving everything under the
- * reader. Shown as unreachable once it has missed [STALE_MS]; forgotten after
- * [FORGET_MS].
+ * reader. Shown as offline once it has missed [MISSED] rounds in a row;
+ * forgotten after [FORGET_MS].
+ *
+ * By rounds, not by time: by time, every machine went grey while a session
+ * was open (no rounds then) and between rounds slower than the limit, most
+ * of the time (2026-10-16).
  */
 object HostCache {
-    const val STALE_MS = 25_000L
+    const val MISSED = 2
     const val FORGET_MS = 7L * 24 * 3600 * 1000
 
-    fun reachable(h: AgentHost, now: Long): Boolean = now - h.lastSeen < STALE_MS
+    fun reachable(h: AgentHost): Boolean = h.missed < MISSED
 
     /** This round's [found] hosts, and the [previous] ones that did not answer, by name and mesh. */
     fun merge(previous: List<AgentHost>, found: List<AgentHost>, now: Long): List<AgentHost> {
-        val fresh = found.map { it.copy(lastSeen = now) }
+        val fresh = found.map { it.copy(lastSeen = now, missed = 0) }
         val names = fresh.map { it.name + "@" + it.mesh }.toSet()
         val kept = previous.filter { it.name + "@" + it.mesh !in names && now - it.lastSeen < FORGET_MS }
+            .map { it.copy(missed = it.missed + 1) }
         return (fresh + kept).sortedWith(compareBy({ it.name }, { it.mesh }))
     }
 
@@ -133,7 +140,7 @@ object HostCache {
         meshesByPrefix(own, hosts).sortedByDescending { it.lastSeen }.distinctBy { it.name + "@" + it.mesh }
 
     fun encode(hosts: List<AgentHost>): String = org.json.JSONArray(hosts.map { h ->
-        JSONObject().put("name", h.name).put("mesh", h.mesh).put("address", h.address).put("seen", h.lastSeen)
+        JSONObject().put("name", h.name).put("mesh", h.mesh).put("address", h.address).put("seen", h.lastSeen).put("missed", h.missed)
             .put("sessions", org.json.JSONArray(h.sessions.map { s ->
                 JSONObject().put("name", s.name).put("dir", s.dir).put("state", s.state).put("pending", s.pending)
                     .put("running", s.running).put("last_seq", s.lastSeq).put("last_time", s.lastTime)
@@ -165,7 +172,7 @@ object HostCache {
                             ?: s.optString("cage").takeIf { s.has("cage") }?.let { SessionCage(it) },
                     )
                 },
-                lastSeen = h.optLong("seen"))
+                lastSeen = h.optLong("seen"), missed = h.optInt("missed"))
         }.filter { it.name.isNotEmpty() && AgentClient.isMeshAddress(it.address) }
     }.getOrDefault(emptyList())
 }
@@ -299,7 +306,9 @@ suspend fun discoverAgents(peers: List<Peer>, byName: List<String> = emptyList()
         // Known by machine AND mesh: by name alone, the laptop found on the
         // office mesh was never looked for on home (k11, 2026-10-16).
         val known = (found.map { it.name to meshPrefix(it.address) } + peers.map { it.name to meshPrefix(it.overlay) }).toSet()
-        val via = found.flatMap { h -> runCatching { AgentClient(h.address).peers() }.getOrDefault(emptyList()) }
+        // Every agent asked at once: one after another, a round took longer
+        // than the list waited before calling a machine offline.
+        val via = found.map { h -> async { runCatching { AgentClient(h.address).peers() }.getOrDefault(emptyList()) } }.awaitAll().flatten()
             .filter { (it.first to meshPrefix(it.third)) !in known }.distinctBy { it.first + "@" + meshPrefix(it.third) }
             .map { (name, mesh, addr) ->
                 async { runCatching { AgentHost(name, mesh, addr, AgentClient(addr).sessions(3000)) }.getOrNull() }
@@ -613,15 +622,15 @@ fun AgentsScreen(peers: List<Peer>, onClose: () -> Unit, initial: OpenSession? =
                             modifier = Modifier.padding(top = 14.dp))
                     }
                     itemsIndexed(starred, key = { _, p -> "s-" + p.first.name + "@" + p.first.mesh + "/" + p.second.name }) { _, (h, sess) ->
-                        SessionRow(sess, where = h.name, reachable = HostCache.reachable(h, now), unread = unread(h, sess), onStar = { star(h, sess) }, onLongPress = { deleting = h to sess }) {
+                        SessionRow(sess, where = h.name, reachable = HostCache.reachable(h), unread = unread(h, sess), onStar = { star(h, sess) }, onLongPress = { deleting = h to sess }) {
                             open = h.of(sess).let { OpenSession(it.address, h.name, it.mesh, sess.name) }
                         }
                     }
                 }
                 for (h in rest) {
-                    val up = HostCache.reachable(h, now)
+                    val up = HostCache.reachable(h)
                     item(key = "h-" + h.name + "@" + h.mesh) {
-                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 14.dp).alpha(if (up) 1f else 0.45f)) {
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 14.dp)) {
                             Box(Modifier.size(10.dp).border(2.dp, meshColour(h.mesh, meshes), CircleShape))
                             Spacer(Modifier.width(10.dp))
                             Text(h.name, style = MaterialTheme.typography.titleMedium, color = Palette.Bone)
@@ -629,8 +638,8 @@ fun AgentsScreen(peers: List<Peer>, onClose: () -> Unit, initial: OpenSession? =
                             Text(h.meshes.ifEmpty { listOf(h.mesh) }.joinToString(" · "), style = MaterialTheme.typography.labelSmall, color = meshColour(h.mesh, meshes))
                             if (!up) {
                                 Spacer(Modifier.width(8.dp))
-                                Text("unreachable · seen ${whenSaid(h.lastSeen)}", style = MaterialTheme.typography.labelSmall,
-                                    color = Palette.Ash, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text("offline · seen ${whenSaid(h.lastSeen)}", style = MaterialTheme.typography.labelSmall,
+                                    color = Palette.Amber, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             }
                             Spacer(Modifier.weight(1f))
                             if (up) Link("+ session") { creatingOn = h }
@@ -656,7 +665,7 @@ fun AgentsScreen(peers: List<Peer>, onClose: () -> Unit, initial: OpenSession? =
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 private fun SessionRow(s: AgentSession, where: String = "", reachable: Boolean = true, unread: Int = 0, onStar: () -> Unit, onLongPress: () -> Unit, onOpen: () -> Unit) {
     val (badge, colour) = when {
-        !reachable -> "unreachable" to Palette.Ash
+        !reachable -> "offline" to Palette.Amber
         else -> when (s.state) {
         "waiting" -> "NEEDS YOU" to Palette.Amber
         "working" -> "WORKING" to Palette.Phosphor
@@ -671,8 +680,10 @@ private fun SessionRow(s: AgentSession, where: String = "", reachable: Boolean =
             .clip(RoundedCornerShape(12.dp))
             .background(Palette.Panel.copy(alpha = 0.85f), RoundedCornerShape(12.dp))
             .border(1.dp, if (reachable && s.state == "waiting") Palette.Amber else Palette.Line, RoundedCornerShape(12.dp))
-            // Dimmed while it cannot work for want of quota, too.
-            .alpha(if (!reachable) 0.5f else if (s.limited != null) 0.6f else 1f),
+            // Readable whether or not its machine answers: "offline" says that
+            // (dimmed, it was most of the time, and hard to read). Dimmed only
+            // while it cannot work for want of quota.
+            .alpha(if (s.limited != null) 0.6f else 1f),
     ) {
     Column(
         Modifier.weight(1f)
