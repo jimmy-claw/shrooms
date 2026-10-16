@@ -303,16 +303,34 @@ func TestAnInterruptBeforeTheSessionExistsEndsTheWaitingTurn(t *testing.T) {
 	}
 }
 
-// Usage accumulates across turns of one session — the figure the mesh's
-// accounting reads is the session's, not the last turn's. Found by the
-// reviewer: nothing exercised two turns on one session, so overwriting instead
-// of adding would have shipped silently.
-func TestUsageAccumulatesAcrossTurns(t *testing.T) {
+// Usage is THIS TURN's, not a running total. Every other harness reports the
+// turn's own figures and the mesh reads them that way — rate.go divides
+// output_tokens by the turn's own generating time, so a cumulative figure
+// inflates the rate from the second turn on.
+//
+// This test first asserted the SUM, which is what the code did: found by the
+// reviewer asking whether nothing covered two turns, and then by measuring
+// opencode 1.19.2, where turn 1 answers in 231/out 3 and turn 2 in 7680/out 4
+// — the context being re-read, not 231+7680. A test that agrees with the bug
+// is worse than no test, and this one was.
+func TestUsageIsTheTurnsOwnAndNotARunningTotal(t *testing.T) {
 	_, s := newOpenCodeSession(t)
-	runTurn(t, s, "one")
-	got, _ := runTurn(t, s, "two")
 
-	last := string(got[len(got)-1].Data)
+	first, _ := runTurn(t, s, "one")
+	if got := usageOf(t, first); got != [3]uint64{100, 20, 5} {
+		t.Errorf("the first turn's usage: %v, want [100 20 5]", got)
+	}
+	second, _ := runTurn(t, s, "two")
+	// The fake answers every prompt with the same figures, so a running total
+	// reads 200/40/10 here and the turn's own reads 100/20/5.
+	if got := usageOf(t, second); got != [3]uint64{100, 20, 5} {
+		t.Errorf("the second turn's usage: %v, want [100 20 5] — the turn's own, not the session's total", got)
+	}
+}
+
+// usageOf reads {input, output, cache_read} from a turn's result event.
+func usageOf(t *testing.T, evs []Event) [3]uint64 {
+	t.Helper()
 	var res struct {
 		Usage struct {
 			Input  uint64 `json:"input_tokens"`
@@ -320,14 +338,11 @@ func TestUsageAccumulatesAcrossTurns(t *testing.T) {
 			Cache  uint64 `json:"cache_read_input_tokens"`
 		} `json:"usage"`
 	}
-	if err := json.Unmarshal([]byte(last), &res); err != nil {
-		t.Fatalf("the turn's result: %s", last)
+	last := evs[len(evs)-1]
+	if err := json.Unmarshal(last.Data, &res); err != nil {
+		t.Fatalf("the turn's result: %s", last.Data)
 	}
-	// The fake answers every prompt with 100 in / 20 out / 5 cached read.
-	if res.Usage.Input != 200 || res.Usage.Output != 40 || res.Usage.Cache != 10 {
-		t.Errorf("two turns of 100/20/5 should read 200/40/10, got %d/%d/%d: %s",
-			res.Usage.Input, res.Usage.Output, res.Usage.Cache, last)
-	}
+	return [3]uint64{res.Usage.Input, res.Usage.Output, res.Usage.Cache}
 }
 
 // A turn that fails is reported as a failed turn, not as a quiet success.

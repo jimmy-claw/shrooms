@@ -372,9 +372,18 @@ func (c *openCodec) Decode(line json.RawMessage) ([]json.RawMessage, []any) {
 				} `json:"usage"`
 			}
 			json.Unmarshal(m.Result, &res)
-			c.usage.Input += res.Usage.InputTokens
-			c.usage.Output += res.Usage.OutputTokens
-			c.usage.CacheRead += res.Usage.CachedReadTokens
+			// THIS TURN's figures, NOT a running total. Every other harness
+			// reports the turn's own, and the mesh reads them that way:
+			// rate.go divides output_tokens by the turn's OWN generating
+			// time, so a cumulative figure inflates the rate from the second
+			// turn on. Measured against opencode 1.19.2: turn 1 in 231 /
+			// out 3, turn 2 in 7680 / out 4 — the second is the context
+			// being re-read, not the sum of the two.
+			c.usage = rawUsage{
+				Input:     res.Usage.InputTokens,
+				Output:    res.Usage.OutputTokens,
+				CacheRead: res.Usage.CachedReadTokens,
+			}
 			sub := "success"
 			if m.Error != nil {
 				sub = "error_during_execution"
