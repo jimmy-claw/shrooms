@@ -517,3 +517,45 @@ func TestACageKeepsItsNetwork(t *testing.T) {
 		t.Fatalf("the cage is not started in a scope of its own, or not started again without its network: %q", cs)
 	}
 }
+
+// A cage's own limits: made with them, changed on the cage that exists (not
+// made again, so what was installed stays), refused for nonsense, and "" is
+// the machine's again.
+func TestACagesLimitsAreItsOwn(t *testing.T) {
+	podman, log := fakePodman(t, false)
+	m := newTestManager(t, t.TempDir())
+	m.Cages = &Cages{Podman: podman, Image: "localhost/bench:1", Memory: "4g", CPUs: "2", Nft: "nft"}
+	if _, err := m.CreateCaged("box", t.TempDir(), "claude", &Cage{Memory: "8g"}); err != nil {
+		t.Fatal(err)
+	}
+	s, _ := m.Get("box")
+	if err := s.Send("hello", "phone"); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, s, 0, func(e Event) bool { return strings.Contains(assistantText(e), "hello") })
+	cs := calls(t, log)
+	create := indexOf(cs, `^create `)
+	if create < 0 || !strings.Contains(cs[create], "--memory 8g ") || !strings.Contains(cs[create], "--cpus 2 ") {
+		t.Fatalf("not made with its own memory and the machine's CPUs: %q", cs)
+	}
+	in, err := m.SetCageLimits("box", "16g", "8", "phone")
+	if err != nil || in.Cage.Memory != "16g" || in.Cage.CPUs != "8" || in.Cage.MachineMemory != "4g" {
+		t.Fatalf("set: %v %+v", err, in.Cage)
+	}
+	cs = calls(t, log)
+	if indexOf(cs, `^update --memory 16g --cpus 8 `+s.cage.Container+`$`) < 0 || indexOf(cs[create+1:], `^(create|rm) `) >= 0 {
+		t.Fatalf("the cage was not changed where it is, or was made again: %q", cs[create:])
+	}
+	for _, bad := range [][2]string{{"lots", ""}, {"", "-1"}, {"", "100000"}, {"16g; rm", ""}} {
+		if _, err := m.SetCageLimits("box", bad[0], bad[1], "phone"); err == nil {
+			t.Errorf("%q / %q taken as limits", bad[0], bad[1])
+		}
+	}
+	if in, _ := m.SetCageLimits("box", "", "", "phone"); in.Cage.Memory != "" {
+		t.Errorf("back to the machine's: %+v", in.Cage)
+	}
+	m2 := newTestManager(t, m.dir)
+	if s2, _ := m2.Get("box"); s2 == nil || s2.cage.Memory != "" {
+		t.Error("the limits set are not what is kept")
+	}
+}

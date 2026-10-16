@@ -1492,6 +1492,18 @@ Item {
         root.cageOpts = c ? { image: c.image, nix: !!c.nix, github: !!c.github, shared: !!c.shared, sealed: !!c.sealed } : { image: "", nix: false, github: false, shared: false, sealed: false }
         cageDialog.open()
     }
+    // A caged session's memory and CPUs, set on its cage where it is.
+    function setCageLimits(memory, cpus) {
+        if (!agentOpen) return false
+        var r = agentCall("agentPost", [agentOpen.address, "/v1/sessions/" + agentOpen.session + "/cage/limits",
+                                        JSON.stringify({ memory: String(memory || "").trim(), cpus: String(cpus || "").trim() })])
+        if (r === null) return false
+        if (r.cage) root.agentInfo = Object.assign({}, root.agentInfo || {}, { cage: r.cage })
+        root.said = "session " + agentOpen.session + "'s cage: " + (r.cage && r.cage.memory ? r.cage.memory : "the machine's memory")
+                    + ", " + (r.cage && r.cage.cpus ? r.cage.cpus + " CPUs" : "the machine's CPUs")
+        root.saidBad = false
+        return true
+    }
     // Files between agents (ADR-048): who the open session takes files from, who
     // asked and was refused, and what it was sent.
     // An allow entry: MACHINE/SESSION, or MACHINE and a star for all of it. Pure.
@@ -3379,6 +3391,40 @@ Item {
                 color: cAsh; font.family: "monospace"; font.pixelSize: root.fs(11)
             }
             CageOptions { forSession: true; visible: root.cageStatus !== null; Layout.fillWidth: true }
+            // Its cage's memory and CPUs, set on the cage that exists: not made
+            // again, so what was installed in it stays (a nix, a toolchain).
+            ColumnLayout {
+                objectName: "cageLimits"
+                visible: !!(root.agentInfo && root.agentInfo.cage)
+                Layout.fillWidth: true
+                spacing: root.sz(6)
+                Text {
+                    Layout.fillWidth: true; wrapMode: Text.Wrap
+                    text: "RESOURCES — set on its cage as it is, nothing reinstalled. Empty is the machine's ("
+                          + (root.agentInfo && root.agentInfo.cage ? (root.agentInfo.cage.machine_memory || "no limit") + ", "
+                             + (root.agentInfo.cage.machine_cpus || "all") + " CPUs" : "") + ")."
+                    color: cAsh; font.family: "monospace"; font.pixelSize: root.fs(10)
+                }
+                RowLayout {
+                    spacing: root.sz(8)
+                    Text { text: "memory"; color: cAsh; font.family: "monospace"; font.pixelSize: root.fs(10) }
+                    TextField {
+                        id: limitMemory; objectName: "limitMemory"; Layout.preferredWidth: root.sz(90)
+                        text: root.agentInfo && root.agentInfo.cage ? (root.agentInfo.cage.memory || "") : ""
+                        placeholderText: "e.g. 16g"; placeholderTextColor: cAsh; color: cBone; font.family: "monospace"
+                        background: Rectangle { color: cPanel; border.color: limitMemory.activeFocus ? cPhosphor : cLine; radius: 6 }
+                    }
+                    Text { text: "CPUs"; color: cAsh; font.family: "monospace"; font.pixelSize: root.fs(10) }
+                    TextField {
+                        id: limitCpus; objectName: "limitCpus"; Layout.preferredWidth: root.sz(60)
+                        text: root.agentInfo && root.agentInfo.cage ? (root.agentInfo.cage.cpus || "") : ""
+                        placeholderText: "e.g. 8"; placeholderTextColor: cAsh; color: cBone; font.family: "monospace"
+                        background: Rectangle { color: cPanel; border.color: limitCpus.activeFocus ? cPhosphor : cLine; radius: 6 }
+                    }
+                    Lnk { text: "SET"; base: cPhosphor; font.pixelSize: root.fs(11)
+                          onClicked: root.setCageLimits(limitMemory.text, limitCpus.text) }
+                }
+            }
             Text {
                 visible: root.agentWorking
                 Layout.fillWidth: true; wrapMode: Text.Wrap

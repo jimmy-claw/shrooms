@@ -1333,6 +1333,26 @@ private fun SessionScreen(o: OpenSession, onBack: () -> Unit, onRenamed: (String
                         if (caged) "; a cage changed or left is deleted, with what was installed in it." else ".",
                         style = MaterialTheme.typography.bodySmall, color = Palette.Ash)
                     if (offer != null) CageOptions(offer, cageOpts) { cageOpts = it }
+                    // Its cage's memory and CPUs, set on the cage as it is: nothing reinstalled.
+                    info?.cage?.let { c ->
+                        var mem by remember(c) { mutableStateOf(c.memory) }
+                        var cpu by remember(c) { mutableStateOf(c.cpus) }
+                        Text("RESOURCES — set on its cage as it is, nothing reinstalled. Empty is the machine's (" +
+                            c.machineMemory.ifEmpty { "no limit" } + ", " + c.machineCpus.ifEmpty { "all" } + " CPUs).",
+                            style = MaterialTheme.typography.bodySmall, color = Palette.Ash)
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Box(Modifier.weight(1f)) { Field("memory, e.g. 16g", mem) { mem = it } }
+                            Box(Modifier.weight(1f)) { Field("CPUs", cpu) { cpu = it } }
+                            Text("SET", style = MaterialTheme.typography.labelSmall, color = Palette.Phosphor,
+                                modifier = Modifier.clickable {
+                                    scope.launch {
+                                        withContext(Dispatchers.IO) { runCatching { client.setCageLimits(o.session, mem.trim(), cpu.trim()) } }
+                                            .onSuccess { got -> if (got != null) info = info?.copy(cage = got); actionError = "" }
+                                            .onFailure { actionError = it.message ?: "could not set them" }
+                                    }
+                                }.padding(8.dp))
+                        }
+                    }
                     if (working) Text("It is working: move it once it is idle.", style = MaterialTheme.typography.bodySmall, color = Palette.Amber)
                 }
             },

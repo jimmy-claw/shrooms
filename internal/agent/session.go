@@ -641,7 +641,11 @@ func (s *Session) Info() Info {
 		AcceptFilesFrom: append([]string(nil), s.acceptFiles...), FileRequests: append([]FileAsk(nil), s.fileAsks...),
 		Meshes: append([]string(nil), s.meshes...), ModelSetting: s.modelSet}
 	if s.cage != nil {
-		in.Cage = &CageInfo{Image: s.cage.Image, Nix: s.cage.Nix, GitHub: s.cage.GitHub, Shared: s.sharedFor(), Sealed: s.cage.Sealed, Outbox: s.cage.Outbox}
+		in.Cage = &CageInfo{Image: s.cage.Image, Nix: s.cage.Nix, GitHub: s.cage.GitHub, Shared: s.sharedFor(), Sealed: s.cage.Sealed, Outbox: s.cage.Outbox,
+			Memory: s.cage.Memory, CPUs: s.cage.CPUs}
+		if s.m.Cages != nil {
+			in.Cage.MachineMemory, in.Cage.MachineCPUs = s.m.Cages.Memory, s.m.Cages.CPUs
+		}
 		if in.Cage.Image == "" && s.m.Cages != nil {
 			in.Cage.Image = s.m.Cages.Image
 		}

@@ -354,6 +354,9 @@ Item {
             Qt.callLater(function() {
                 console.error("COREEVENT read=" + (top.eventCalls > callsBefore) + " interval=" + evInterval + " subscribed=" + view.bridge.subscribed.join(","))
             })
+            // A cage's limits, set where it is.
+            view.setCageLimits(" 16g ", "8")
+            console.error("CAGELIMITS " + top.lastPostPath + " " + top.lastPost)
             // The model, chosen as the name is renamed: sent as a setting, and noted.
             view.setModelOpenSession(" venice/claude-haiku-5-5 ")
             console.error("MODELSET " + top.lastPostPath + " " + top.lastPost + " note=" + view.modelNote({ model: "haiku" }, "phone.office") + "|" + view.modelNote({ model: "" }, ""))

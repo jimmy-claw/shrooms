@@ -94,6 +94,9 @@ data class SessionCage(
     val sealed: Boolean = false, val outbox: String = "",
     /** The shared folder (ADR-057), at /shared; never for a sealed cage. */
     val shared: Boolean = false,
+    /** Its own memory and CPUs, "" for the machine's, which follow. */
+    val memory: String = "", val cpus: String = "",
+    val machineMemory: String = "", val machineCpus: String = "",
 ) {
     fun json(): JSONObject = JSONObject().apply {
         if (image.isNotEmpty()) put("image", image)
@@ -108,7 +111,9 @@ data class SessionCage(
         fun parse(o: JSONObject?): SessionCage? = o?.let {
             // The list names the folder's volume; a note says true.
             SessionCage(it.optString("image"), it.optBoolean("nix"), it.optBoolean("github"), it.optBoolean("sealed"), it.optString("outbox"),
-                shared = it.opt("shared").let { v -> v == true || (v is String && v.isNotEmpty()) })
+                shared = it.opt("shared").let { v -> v == true || (v is String && v.isNotEmpty()) },
+                memory = it.optString("memory"), cpus = it.optString("cpus"),
+                machineMemory = it.optString("machine_memory"), machineCpus = it.optString("machine_cpus"))
         }
     }
 }
@@ -281,6 +286,11 @@ class AgentClient(private val address: String) {
     fun setModel(session: String, model: String) {
         request("POST", "/v1/sessions/${enc(session)}/settings", JSONObject().put("model", model).toString())
     }
+
+    /** A caged session's memory and CPUs, "" for the machine's: set on its cage where it is. */
+    fun setCageLimits(session: String, memory: String, cpus: String): SessionCage? =
+        SessionCage.parse(JSONObject(request("POST", "/v1/sessions/${enc(session)}/cage/limits",
+            JSONObject().put("memory", memory).put("cpus", cpus).toString())).optJSONObject("cage"))
 
     fun setAcceptCaged(session: String, on: Boolean) {
         request("POST", "/v1/sessions/${enc(session)}/settings", JSONObject().put("accept_caged", on).toString())

@@ -65,6 +65,13 @@ class CageTest {
         assertFalse(parseOffer("""{"harnesses":[],"cage":{"available":true,"image":"a"}}""").cage!!.shared)
     }
 
+    // A cage's own limits, and the machine's, read from the list.
+    @Test fun aCagesLimitsAreRead() {
+        val c = SessionCage.parse(JSONObject("""{"image":"x","memory":"16g","cpus":"8","machine_memory":"4g","machine_cpus":"2"}"""))!!
+        assertEquals(listOf("16g", "8", "4g", "2"), listOf(c.memory, c.cpus, c.machineMemory, c.machineCpus))
+        assertEquals("", SessionCage.parse(JSONObject("""{"image":"x"}"""))!!.memory)
+    }
+
     @Test fun whetherASessionTakesCagedTasksIsRead() {
         val s = """{"sessions":[{"name":"a","accept_caged":true},{"name":"b"}]}"""
         val ss = org.json.JSONObject(s).getJSONArray("sessions")

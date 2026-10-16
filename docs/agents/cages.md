@@ -275,6 +275,22 @@ curl -X POST "http://[MESH-ADDRESS]:7387/v1/sessions/webapp/cage" \
   nix, GitHub and the shared folder are fixed when a container is made.
 - A note in the conversation records the move and who made it.
 
+## A cage's memory and CPUs
+
+A cage gets the machine's limits: 4 GB of memory and 2 CPUs unless the
+agent is started with others. A session can have its own. In the cage
+dialog, under RESOURCES, set its memory (`16g`, `512m`) and CPUs (`8`, up
+to the machine's), or leave them empty for the machine's. Over the API:
+
+```
+curl -X POST "http://[MESH-ADDRESS]:7387/v1/sessions/review/cage/limits" \
+  -d '{"memory": "16g", "cpus": "8"}'
+```
+
+They are set on the cage as it is (`podman update`), running or not. It is
+not made again, so what was installed in it stays: a nix, a toolchain, a
+build. A caged agent cannot change its own limits.
+
 ## What the agent inside sees
 
 **Files, at the machine's own paths:**

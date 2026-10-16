@@ -70,6 +70,7 @@ func Handler(log *slog.Logger, m *Manager, who Who) http.Handler {
 	mux.HandleFunc("POST /v1/sessions/{name}/restart", h.restart)
 	mux.HandleFunc("POST /v1/sessions/{name}/rename", h.rename)
 	mux.HandleFunc("POST /v1/sessions/{name}/cage", h.cage)
+	mux.HandleFunc("POST /v1/sessions/{name}/cage/limits", h.cageLimits)
 	// A2A (a2a.go): the machine's card, each session's, and JSON-RPC.
 	mux.HandleFunc("GET /.well-known/agent-card.json", h.machineCard)
 	mux.HandleFunc("GET /a2a/{name}/.well-known/agent-card.json", h.a2aCard)
@@ -689,6 +690,34 @@ func (h *handler) events(w http.ResponseWriter, r *http.Request) {
 
 // cage moves a session into a cage, changes it, or takes it out:
 // {"cage": {image?, nix?, github?}} or {"cage": null}.
+// cageLimits sets a caged session's memory and CPUs, without making its cage
+// again: {"memory":"16g","cpus":"8"}, "" for the machine's.
+func (h *handler) cageLimits(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Memory string `json:"memory"`
+		CPUs   string `json:"cpus"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		fail(w, http.StatusBadRequest, err)
+		return
+	}
+	// Not from a cage: a caged agent does not give itself more of the machine.
+	if r.Header.Get(cagedHeader) != "" {
+		fail(w, http.StatusForbidden, errors.New("a caged agent cannot change a cage's limits"))
+		return
+	}
+	if _, ok := h.session(w, r); !ok {
+		return
+	}
+	in, err := h.m.SetCageLimits(r.PathValue("name"), req.Memory, req.CPUs, h.caller(r))
+	if err != nil {
+		fail(w, http.StatusConflict, err)
+		return
+	}
+	h.log.Info("cage limits changed", "session", in.Name, "memory", req.Memory, "cpus", req.CPUs, "by", h.caller(r))
+	writeJSON(w, http.StatusOK, in)
+}
+
 func (h *handler) cage(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Cage *Cage `json:"cage"`

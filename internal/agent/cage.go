@@ -30,8 +30,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -70,6 +72,12 @@ type Cage struct {
 	// share, read-write at /shared (ADR-057): the one of its meshes, so a
 	// session limited to the home mesh shares nothing with an office one.
 	Shared bool `json:"shared,omitempty"`
+	// Memory and CPUs are this cage's limits, "" for the machine's (Cages);
+	// a podman memory ("16g") and a number of CPUs ("8"). Changed on a
+	// cage that exists without making it again (SetCageLimits), so what
+	// was installed in it stays.
+	Memory string `json:"memory,omitempty"`
+	CPUs   string `json:"cpus,omitempty"`
 	// Sealed: for code nobody vouches for (sealed.go, ADR-045) — the
 	// internet and nothing local, a credential of its own, no agents to
 	// ask, results through Outbox (a directory on the machine).
@@ -81,7 +89,8 @@ type Cage struct {
 // container name, and for a sealed one its outbox and none of the options
 // that widen a cage.
 func newCage(asked *Cage, session string) *Cage {
-	c := &Cage{Image: asked.Image, Nix: asked.Nix, GitHub: asked.GitHub, Shared: asked.Shared, Sealed: asked.Sealed, Container: newContainerName(session)}
+	c := &Cage{Image: asked.Image, Nix: asked.Nix, GitHub: asked.GitHub, Shared: asked.Shared, Sealed: asked.Sealed,
+		Memory: asked.Memory, CPUs: asked.CPUs, Container: newContainerName(session)}
 	if c.Sealed {
 		c.Nix, c.GitHub, c.Shared = false, false, false
 		c.Outbox = sealedOutbox(session)
@@ -132,8 +141,14 @@ type CageInfo struct {
 	GitHub bool   `json:"github,omitempty"`
 	// Shared: the volume of the folder it shares (ADR-057), "" for none.
 	Shared string `json:"shared,omitempty"`
-	Sealed bool   `json:"sealed,omitempty"`
-	Outbox string `json:"outbox,omitempty"`
+	// Memory and CPUs: its limits as set for it, "" for the machine's; and
+	// the machine's, for the apps to show what "" means.
+	Memory        string `json:"memory,omitempty"`
+	CPUs          string `json:"cpus,omitempty"`
+	MachineMemory string `json:"machine_memory,omitempty"`
+	MachineCPUs   string `json:"machine_cpus,omitempty"`
+	Sealed        bool   `json:"sealed,omitempty"`
+	Outbox        string `json:"outbox,omitempty"`
 }
 
 // CageStatus is what the apps are told: whether sessions can be caged here.
@@ -623,6 +638,23 @@ func (m *Manager) binOf(harness string) string {
 
 // createArgs makes a session's container.
 func (c *Cages) createArgs(name, session, image string, ms []mount, extra ...string) []string {
+	return c.createArgsWith(nil, name, session, image, ms, extra...)
+}
+
+// limits are a cage's memory and CPUs: its own, or the machine's.
+func (c *Cages) limits(cage *Cage) (memory, cpus string) {
+	memory, cpus = c.Memory, c.CPUs
+	if cage != nil && cage.Memory != "" {
+		memory = cage.Memory
+	}
+	if cage != nil && cage.CPUs != "" {
+		cpus = cage.CPUs
+	}
+	return memory, cpus
+}
+
+// createArgsWith makes a session's container, with its cage's own limits.
+func (c *Cages) createArgsWith(cage *Cage, name, session, image string, ms []mount, extra ...string) []string {
 	args := []string{"create", "--name", name, "--label", "xyz.vpavlin.shrooms.session=" + session,
 		// A cage made with its own agent's socket (ADR-044); one without is
 		// made again.
@@ -634,11 +666,12 @@ func (c *Cages) createArgs(name, session, image string, ms []mount, extra ...str
 		// Not in podman's defaults either; said so, since the rule that
 		// closes the agent port depends on it.
 		"--cap-drop", "NET_ADMIN"}
-	if c.Memory != "" {
-		args = append(args, "--memory", c.Memory)
+	memory, cpus := c.limits(cage)
+	if memory != "" {
+		args = append(args, "--memory", memory)
 	}
-	if c.CPUs != "" {
-		args = append(args, "--cpus", c.CPUs)
+	if cpus != "" {
+		args = append(args, "--cpus", cpus)
 	}
 	if c.Pids > 0 {
 		args = append(args, "--pids-limit", fmt.Sprint(c.Pids))
@@ -739,7 +772,7 @@ func (m *Manager) prepareCage(s *Session, bin string) (*cageRun, error) {
 			}
 			extra = append(extra, "--label", sharedLabel+"="+v)
 		}
-		if _, err := c.run(ctx, c.createArgs(name, s.Name(), image, ms, extra...)...); err != nil {
+		if _, err := c.run(ctx, c.createArgsWith(s.cage, name, s.Name(), image, ms, extra...)...); err != nil {
 			return nil, err
 		}
 	}
@@ -957,4 +990,65 @@ func (m *Manager) SetCage(name string, cage *Cage, by string) (Info, error) {
 		m.Cages.Prepare(m.Cages.image(cage), m.log.Info)
 	}
 	return s.Info(), err
+}
+
+var (
+	cageMemoryRe = regexp.MustCompile(`^[1-9][0-9]{0,6}[mMgG]$`)
+	cageCPUsRe   = regexp.MustCompile(`^[0-9]{1,3}(\.[0-9]{1,2})?$`)
+)
+
+// SetCageLimits sets a caged session's memory and CPUs; "" goes back to the
+// machine's. A cage that exists is changed where it is (podman update), not
+// made again: what was installed in it (a nix, a toolchain) stays. One that
+// does not exist yet is made with them.
+func (m *Manager) SetCageLimits(name, memory, cpus, by string) (Info, error) {
+	s, ok := m.Get(name)
+	if !ok {
+		return Info{}, fmt.Errorf("no session %s", name)
+	}
+	memory, cpus = strings.TrimSpace(memory), strings.TrimSpace(cpus)
+	if memory != "" && !cageMemoryRe.MatchString(memory) {
+		return Info{}, fmt.Errorf("%q is not a memory limit: say e.g. 16g or 512m", memory)
+	}
+	if cpus != "" {
+		n, err := strconv.ParseFloat(cpus, 64)
+		if !cageCPUsRe.MatchString(cpus) || err != nil || n <= 0 || n > float64(runtime.NumCPU()) {
+			return Info{}, fmt.Errorf("%q is not a number of CPUs between 0 and %d, this machine's", cpus, runtime.NumCPU())
+		}
+	}
+	s.mu.Lock()
+	if s.cage == nil {
+		s.mu.Unlock()
+		return Info{}, fmt.Errorf("session %s is not caged", name)
+	}
+	s.cage.Memory, s.cage.CPUs = memory, cpus
+	container := s.cage.Container
+	mem, cpu := m.Cages.limits(s.cage)
+	s.record("setting", by, map[string]string{"cage_memory": mem, "cage_cpus": cpu})
+	s.mu.Unlock()
+	m.mu.Lock()
+	err := m.save()
+	m.mu.Unlock()
+	if err != nil {
+		return Info{}, err
+	}
+	if m.Cages != nil {
+		ctx, cancel := context.WithTimeout(m.ctx, 30*time.Second)
+		defer cancel()
+		if _, err := m.Cages.run(ctx, "container", "exists", container); err == nil {
+			args := []string{"update"}
+			if mem != "" {
+				args = append(args, "--memory", mem)
+			}
+			if cpu != "" {
+				args = append(args, "--cpus", cpu)
+			}
+			if len(args) > 1 {
+				if _, err := m.Cages.run(ctx, append(args, container)...); err != nil {
+					return s.Info(), fmt.Errorf("kept for its next cage, but its cage now: %w", err)
+				}
+			}
+		}
+	}
+	return s.Info(), nil
 }
