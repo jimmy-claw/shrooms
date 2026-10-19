@@ -333,6 +333,10 @@ grep -q 'onMovementEnded: root.chatStick = root.followingEnd(chatList.atYEnd)' b
 # for as long as it runs, ~50 frames a second on the Duet tablet (2026-10-15).
 ! grep -n 'Animation.Infinite' basecamp-agents/Main.qml basecamp/Main.qml \
     || { echo "FAIL: an infinite animation repaints the whole window all the time; blink with a Timer"; exit 1; }
+# No attached ToolTips: a shared popup whose item a list rebuild destroyed
+# crashed Basecamp in QQuickPopup::overlayEvent (2026-10-19); showHint instead.
+! grep -n 'ToolTip\.' basecamp-agents/Main.qml basecamp/Main.qml \
+    || { echo "FAIL: an attached ToolTip can outlive its row and crash Basecamp; use root.showHint"; exit 1; }
 grep -q 'ackPath(row.id)' basecamp-agents/Main.qml \
     || { echo "FAIL: an ack does not go to the /v1/ path the core forwards"; exit 1; }
 

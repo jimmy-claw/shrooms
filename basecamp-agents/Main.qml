@@ -4293,6 +4293,37 @@ Item {
         }
     }
 
+    // What a tag says on hover, drawn in the view rather than as a ToolTip:
+    // a ToolTip is a popup Qt shares per window, and the list's rows are made
+    // again on every refresh; one made again under the mouse left the popup
+    // with an item that was gone, and the next mouse event crashed Basecamp
+    // in QQuickPopup::overlayEvent (2026-10-19).
+    property var hintFor: null
+    property string hintText: ""
+    property point hintAt: Qt.point(0, 0)
+    function showHint(item, text) {
+        if (text) {
+            root.hintFor = item
+            root.hintText = text
+            root.hintAt = item.mapToItem(root, 0, item.height + root.sz(4))
+        } else if (root.hintFor === item) {
+            root.hintFor = null
+            root.hintText = ""
+        }
+    }
+    Rectangle {
+        objectName: "hoverHint"
+        visible: root.hintText !== ""
+        z: 1000
+        x: Math.max(0, Math.min(root.hintAt.x, root.width - width))
+        y: Math.min(root.hintAt.y, root.height - height)
+        width: Math.min(hintLabel.implicitWidth, root.width * 0.6) + root.sz(12)
+        height: hintLabel.implicitHeight + root.sz(8)
+        radius: root.sz(4); color: cPanel; border.color: cLine; border.width: 1
+        Text { id: hintLabel; anchors.centerIn: parent; width: parent.width - root.sz(12); text: root.hintText
+               color: cBone; font.family: "monospace"; font.pixelSize: root.fs(10); wrapMode: Text.Wrap }
+    }
+
     // A session in a cage, by its name: a tag in the cage's violet, its
     // details (image, nix, GitHub login) on hover and in the line below.
     component CageTag: Text {
@@ -4306,9 +4337,9 @@ Item {
         font.family: "monospace"; font.pixelSize: root.fs(9); font.letterSpacing: 1; font.bold: true
         leftPadding: root.sz(5); rightPadding: root.sz(5); topPadding: root.sz(1); bottomPadding: root.sz(1)
         Rectangle { anchors.fill: parent; z: -1; radius: root.sz(4); color: "transparent"; border.color: ctag.color; border.width: 1 }
-        ToolTip.visible: ctagMouse.containsMouse && visible
-        ToolTip.text: sess && sess.cage ? "in a cage: " + root.cageWords(sess.cage) + (sess.cage.outbox ? "; results in " + sess.cage.outbox : "") : ""
-        MouseArea { id: ctagMouse; anchors.fill: parent; hoverEnabled: true; acceptedButtons: Qt.NoButton }
+        MouseArea { id: ctagMouse; anchors.fill: parent; hoverEnabled: true; acceptedButtons: Qt.NoButton
+                     onContainsMouseChanged: root.showHint(ctag, containsMouse ? (sess && sess.cage ? "in a cage: " + root.cageWords(sess.cage) + (sess.cage.outbox ? "; results in " + sess.cage.outbox : "") : "") : "") }
+        Component.onDestruction: root.showHint(ctag, "")
     }
 
     // Out of quota, by the name: when it comes back; why, on hover.
@@ -4322,9 +4353,9 @@ Item {
         font.family: "monospace"; font.pixelSize: root.fs(9); font.letterSpacing: 1; font.bold: true
         leftPadding: root.sz(5); rightPadding: root.sz(5); topPadding: root.sz(1); bottomPadding: root.sz(1)
         Rectangle { anchors.fill: parent; z: -1; radius: root.sz(4); color: "transparent"; border.color: cAmber; border.width: 1 }
-        ToolTip.visible: qtagMouse.containsMouse && visible
-        ToolTip.text: sess && sess.limited ? sess.limited.reason : ""
-        MouseArea { id: qtagMouse; anchors.fill: parent; hoverEnabled: true; acceptedButtons: Qt.NoButton }
+        MouseArea { id: qtagMouse; anchors.fill: parent; hoverEnabled: true; acceptedButtons: Qt.NoButton
+                     onContainsMouseChanged: root.showHint(qtag, containsMouse ? (sess && sess.limited ? sess.limited.reason : "") : "") }
+        Component.onDestruction: root.showHint(qtag, "")
     }
 
     // A lit dot, still: beside "WORKING" or "NEEDS YOU" it says enough, and
