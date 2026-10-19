@@ -98,7 +98,12 @@ TestCase {
     }
 
     function hostsWith(id, session, from, state, extra) {
-        return [{ name: "laptop", address: "fd00::1", sessions: [{ name: session }],
+        // `mesh` is not decoration: a host on the wire always carries it
+        // (AgentsHarness.qml builds its hosts the same way), and the session
+        // list reads it for the mesh tint and the mesh label. Leaving it out
+        // made Main.qml assign `undefined` to a QString at line 4471 on every
+        // scenario, and meant the mesh-label path was never exercised at all.
+        return [{ name: "laptop", mesh: "office", address: "fd00::1", sessions: [{ name: session }],
                   tasks: [{ id: id, status: { state: state, timestamp: "2026-10-18T11:00:00Z",
                                               message: { parts: [{ text: "which way?" }] } },
                             metadata: Object.assign({ "shrooms/session": session, "shrooms/from": from }, extra || {}) }] }]
