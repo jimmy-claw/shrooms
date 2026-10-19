@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -34,7 +33,7 @@ func TestAQuestionWaitsForItsAnswerEvenWithAutoApprove(t *testing.T) {
 		t.Fatalf("auto-approve answered the question: %+v", in)
 	}
 
-	srv := httptest.NewServer(Handler(slog.New(slog.DiscardHandler), m, nil))
+	srv := localServer(Handler(slog.New(slog.DiscardHandler), m, nil))
 	t.Cleanup(srv.Close)
 	post := func(body any) int {
 		b, _ := json.Marshal(body)

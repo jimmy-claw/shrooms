@@ -100,7 +100,10 @@ func Handler(log *slog.Logger, m *Manager, who Who) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !overSocket(r) {
 			if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
-				if a, err := netip.ParseAddr(host); err == nil && m.isSelf(a.Unmap()) {
+				// Loopback too, unless the mesh names it (only a test's does):
+				// a local process can bind ::1 or 127.0.0.1 and reach the
+				// agent's mesh address from it (auditor, 2026-10-19).
+				if a, err := netip.ParseAddr(host); err == nil && (m.isSelf(a.Unmap()) || a.Unmap().IsLoopback() && (who == nil || who(a.Unmap()) == "")) {
 					fail(w, http.StatusForbidden, errors.New("a request from this machine's own mesh address: on this machine, use the agent's socket ("+SocketPath()+")"))
 					return
 				}

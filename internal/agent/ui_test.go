@@ -6,7 +6,6 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -210,7 +209,7 @@ func TestUploadsLandWhereTheAgentDecides(t *testing.T) {
 	state := t.TempDir()
 	m := newTestManager(t, state)
 	m.Create("proj", t.TempDir())
-	srv := httptest.NewServer(Handler(slog.New(slog.DiscardHandler), m, nil))
+	srv := localServer(Handler(slog.New(slog.DiscardHandler), m, nil))
 	t.Cleanup(srv.Close)
 
 	for name, wantBase := range map[string]string{

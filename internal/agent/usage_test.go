@@ -247,7 +247,7 @@ func TestTheSessionListCarriesTheNewestLimits(t *testing.T) {
 	at := time.Now()
 	m.noteLimits(at, []byte(`{"type":"rate_limit_event","rate_limit_info":{"status":"allowed","rateLimitType":"five_hour","utilization":0.62,"resetsAt":1791332400,"unifiedWindows":{"five_hour":{"utilization":0.62,"resetsAt":1791332400}}}}`))
 	m.noteLimits(at.Add(-time.Hour), []byte(`{"type":"rate_limit_event","rate_limit_info":{"status":"rejected","rateLimitType":"five_hour","utilization":1,"resetsAt":1791314400}}`))
-	srv := httptest.NewServer(Handler(slog.New(slog.DiscardHandler), m, func(netip.Addr) string { return "" }))
+	srv := localServer(Handler(slog.New(slog.DiscardHandler), m, func(netip.Addr) string { return "" }))
 	defer srv.Close()
 	resp, err := http.Get(srv.URL + "/v1/sessions")
 	if err != nil {

@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -44,7 +43,7 @@ func TestAMessageSentTwiceIsSentOnce(t *testing.T) {
 	m := newTestManager(t, state)
 	m.Create("proj", t.TempDir())
 	s, _ := m.Get("proj")
-	srv := httptest.NewServer(Handler(slog.New(slog.DiscardHandler), m, nil))
+	srv := localServer(Handler(slog.New(slog.DiscardHandler), m, nil))
 	t.Cleanup(srv.Close)
 	url := srv.URL + "/v1/sessions/proj/messages"
 
@@ -85,7 +84,7 @@ func TestAVoiceNoteIsSentAsWhatWasSaid(t *testing.T) {
 	m.Create("proj", t.TempDir())
 	s, _ := m.Get("proj")
 	m.STT, _ = fakeTools(t, "4")
-	srv := httptest.NewServer(Handler(slog.New(slog.DiscardHandler), m, nil))
+	srv := localServer(Handler(slog.New(slog.DiscardHandler), m, nil))
 	t.Cleanup(srv.Close)
 	url := srv.URL + "/v1/sessions/proj/voice?name=note.m4a&id=v-1"
 
@@ -127,7 +126,7 @@ func TestAVoiceNoteThatFailsSaysSo(t *testing.T) {
 	os.WriteFile(bad, []byte("#!/bin/sh\necho 'model not found' >&2\nexit 3\n"), 0o755)
 	tr.Bin = bad
 	m.STT = tr
-	srv := httptest.NewServer(Handler(slog.New(slog.DiscardHandler), m, nil))
+	srv := localServer(Handler(slog.New(slog.DiscardHandler), m, nil))
 	t.Cleanup(srv.Close)
 	r, _ := http.Post(srv.URL+"/v1/sessions/proj/voice?name=note.m4a&id=v-2", "audio/mp4", strings.NewReader("aac"))
 	r.Body.Close()
@@ -167,7 +166,7 @@ func TestAnEmptyTranscriptIsAFailure(t *testing.T) {
 	os.WriteFile(quiet, []byte("#!/bin/sh\necho '   '\n"), 0o755)
 	tr.Bin = quiet
 	m.STT = tr
-	srv := httptest.NewServer(Handler(slog.New(slog.DiscardHandler), m, nil))
+	srv := localServer(Handler(slog.New(slog.DiscardHandler), m, nil))
 	t.Cleanup(srv.Close)
 	r, _ := http.Post(srv.URL+"/v1/sessions/proj/voice?name=note.m4a&id=v-3", "audio/mp4", strings.NewReader("aac"))
 	r.Body.Close()
@@ -212,7 +211,7 @@ func TestAMessageAfterAVoiceNoteWaitsForIt(t *testing.T) {
 	s, _ := m.Get("proj")
 	var open func()
 	m.STT, open = slowSTT(t, false)
-	srv := httptest.NewServer(Handler(slog.New(slog.DiscardHandler), m, nil))
+	srv := localServer(Handler(slog.New(slog.DiscardHandler), m, nil))
 	t.Cleanup(srv.Close)
 
 	r, err := http.Post(srv.URL+"/v1/sessions/proj/voice?name=note.m4a&id=v-1", "audio/mp4", strings.NewReader("aac"))
@@ -244,7 +243,7 @@ func TestAFailedVoiceNoteDoesNotHoldUpTheNext(t *testing.T) {
 	s, _ := m.Get("proj")
 	var open func()
 	m.STT, open = slowSTT(t, true)
-	srv := httptest.NewServer(Handler(slog.New(slog.DiscardHandler), m, nil))
+	srv := localServer(Handler(slog.New(slog.DiscardHandler), m, nil))
 	t.Cleanup(srv.Close)
 
 	r, err := http.Post(srv.URL+"/v1/sessions/proj/voice?name=note.m4a&id=v-1", "audio/mp4", strings.NewReader("aac"))

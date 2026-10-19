@@ -508,7 +508,7 @@ func TestEventsCanStartAtTheTail(t *testing.T) {
 		last = waitFor(t, s, last, func(e Event) bool { return claudeType(e) == "result/success" }).Seq
 	}
 	all, _ := s.Since(0)
-	srv := httptest.NewServer(Handler(slog.New(slog.DiscardHandler), m, nil))
+	srv := localServer(Handler(slog.New(slog.DiscardHandler), m, nil))
 	t.Cleanup(srv.Close)
 
 	tail := readSSE(t, srv.URL+"/v1/sessions/proj/events?tail=3", "", 0)

@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -221,7 +220,7 @@ func TestHarnessesOverHTTP(t *testing.T) {
 	m := newTestManager(t, t.TempDir())
 	m.Register(Pi{}, fakePiBin(t))
 	m.Register(OpenCode{}, fakeOpenCodeBin(t))
-	srv := httptest.NewServer(Handler(slog.New(slog.DiscardHandler), m, nil))
+	srv := localServer(Handler(slog.New(slog.DiscardHandler), m, nil))
 	t.Cleanup(srv.Close)
 
 	r, err := http.Get(srv.URL + "/v1/harnesses")
@@ -294,7 +293,7 @@ func TestAStarIsKept(t *testing.T) {
 	state := t.TempDir()
 	m := newTestManager(t, state)
 	m.Create("proj", t.TempDir())
-	srv := httptest.NewServer(Handler(slog.New(slog.DiscardHandler), m, nil))
+	srv := localServer(Handler(slog.New(slog.DiscardHandler), m, nil))
 	t.Cleanup(srv.Close)
 	r, err := http.Post(srv.URL+"/v1/sessions/proj/settings", "application/json", strings.NewReader(`{"starred":true}`))
 	if err != nil {

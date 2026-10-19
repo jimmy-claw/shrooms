@@ -8,7 +8,6 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
-	"net/http/httptest"
 	"net/netip"
 	"path/filepath"
 	"strings"
@@ -25,7 +24,7 @@ func TestACageReachesAgentsOnlyThroughItsOwn(t *testing.T) {
 	boxed, _ := laptop.Get("boxed")
 	self, pi5 := netip.MustParseAddr("fd00::1"), netip.MustParseAddr("fd00::2")
 	laptop.Machines = func() ([]Machine, error) { return []Machine{{"laptop", self}, {"pi5", pi5}}, nil }
-	own := httptest.NewServer(Handler(slog.New(slog.DiscardHandler), laptop, func(netip.Addr) string { return "" }))
+	own := localServer(Handler(slog.New(slog.DiscardHandler), laptop, func(netip.Addr) string { return "" }))
 	t.Cleanup(own.Close)
 	laptop.agentAt = func(a netip.Addr) string {
 		if a == pi5 {

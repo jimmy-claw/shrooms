@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"net/http/httptest"
 	"net/url"
 	"os"
 	"testing"
@@ -36,7 +35,7 @@ func TestSearchFindsTheWholeConversation(t *testing.T) {
 	fmt.Fprintf(f, `{"type":"assistant","timestamp":%q,"message":{"content":[{"type":"text","text":"echo: restart the relay please"}]}}`+"\n", now)
 	f.Close()
 
-	srv := httptest.NewServer(Handler(slog.New(slog.DiscardHandler), m, nil))
+	srv := localServer(Handler(slog.New(slog.DiscardHandler), m, nil))
 	t.Cleanup(srv.Close)
 	search := func(q string) []Found {
 		t.Helper()

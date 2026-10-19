@@ -106,7 +106,9 @@ func TestACallerIsHereOrOnAMesh(t *testing.T) {
 	for addr, want := range map[string]string{
 		// This machine's own mesh address is not here: any local user can
 		// connect from it (audit F-24); here is the socket.
-		"127.0.0.1:1": "here", "[fd00::1]:1": "nobody", "[fd00::7]:1": "office", "[fd00::9]:1": "nobody",
+		// Nor loopback: a local process can bind it (auditor, 2026-10-19).
+		"127.0.0.1:1": "nobody", "[::1]:1": "nobody", "[::ffff:127.0.0.1]:1": "nobody",
+		"[fd00::1]:1": "nobody", "[fd00::7]:1": "office", "[fd00::9]:1": "nobody",
 	} {
 		mesh, local := h.from(&http.Request{RemoteAddr: addr})
 		got := map[bool]string{true: "here"}[local]
@@ -128,7 +130,8 @@ func TestTheAgentRefusesItsOwnMeshAddress(t *testing.T) {
 	m := newTestManager(t, t.TempDir())
 	m.Meshes = func() []MeshInfo { return []MeshInfo{{"office", netip.MustParseAddr("fd00::1")}} }
 	h := Handler(slog.New(slog.DiscardHandler), m, nil)
-	for from, want := range map[string]int{"[fd00::1]:4444": http.StatusForbidden, "[fd00::7]:4444": http.StatusOK} {
+	for from, want := range map[string]int{"[fd00::1]:4444": http.StatusForbidden, "[fd00::7]:4444": http.StatusOK,
+		"[::1]:4444": http.StatusForbidden, "[::ffff:127.0.0.1]:4444": http.StatusForbidden, "127.0.0.1:4444": http.StatusForbidden} {
 		rec := httptest.NewRecorder()
 		req := httptest.NewRequest("GET", "/v1/sessions", nil)
 		req.RemoteAddr = from

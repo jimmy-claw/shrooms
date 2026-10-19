@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"math"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -114,7 +113,7 @@ func TestTheWindowFollowsTheClip(t *testing.T) {
 func TestTheTranscribeEndpoint(t *testing.T) {
 	m := newTestManager(t, t.TempDir())
 	m.Create("proj", t.TempDir())
-	srv := httptest.NewServer(Handler(slog.New(slog.DiscardHandler), m, nil))
+	srv := localServer(Handler(slog.New(slog.DiscardHandler), m, nil))
 	t.Cleanup(srv.Close)
 	post := func() *http.Response {
 		r, err := http.Post(srv.URL+"/v1/sessions/proj/transcribe?name=note.m4a&lang=cs", "audio/mp4", strings.NewReader("aac"))

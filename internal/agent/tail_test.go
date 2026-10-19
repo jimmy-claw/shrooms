@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 )
@@ -17,7 +16,7 @@ func TestTheListCarriesTheLastLines(t *testing.T) {
 	s, _ := m.Get("proj")
 	s.Send("hello\nsecond line", "")
 	waitFor(t, s, 0, func(e Event) bool { return claudeType(e) == "result/success" })
-	srv := httptest.NewServer(Handler(slog.New(slog.DiscardHandler), m, nil))
+	srv := localServer(Handler(slog.New(slog.DiscardHandler), m, nil))
 	defer srv.Close()
 	get := func(q string) []Info {
 		resp, err := http.Get(srv.URL + "/v1/sessions" + q)

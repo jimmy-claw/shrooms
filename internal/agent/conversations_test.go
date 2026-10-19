@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -174,7 +173,7 @@ func TestTheConversationsAPI(t *testing.T) {
 	work := t.TempDir()
 	writeTranscript(t, base, "api-1", work, "q", "a", time.Now())
 	m := newTestManager(t, t.TempDir())
-	srv := httptest.NewServer(Handler(slog.New(slog.DiscardHandler), m, nil))
+	srv := localServer(Handler(slog.New(slog.DiscardHandler), m, nil))
 	t.Cleanup(srv.Close)
 
 	r, _ := http.Get(srv.URL + "/v1/conversations")

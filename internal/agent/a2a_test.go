@@ -25,7 +25,7 @@ func newA2A(t *testing.T) a2aRig {
 	m := newTestManager(t, t.TempDir())
 	m.Create("proj", t.TempDir())
 	remote := httptest.NewServer(Handler(slog.New(slog.DiscardHandler), m, func(netip.Addr) string { return "pi5.default" }))
-	local := httptest.NewServer(Handler(slog.New(slog.DiscardHandler), m, func(netip.Addr) string { return "" }))
+	local := localServer(Handler(slog.New(slog.DiscardHandler), m, func(netip.Addr) string { return "" }))
 	t.Cleanup(remote.Close)
 	t.Cleanup(local.Close)
 	return a2aRig{m, remote, local}

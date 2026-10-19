@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -34,10 +35,14 @@ func TestTheAgentsMetrics(t *testing.T) {
 		rec := httptest.NewRecorder()
 		req := httptest.NewRequest("GET", "/metrics", nil)
 		req.RemoteAddr = remote
+		if remote == "socket" { // this machine's user, as the socket marks it
+			req = req.WithContext(context.WithValue(req.Context(), overSocketKey{}, true))
+			req.RemoteAddr = "@"
+		}
 		h.metrics(rec, req)
 		return rec.Body.String()
 	}
-	local := get("127.0.0.1:1234")
+	local := get("socket")
 	for _, want := range []string{
 		`shrooms_agent_tokens_total{machine="`, `session="pi-proj",harness="pi",model="local/qwen3.5:0.8b",provider="local",kind="output"}`,
 		`shrooms_agent_turns_total{`, `shrooms_agent_cost_usd_total{`, `shrooms_agent_sessions{machine=`, `state="idle"} 2`,
