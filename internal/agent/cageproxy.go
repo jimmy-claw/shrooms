@@ -20,6 +20,7 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -129,8 +130,22 @@ func proxyAllowed(method, path, rpc string) bool {
 		return true // its own machine and session only (cageProxy)
 	case method == http.MethodPost && isDrop(path):
 		return true // a file to another session, named as this one's (drop.go)
+	case isSchedule(path) && (method == http.MethodGet || method == http.MethodPost || method == http.MethodDelete):
+		return true // its own schedule, on its own machine (cageProxy, ADR-064)
 	}
 	return false
+}
+
+// isSchedule is a session's schedule, /v1/sessions/{name}/schedule and one
+// routine under it; the cage's proxy names its own session there whatever
+// the cage wrote.
+func isSchedule(path string) bool {
+	rest, ok := strings.CutPrefix(path, "/v1/sessions/")
+	if !ok {
+		return false
+	}
+	_, tail, ok := strings.Cut(rest, "/")
+	return ok && (tail == "schedule" || strings.HasPrefix(tail, "schedule/") && !strings.Contains(tail[len("schedule/"):], "/"))
 }
 
 // isTaskUpdate is task_update's path, /v1/tasks/{id}, and nothing under it:
@@ -218,6 +233,15 @@ func (m *Manager) cageProxy(s *Session) http.Handler {
 			}
 			u["session"] = s.Name()
 			body, _ = json.Marshal(u)
+		case isSchedule(path):
+			// Its own calendar only: on this machine, as its own session.
+			if addr != self.Addr {
+				fail(w, http.StatusForbidden, errors.New("a cage reaches only its own schedule, on its own machine"))
+				return
+			}
+			rest := strings.TrimPrefix(path, "/v1/sessions/")
+			_, tail, _ := strings.Cut(rest, "/")
+			path = "/v1/sessions/" + url.PathEscape(s.Name()) + "/" + tail
 		case rpc.Method == "SendMessage" || rpc.Method == "SendStreamingMessage":
 			// The asker, as this agent knows it, not as the cage says.
 			if body, err = nameAsker(body, self.Name+"/"+s.Name()); err != nil {

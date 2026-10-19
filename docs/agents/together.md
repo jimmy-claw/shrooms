@@ -37,7 +37,7 @@ same task, not a second one. A renamed session keeps its tasks.
 You do nothing to switch this on. Each session starts with:
 
 - **An MCP server called `shrooms`** (the agent's own binary, run as
-  `shrooms-agent mcp`), with six tools:
+  `shrooms-agent mcp`), with seven tools:
 
 | Tool | Who uses it | What it does |
 |---|---|---|
@@ -47,6 +47,7 @@ You do nothing to switch this on. Each session starts with:
 | `task_update` | the worker | finishes a task: `done` with a summary, `blocked` with what it needs, or `failed` with why |
 | `task_ack` | the asker | says it has what it needed |
 | `send_file` | anyone | sends a file (`path`, with a `note`) to `MACHINE/SESSION`, at most 100 MB; kept only if that session takes files from this one ([Files between agents](../agents-files.md)) |
+| `schedule` | the session | its own routines, in the Scala calendar it shares with you: list, add, change, remove; you are told of every change ([ADR-064](../adr/064-an-agents-schedule-is-its-own-scala-calendar.md)) |
 
 - **A note in its system prompt**: which session and machine it is, where the
   tools are, how tasks work, and the manners. Say who you are, what you need

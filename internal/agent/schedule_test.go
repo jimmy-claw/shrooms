@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -27,6 +28,30 @@ func (f *fakeCal) Due(_ string, from, to time.Time, _ string) ([]Occurrence, err
 	return out, nil
 }
 func (f *fakeCal) PostRun(_, _ string, r RunRecord) error { f.runs = append(f.runs, r); return nil }
+func (f *fakeCal) Put(_ string, e CalEvent) (string, error) {
+	e.Author = session
+	if e.ID == "" {
+		e.ID = fmt.Sprintf("e%d", len(f.state.Events)+1)
+		f.state.Events = append(f.state.Events, e)
+		return e.ID, nil
+	}
+	for i := range f.state.Events {
+		if f.state.Events[i].ID == e.ID {
+			f.state.Events[i] = e
+			return e.ID, nil
+		}
+	}
+	return "", fmt.Errorf("no routine %s", e.ID)
+}
+func (f *fakeCal) Delete(_, id string) error {
+	for i := range f.state.Events {
+		if f.state.Events[i].ID == id {
+			f.state.Events = append(f.state.Events[:i], f.state.Events[i+1:]...)
+			return nil
+		}
+	}
+	return fmt.Errorf("no routine %s", id)
+}
 
 const (
 	owner   = "0xowner"
@@ -211,4 +236,56 @@ func sinceAll(s *Session) []Event {
 	evs, ch := s.Since(0)
 	s.Unsubscribe(ch)
 	return evs
+}
+
+// Through the agent's API, a session sets its own routines; nonsense is
+// refused; a session with no calendar says so. The owner is told of the
+// session's change at the next look (TestChangesTheOwnerDidNotMakeAreTold).
+func TestASessionSetsItsOwnRoutines(t *testing.T) {
+	cal := &fakeCal{state: goodState()}
+	m, s := newScheduled(t, cal)
+	start := time.Date(2026, 10, 20, 8, 0, 0, 0, time.UTC)
+	id, err := m.ScheduleSet(s, Routine{Title: "PRs", Start: start, Freq: "daily", Interval: 2, Prompt: "review"})
+	if err != nil || len(cal.state.Events) != 1 {
+		t.Fatalf("add: %v %+v", err, cal.state.Events)
+	}
+	e := cal.state.Events[0]
+	if e.Recur == nil || e.Recur.Freq != "daily" || e.Recur.Interval != 2 || e.Fields["prompt"] != "review" || e.Fields["enabled"] != true {
+		t.Fatalf("as written: %+v", e)
+	}
+	off := false
+	if _, err := m.ScheduleSet(s, Routine{ID: id, Title: "PRs", Start: start, Prompt: "review", Enabled: &off}); err != nil ||
+		cal.state.Events[0].Fields["enabled"] != false || cal.state.Events[0].Recur != nil {
+		t.Fatalf("change: %v %+v", err, cal.state.Events[0])
+	}
+	for _, bad := range []Routine{{Start: start, Prompt: "x"}, {Title: "x", Prompt: "x"}, {Title: "x", Start: start},
+		{Title: "x", Start: start, Prompt: "x", Freq: "hourly"}} {
+		if _, err := m.ScheduleSet(s, bad); err == nil {
+			t.Errorf("%+v taken", bad)
+		}
+	}
+	if err := m.ScheduleRemove(s, id); err != nil || len(cal.state.Events) != 0 {
+		t.Fatalf("remove: %v", err)
+	}
+	m.Create("other", t.TempDir())
+	o, _ := m.Get("other")
+	if _, err := m.ScheduleSet(o, Routine{Title: "x", Start: start, Prompt: "x"}); err == nil || !strings.Contains(err.Error(), "no schedule yet") {
+		t.Errorf("a session without a calendar: %v", err)
+	}
+}
+
+// A cage reaches only its own schedule: whatever session it names, its proxy
+// names its own; and only these paths.
+func TestACageReachesOnlyItsOwnSchedule(t *testing.T) {
+	for path, want := range map[string]bool{
+		"/v1/sessions/proj/schedule":      true,
+		"/v1/sessions/other/schedule/e1":  true,
+		"/v1/sessions/proj/schedule/e1/x": false,
+		"/v1/sessions/proj/settings":      false,
+		"/v1/sessions/proj/schedulex":     false,
+	} {
+		if isSchedule(path) != want {
+			t.Errorf("%s: isSchedule %v", path, !want)
+		}
+	}
 }

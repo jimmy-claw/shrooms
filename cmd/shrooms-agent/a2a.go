@@ -556,3 +556,85 @@ func flagsFirst(args []string, booleans ...string) []string {
 	}
 	return append(flags, words...)
 }
+
+// schedule is the schedule tool: this session's own routines, through its
+// own machine's agent (in a cage, its socket names this session whatever is
+// written here).
+func (c a2aClient) schedule(a mcpArgs) (string, error) {
+	me := os.Getenv("SHROOMS_AGENT_SESSION")
+	if me == "" {
+		return "", fmt.Errorf("schedule is for a session's own routines, and this is not run by one")
+	}
+	ms, err := c.peers()
+	if err != nil || len(ms) == 0 {
+		return "", fmt.Errorf("this machine's agent: %v", err)
+	}
+	base := c.base(ms[0].Addr) + "/v1/sessions/" + url.PathEscape(me) + "/schedule"
+	hc := c.http(30 * time.Second)
+	var req *http.Request
+	switch a.Action {
+	case "list":
+		req, _ = http.NewRequest(http.MethodGet, base, nil)
+	case "add", "change":
+		if a.Action == "change" && a.ID == "" {
+			return "", fmt.Errorf("change needs the routine's id (from list)")
+		}
+		start, err := time.Parse(time.RFC3339, a.Start)
+		if err != nil {
+			return "", fmt.Errorf("start %q: RFC 3339, e.g. 2026-10-20T08:00:00+02:00", a.Start)
+		}
+		id := a.ID
+		if a.Action == "add" {
+			id = ""
+		}
+		body, _ := json.Marshal(agent.Routine{ID: id, Title: a.Title, Start: start, Freq: a.Freq, Interval: a.Interval,
+			Prompt: a.Prompt, Checks: a.Checks, Enabled: a.Enabled})
+		req, _ = http.NewRequest(http.MethodPost, base, bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+	case "remove":
+		if a.ID == "" {
+			return "", fmt.Errorf("remove needs the routine's id (from list)")
+		}
+		req, _ = http.NewRequest(http.MethodDelete, base+"/"+url.PathEscape(a.ID), nil)
+	default:
+		return "", fmt.Errorf("schedule: action is list, add, change or remove")
+	}
+	resp, err := hc.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	b, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if resp.StatusCode >= 300 {
+		return "", fmt.Errorf("schedule: %s: %.300s", resp.Status, b)
+	}
+	switch a.Action {
+	case "list":
+		var d struct {
+			Routines []agent.CalEvent
+			Paused   string
+		}
+		json.Unmarshal(b, &d)
+		var out strings.Builder
+		if d.Paused != "" {
+			out.WriteString("NOT RUNNING: " + d.Paused + "\n")
+		}
+		if len(d.Routines) == 0 {
+			out.WriteString("no routines yet\n")
+		}
+		for _, e := range d.Routines {
+			every := "once"
+			if e.Recur != nil {
+				every = fmt.Sprintf("%s every %d", e.Recur.Freq, e.Recur.Interval)
+			}
+			p, _ := e.Fields["prompt"].(string)
+			fmt.Fprintf(&out, "%s\t%s — from %s, %s: %s\n", e.ID, e.Title, e.Start.Format(time.RFC3339), every, p)
+		}
+		return out.String(), nil
+	case "remove":
+		return "removed; your owner is told", nil
+	}
+	var d struct{ ID string }
+	json.Unmarshal(b, &d)
+	return "set: " + d.ID + "; your owner is told", nil
+}

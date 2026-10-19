@@ -29,7 +29,16 @@ type CalEvent struct {
 	ID     string         `json:"id"`
 	Title  string         `json:"title"`
 	Author string         `json:"author"` // who last wrote it, its signed address
+	Start  time.Time      `json:"start"`  // the first time it is due
+	Recur  *Recur         `json:"recur,omitempty"`
 	Fields map[string]any `json:"fields"` // the schema's fields: prompt, checks, …
+}
+
+// Recur is Scala's recurrence: every Interval Freq, until Until.
+type Recur struct {
+	Freq     string    `json:"freq"` // daily, weekly, monthly, yearly
+	Interval int       `json:"interval"`
+	Until    time.Time `json:"until,omitzero"`
 }
 
 func (e CalEvent) text(k string) string {
@@ -87,6 +96,111 @@ type Calendar interface {
 	State(calID string) (CalState, error)
 	Due(calID string, from, to time.Time, tz string) ([]Occurrence, error)
 	PostRun(calID, eventID string, r RunRecord) error
+	// Put writes an event, signed as the session (a new one when e.ID is
+	// ""), and returns its id; Delete removes one.
+	Put(calID string, e CalEvent) (string, error)
+	Delete(calID, eventID string) error
+}
+
+// Routine is what a session (its schedule tool) or the owner (the apps) asks
+// for: an event in the session's calendar.
+type Routine struct {
+	ID         string    `json:"id,omitempty"`
+	Title      string    `json:"title"`
+	Start      time.Time `json:"start"`
+	Freq       string    `json:"freq,omitempty"` // daily, weekly, monthly, yearly; "" for once
+	Interval   int       `json:"interval,omitempty"`
+	Prompt     string    `json:"prompt,omitempty"`
+	Checks     string    `json:"checks,omitempty"`
+	Enabled    *bool     `json:"enabled,omitempty"`
+	MaxCost    float64   `json:"maxCost,omitempty"`
+	TimeoutMin int       `json:"timeoutMin,omitempty"`
+}
+
+func (r Routine) event() (CalEvent, error) {
+	e := CalEvent{ID: r.ID, Title: strings.TrimSpace(r.Title), Start: r.Start, Fields: map[string]any{}}
+	switch {
+	case e.Title == "":
+		return e, errors.New("a routine needs a title")
+	case r.Start.IsZero():
+		return e, errors.New("a routine needs a start: when it is first due")
+	case strings.TrimSpace(r.Prompt) == "" && strings.TrimSpace(r.Checks) == "":
+		return e, errors.New("a routine needs a prompt, checks, or both")
+	}
+	if r.Freq != "" {
+		switch r.Freq {
+		case "daily", "weekly", "monthly", "yearly":
+		default:
+			return e, fmt.Errorf("%q: every is daily, weekly, monthly or yearly", r.Freq)
+		}
+		iv := r.Interval
+		if iv < 1 {
+			iv = 1
+		}
+		e.Recur = &Recur{Freq: r.Freq, Interval: iv}
+	}
+	e.Fields["prompt"] = strings.TrimSpace(r.Prompt)
+	e.Fields["checks"] = strings.TrimSpace(r.Checks)
+	e.Fields["enabled"] = r.Enabled == nil || *r.Enabled
+	if r.MaxCost > 0 {
+		e.Fields["maxCost"] = r.MaxCost
+	}
+	if r.TimeoutMin > 0 {
+		e.Fields["timeoutMin"] = float64(r.TimeoutMin)
+	}
+	return e, nil
+}
+
+// calendarOf is a session's calendar, or why it has none.
+func (m *Manager) calendarOf(s *Session) (SessionCalendar, error) {
+	sc := m.Schedules
+	if sc == nil || sc.Cal == nil {
+		return SessionCalendar{}, errors.New("this machine runs no schedules (no Scala here)")
+	}
+	cal, ok := sc.Sessions[s.Name()]
+	if !ok {
+		return SessionCalendar{}, fmt.Errorf("session %s has no schedule yet: its owner gives it one from the apps", s.Name())
+	}
+	return cal, nil
+}
+
+// ScheduleList is a session's routines, and why they do not run, if they do not.
+func (m *Manager) ScheduleList(s *Session) ([]CalEvent, string, error) {
+	cal, err := m.calendarOf(s)
+	if err != nil {
+		return nil, "", err
+	}
+	st, err := m.Schedules.Cal.State(cal.Calendar)
+	if err != nil {
+		return nil, "", err
+	}
+	paused := ""
+	if why := m.Schedules.runnable(st, cal.Self); why != nil {
+		paused = why.Error()
+	}
+	return st.Events, paused, nil
+}
+
+// ScheduleSet adds a routine to a session's calendar, or changes one.
+func (m *Manager) ScheduleSet(s *Session, r Routine) (string, error) {
+	cal, err := m.calendarOf(s)
+	if err != nil {
+		return "", err
+	}
+	e, err := r.event()
+	if err != nil {
+		return "", err
+	}
+	return m.Schedules.Cal.Put(cal.Calendar, e)
+}
+
+// ScheduleRemove removes a routine from a session's calendar.
+func (m *Manager) ScheduleRemove(s *Session, id string) error {
+	cal, err := m.calendarOf(s)
+	if err != nil {
+		return err
+	}
+	return m.Schedules.Cal.Delete(cal.Calendar, id)
 }
 
 // Schedules is this machine's: Scala, the owner it trusts, and which calendar

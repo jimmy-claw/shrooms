@@ -80,6 +80,25 @@ var mcpTools = []map[string]any{
 			"task": map[string]any{"type": "string"},
 		}},
 	},
+	{
+		"name": "schedule",
+		"description": "Your own routines, in the calendar you and your owner share (ADR-064): list them, add one, change one, or remove one. " +
+			"Add a routine only once your owner has agreed to it in conversation; they are told of every change you make. " +
+			"A routine has a title, a start (RFC 3339, e.g. 2026-10-20T08:00:00+02:00), how often (freq daily, weekly, monthly or yearly, " +
+			"and interval: 2 is every other), a prompt you will be sent when it is due, and optional checks: shell commands, one a line, " +
+			"run first without you; you are woken only when what they print changed.",
+		"inputSchema": map[string]any{"type": "object", "required": []string{"action"}, "properties": map[string]any{
+			"action":   map[string]any{"type": "string", "enum": []string{"list", "add", "change", "remove"}},
+			"id":       map[string]any{"type": "string", "description": "the routine, for change and remove"},
+			"title":    map[string]any{"type": "string"},
+			"start":    map[string]any{"type": "string", "description": "RFC 3339: when it is first due"},
+			"freq":     map[string]any{"type": "string", "enum": []string{"daily", "weekly", "monthly", "yearly", ""}},
+			"interval": map[string]any{"type": "integer"},
+			"prompt":   map[string]any{"type": "string"},
+			"checks":   map[string]any{"type": "string"},
+			"enabled":  map[string]any{"type": "boolean"},
+		}},
+	},
 }
 
 type mcpRequest struct {
@@ -186,6 +205,15 @@ type mcpArgs struct {
 	Task    string `json:"task"`
 	State   string `json:"state"`
 	Summary string `json:"summary"`
+	// schedule
+	Action   string `json:"action"`
+	ID       string `json:"id"`
+	Start    string `json:"start"`
+	Freq     string `json:"freq"`
+	Interval int    `json:"interval"`
+	Prompt   string `json:"prompt"`
+	Checks   string `json:"checks"`
+	Enabled  *bool  `json:"enabled"`
 }
 
 func (c a2aClient) call(tool string, a mcpArgs) (string, error) {
@@ -255,6 +283,8 @@ func (c a2aClient) call(tool string, a mcpArgs) (string, error) {
 		name, _, _ := strings.Cut(a.Task, "/")
 		t.ID = name + "/" + t.ID
 		return t.String(), nil
+	case "schedule":
+		return c.schedule(a)
 	case "task_update":
 		if a.Task == "" || a.State == "" {
 			return "", fmt.Errorf("task_update needs task and state")

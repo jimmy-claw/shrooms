@@ -51,6 +51,10 @@ func Handler(log *slog.Logger, m *Manager, who Who) http.Handler {
 	mux.HandleFunc("PATCH /v1/sessions/{name}", h.update)
 	// The same, for clients that cannot send PATCH (Android's HttpURLConnection).
 	mux.HandleFunc("POST /v1/sessions/{name}/settings", h.update)
+	// Its schedule: its own Scala calendar (schedule.go, ADR-064).
+	mux.HandleFunc("GET /v1/sessions/{name}/schedule", h.scheduleList)
+	mux.HandleFunc("POST /v1/sessions/{name}/schedule", h.scheduleSet)
+	mux.HandleFunc("DELETE /v1/sessions/{name}/schedule/{id}", h.scheduleRemove)
 	mux.HandleFunc("GET /v1/sessions/{name}/history", h.history)
 	mux.HandleFunc("GET /v1/sessions/{name}/search", h.search)
 	mux.HandleFunc("POST /v1/sessions/{name}/files", h.upload)
@@ -747,4 +751,49 @@ func (h *handler) cage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, in)
+}
+
+func (h *handler) scheduleList(w http.ResponseWriter, r *http.Request) {
+	s, ok := h.session(w, r)
+	if !ok {
+		return
+	}
+	evs, paused, err := h.m.ScheduleList(s)
+	if err != nil {
+		fail(w, http.StatusConflict, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"routines": evs, "paused": paused})
+}
+
+func (h *handler) scheduleSet(w http.ResponseWriter, r *http.Request) {
+	s, ok := h.session(w, r)
+	if !ok {
+		return
+	}
+	var rt Routine
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&rt); err != nil {
+		fail(w, http.StatusBadRequest, err)
+		return
+	}
+	id, err := h.m.ScheduleSet(s, rt)
+	if err != nil {
+		fail(w, http.StatusBadRequest, err)
+		return
+	}
+	h.log.Info("routine set", "session", s.Name(), "routine", rt.Title, "by", h.caller(r))
+	writeJSON(w, http.StatusOK, map[string]string{"id": id})
+}
+
+func (h *handler) scheduleRemove(w http.ResponseWriter, r *http.Request) {
+	s, ok := h.session(w, r)
+	if !ok {
+		return
+	}
+	if err := h.m.ScheduleRemove(s, r.PathValue("id")); err != nil {
+		fail(w, http.StatusBadRequest, err)
+		return
+	}
+	h.log.Info("routine removed", "session", s.Name(), "id", r.PathValue("id"), "by", h.caller(r))
+	w.WriteHeader(http.StatusNoContent)
 }
