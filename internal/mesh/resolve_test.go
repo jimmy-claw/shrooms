@@ -227,3 +227,24 @@ func TestResolveQualifiedOnly(t *testing.T) {
 		t.Errorf("atlas.office on a one-mesh device resolved to %v (%v)", a, ok)
 	}
 }
+
+// A name two online devices claim answers nothing, so a member cannot take
+// another's by announcing more often; each still answers to its name and the
+// last group of its address (audit F-18).
+func TestANameTwoOnlineDevicesClaimAnswersNothing(t *testing.T) {
+	nk, _ := identity.NewNetworkKey()
+	self, _ := identity.New()
+	a, _ := identity.New()
+	b, _ := identity.New()
+	m := &Mesh{roster: NewRoster(nk, self.DevicePub)}
+	now := time.Now()
+	m.roster.Apply(newAnnounce(t, a, "laptop", nil, 1), now)
+	m.roster.Apply(newAnnounce(t, b, "laptop", nil, 1), now.Add(time.Second))
+	if addr, ok := m.Resolve("laptop"); ok {
+		t.Fatalf("an ambiguous name answered %v", addr)
+	}
+	aa := identity.OverlayAddr(nk, a.DevicePub)
+	if got, ok := m.Resolve("laptop-" + lastGroup(aa)); !ok || got != aa {
+		t.Errorf("laptop-%s: %v %v", lastGroup(aa), got, ok)
+	}
+}

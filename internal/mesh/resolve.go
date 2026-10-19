@@ -32,23 +32,67 @@ import (
 // machines share a name it is the one still running. The qualified
 // `<peer>.<mesh>` form and the address itself work regardless.
 func (m *Mesh) Resolve(host string) (netip.Addr, bool) {
+	return resolveAmong(m.roster.Peers(), host, time.Now())
+}
+
+// resolveAmong answers a device name among peers.
+//
+// Names are self-asserted, so two devices may claim one. Answering the
+// freshest let a member take another's name, and with it its ssh and every
+// service named under it, by announcing more often (audit F-18,
+// 2026-10-19). So a name two online devices claim answers nothing. One
+// online claimant has it: a device that joined again under a new key leaves
+// its old entry offline behind it for hours. With none online, the freshest
+// as before. Every device also answers to its name and the last group of its
+// address ("box-dead"), as the hosts file writes a duplicate, unless that is
+// claimed twice too.
+func resolveAmong(peers []PeerInfo, host string, now time.Time) (netip.Addr, bool) {
 	want := sanitiseName(host)
 	if want == "" {
 		return netip.Addr{}, false
 	}
-
-	var found netip.Addr
-	var freshest time.Time
-	for _, p := range m.roster.Peers() {
-		if sanitiseName(p.Name) != want {
+	var online []netip.Addr
+	var freshest PeerInfo
+	var fingerprinted []netip.Addr
+	for _, p := range peers {
+		name := sanitiseName(p.Name)
+		if name == "" {
 			continue
 		}
-		if found.IsValid() && !p.LastSeen.After(freshest) {
+		if name+"-"+lastGroup(p.Overlay) == want {
+			fingerprinted = append(fingerprinted, p.Overlay)
+		}
+		if name != want {
 			continue
 		}
-		found, freshest = p.Overlay, p.LastSeen
+		if p.Online(now) {
+			online = append(online, p.Overlay)
+		}
+		if !freshest.Overlay.IsValid() || p.LastSeen.After(freshest.LastSeen) {
+			freshest = p
+		}
 	}
-	return found, found.IsValid()
+	switch {
+	case len(online) == 1:
+		return online[0], true
+	case len(online) > 1:
+		return netip.Addr{}, false
+	case freshest.Overlay.IsValid():
+		return freshest.Overlay, true
+	case len(fingerprinted) == 1:
+		return fingerprinted[0], true
+	}
+	return netip.Addr{}, false
+}
+
+// lastGroup is the last group of an address, as internal/hosts disambiguates
+// a duplicate name with it.
+func lastGroup(a netip.Addr) string {
+	s := a.String()
+	if i := strings.LastIndexAny(s, ":."); i >= 0 {
+		return s[i+1:]
+	}
+	return s
 }
 
 // ResolveSelf answers for this device's own name, so `ping <myname>.mesh`

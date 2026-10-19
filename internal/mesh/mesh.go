@@ -2508,10 +2508,11 @@ func (m *Mesh) hostEntries() []hosts.Entry {
 		Name: m.cfg.Name, Addr: m.self.String(), AddrV4: m.aliasOf(m.self),
 		Mesh: m.cfg.MeshLabel, Self: true,
 	}}
+	now := time.Now()
 	for _, p := range m.roster.Peers() {
 		entries = append(entries, hosts.Entry{
 			Name: p.Name, Addr: p.Overlay.String(), AddrV4: m.aliasOf(p.Overlay),
-			Mesh: m.cfg.MeshLabel,
+			Mesh: m.cfg.MeshLabel, Offline: !p.Online(now),
 		})
 	}
 	return entries

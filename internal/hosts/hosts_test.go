@@ -206,8 +206,9 @@ func TestWithinMeshDuplicatesStillDisambiguated(t *testing.T) {
 		{Name: "box", Addr: "fd00::cafe:f00d", Mesh: "home"},
 	}, "mesh")
 
-	if strings.Count(got, " box.home.mesh") != 1 {
-		t.Errorf("both devices claimed box.home.mesh:\n%s", got)
+	// Two online claimants: the plain name is nobody's (audit F-18).
+	if strings.Count(got, " box.home.mesh") != 0 || strings.Count(got, " box-") != 2 {
+		t.Errorf("box.home.mesh given to one of two online claimants:\n%s", got)
 	}
 	if !strings.Contains(got, "box-") {
 		t.Errorf("second device was not disambiguated:\n%s", got)
@@ -291,9 +292,10 @@ func TestDuplicateNamesKeepTheirOwnAliases(t *testing.T) {
 		{Name: "nas", Addr: "fd3b::bbbb", AddrV4: "198.19.0.2", Mesh: "home"},
 	}, "mesh")
 
+	// Both online: neither keeps the plain name (audit F-18).
 	for _, line := range []string{
-		"fd3b::aaaa  nas.home.mesh",
-		"198.19.0.1  nas.home.mesh",
+		"fd3b::aaaa  nas-aaaa.home.mesh",
+		"198.19.0.1  nas-aaaa.home.mesh",
 		"fd3b::bbbb  nas-bbbb.home.mesh",
 		"198.19.0.2  nas-bbbb.home.mesh",
 	} {
@@ -301,9 +303,26 @@ func TestDuplicateNamesKeepTheirOwnAliases(t *testing.T) {
 			t.Errorf("missing %q in:\n%s", line, block)
 		}
 	}
-	for _, wrong := range []string{"198.19.0.2  nas.home.mesh", "198.19.0.1  nas-bbbb"} {
+	for _, wrong := range []string{"nas.home.mesh", "198.19.0.1  nas-bbbb"} {
 		if strings.Contains(block, wrong) {
 			t.Errorf("an alias landed on the wrong device: %q in:\n%s", wrong, block)
+		}
+	}
+}
+
+// Who keeps a name claimed twice (audit F-18): the one online claimant over
+// one gone quiet; this device over anyone, in its own file.
+func TestANameClaimedTwiceGoesToNoImpostor(t *testing.T) {
+	got := Render([]Entry{
+		{Name: "box", Addr: "fd00::aaaa", Mesh: "home", Offline: true},
+		{Name: "box", Addr: "fd00::bbbb", Mesh: "home"},
+		{Name: "me", Addr: "fd00::cccc", Mesh: "home", Self: true},
+		{Name: "me", Addr: "fd00::1111", Mesh: "home"},
+	}, "mesh")
+	for _, line := range []string{"fd00::bbbb  box.home.mesh", "fd00::aaaa  box-aaaa.home.mesh",
+		"fd00::cccc  me.home.mesh", "fd00::1111  me-1111.home.mesh"} {
+		if !strings.Contains(got, line) {
+			t.Errorf("missing %q in:\n%s", line, got)
 		}
 	}
 }

@@ -57,6 +57,10 @@ type Entry struct {
 	//
 	// The qualified name is kept because it is useful and shadows nothing.
 	Self bool
+
+	// Offline marks a peer that has not announced lately: it does not keep a
+	// name another, online, device claims too.
+	Offline bool
 }
 
 // Render builds the managed block.
@@ -98,19 +102,49 @@ func Render(entries []Entry, suffix string) string {
 	b.WriteString(Begin + "\n")
 	b.WriteString("# Regenerate with: logos-vpn hosts --write\n")
 
-	seen := map[string]bool{} // mesh+name
+	// Who keeps a plain name claimed more than once: this device, in its own
+	// file; else its one online claimant; two online claimants, nobody, and
+	// each is written with the last group of its address. A member that took
+	// a name by sorting first could take its ssh with it (audit F-18).
+	type claim struct{ self, online int }
+	claims := map[string]*claim{}
+	for _, e := range sorted {
+		key := sanitise(e.Mesh) + "\x00" + sanitise(e.Name)
+		c := claims[key]
+		if c == nil {
+			c = &claim{}
+			claims[key] = c
+		}
+		if e.Self {
+			c.self++
+		} else if !e.Offline {
+			c.online++
+		}
+	}
+	seen := map[string]bool{} // mesh+name, its plain name given out
 	for _, e := range sorted {
 		name, mesh := sanitise(e.Name), sanitise(e.Mesh)
 		if name == "" || mesh == "" {
 			continue
 		}
 		key := mesh + "\x00" + name
-		if seen[key] {
+		c := claims[key]
+		plain := !seen[key]
+		switch {
+		case c.self > 0:
+			plain = e.Self
+		case c.online > 1:
+			plain = false
+		case c.online == 1:
+			plain = !e.Offline
+		}
+		if !plain {
 			if short := shortAddr(e.Addr); short != "" {
 				name = name + "-" + short
 			}
+		} else {
+			seen[key] = true
 		}
-		seen[key] = true
 
 		full := name + "." + mesh
 		if suffix != "" {
