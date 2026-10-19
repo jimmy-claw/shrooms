@@ -18,6 +18,7 @@ again. CI fails while this file is out of date.
 | `internal/ctrl` | Package ctrl is the framing that lets control traffic share the WireGuard socket. |
 | `internal/disco` | Package disco is the socket-level discovery protocol: small authenticated probes sent over the same UDP socket as WireGuard, used to find which of a peer's candidate endpoints actually works. |
 | `internal/dns` | Package dns serves names for the mesh and nothing else. |
+| `internal/hostload` | (no package doc comment) |
 | `internal/hosts` | Package hosts renders and applies /etc/hosts entries for mesh peers. |
 | `internal/identity` | Package identity holds device keys, the mesh network key, and the derived addressing scheme. |
 | `internal/invite` | Package invite implements one-time enrolment tokens (ADR-017). |

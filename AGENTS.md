@@ -10,7 +10,7 @@ CI will tell you when it no longer matches.
 
 Shrooms is an overlay mesh: WireGuard between a person's own devices, found
 and joined through Logos Delivery (Waku), with no account and no server of
-ours. Shrooms Agents runs coding-agent sessions (Claude Code, pi) on each
+ours. Shrooms Agents runs coding-agent sessions (Claude Code, pi, OpenCode) on each
 machine and serves them to the person's other devices over that mesh, or on
 one machine without it (ADR-056).
 
