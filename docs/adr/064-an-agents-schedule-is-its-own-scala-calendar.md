@@ -1,6 +1,6 @@
 # 064. An agent's schedule is its own Scala calendar, co-owned with the owner
 
-**Status:** proposed 2026-10-19; reviewed by Scala's author
+**Status:** accepted 2026-10-19 by the owner; reviewed by Scala's author
 (jimmy-crib/vpavlin, against scala main 7fcf52f) and amended. Nothing built. Decides what `docs/agents-calendar.md`
 (2026-10-05) left open.
 
