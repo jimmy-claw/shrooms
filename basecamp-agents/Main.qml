@@ -4499,12 +4499,14 @@ Item {
                             spacing: 8
                             Rectangle { width: root.sz(9); height: width; radius: width / 2; color: "transparent"; border.width: 2; border.color: root.meshTint(hostCol.modelData.mesh) }
                             Text { text: hostCol.modelData.name; color: hostCol.modelData.here ? cPhosphor : cBone; font.family: "monospace"; font.pixelSize: root.fs(14) }
-                            Text { text: hostCol.modelData.meshes && hostCol.modelData.meshes.length ? hostCol.modelData.meshes.join(" · ") : hostCol.modelData.mesh
-                                   color: root.meshTint(hostCol.modelData.mesh); font.family: "monospace"; font.pixelSize: root.fs(10) }
                             Text { visible: !!hostCol.modelData.here; objectName: "hereTag"; text: "THIS MACHINE"; color: cPhosphor; font.family: "monospace"; font.pixelSize: root.fs(9); font.letterSpacing: 1 }
                             Text { visible: !hostCol.up; text: "offline · seen " + root.clock(hostCol.modelData.lastSeen); color: cAmber; font.family: "monospace"; font.pixelSize: root.fs(10) }
-                            Item { Layout.fillWidth: true }
-                            Lnk { visible: hostCol.up; text: "+ session"; onClicked: {
+                            // The meshes give way on a narrow panel, cut short:
+                            // "+ session" stays (it was pushed out, 2026-10-19).
+                            Text { objectName: "hostMeshes"; Layout.fillWidth: true; Layout.minimumWidth: 0; elide: Text.ElideRight
+                                   text: hostCol.modelData.meshes && hostCol.modelData.meshes.length ? hostCol.modelData.meshes.join(" · ") : hostCol.modelData.mesh
+                                   color: root.meshTint(hostCol.modelData.mesh); font.family: "monospace"; font.pixelSize: root.fs(10) }
+                            Lnk { objectName: "newSessionLink"; visible: hostCol.up; text: "+ session"; onClicked: {
                                 newSession.host = hostCol.modelData
                                 root.agentCreating = true
                                 Qt.callLater(function() { root.loadHarnesses(hostCol.modelData); root.loadConversations(hostCol.modelData) })

@@ -303,6 +303,16 @@ Item {
         interval: 3500; running: true
         onTriggered: {
             console.error("HOSTSCROLL=" + top.hostScrollSeen + " TOP=" + top.hostScrollTop)
+            // The narrowest list: "+ session" still inside it, the meshes cut short.
+            var lw = view.listWidth
+            view.listWidth = 200
+            view.forceLayout ? view.forceLayout() : null
+            Qt.callLater(function() {
+                var link = top.findByName(view, "newSessionLink"), list = top.findByName(view, "hostMeshes")
+                var right = link ? link.mapToItem(link.parent.parent, link.width, 0).x : -1
+                console.error("NARROW fits=" + (link !== null && right <= link.parent.parent.width + 0.5) + " gives=" + (list !== null && list.elide === Text.ElideRight && list.Layout.fillWidth))
+                view.listWidth = lw
+            })
             var kinds = []
             for (var i = 0; i < chatCount(); i++) kinds.push(view.chatModelAt(i).kind)
             console.error("ROWS=" + kinds.join(","))
