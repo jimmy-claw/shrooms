@@ -388,6 +388,11 @@ Item {
             // The model, chosen as the name is renamed: sent as a setting, and noted.
             view.setModelOpenSession(" venice/claude-haiku-5-5 ")
             console.error("MODELSET " + top.lastPostPath + " " + top.lastPost + " note=" + view.modelNote({ model: "haiku" }, "phone.office") + "|" + view.modelNote({ model: "" }, ""))
+            // What it is for (ADR-063): lines into skills and responsibilities, and back.
+            view.setRolesOpenSession("Basecamp apps: QML views #Basecamp #qml\n\nAndroid\n", " publishes to the LAN repos \n\n")
+            var rb = JSON.parse(top.lastPost)
+            console.error("ROLES " + top.lastPostPath + " " + JSON.stringify(rb) + " back=" + JSON.stringify(view.skillsText(rb.skills))
+                          + " note=" + view.rolesNote(rb, "phone.office"))
             view.closeDialogs()
             // A turn the harness started itself: labelled by its source.
             var kept = view.agentEventsList

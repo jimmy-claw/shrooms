@@ -171,6 +171,8 @@ object AgentChat {
                         (if (e.data.optBoolean("auto_approve")) "auto-approve on" else "auto-approve off") + by(e))
                 } else if (e.data.has("model")) {
                     out += ChatItem.Note(e.seq, e.time, modelNote(e.data.optString("model")) + by(e))
+                } else if (e.data.has("skills") || e.data.has("responsibilities")) {
+                    out += ChatItem.Note(e.seq, e.time, rolesNote(e.data) + by(e))
                 }
                 "claude" -> claude(e, answers, lastStop, out)
             }
@@ -312,4 +314,12 @@ fun cagedNote(d: org.json.JSONObject): String =
     else "taken out of its cage"
 
 /** A model chosen for a session, as the conversation notes it. */
+/** What it is for, as set (ADR-063): "good at: A, B; responsible for: x". */
+fun rolesNote(d: JSONObject): String {
+    val sk = d.optJSONArray("skills")?.let { a -> (0 until a.length()).map { a.optJSONObject(it)?.optString("name").orEmpty() } }.orEmpty().filter { it.isNotEmpty() }
+    val ds = d.optJSONArray("responsibilities")?.let { a -> (0 until a.length()).map { a.optString(it) } }.orEmpty()
+    return (if (sk.isEmpty()) "no skills set" else "good at: ${sk.joinToString(", ")}") +
+        (if (ds.isEmpty()) "" else "; responsible for: ${ds.joinToString("; ")}")
+}
+
 fun modelNote(model: String): String = if (model.isEmpty()) "model back to its machine's default" else "model set to $model"

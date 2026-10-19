@@ -1110,6 +1110,7 @@ Item {
             else if (e.kind === "setting" && d.auto_approve !== undefined)
                 add(e, { kind: "note", text: (d.auto_approve ? "auto-approve on" : "auto-approve off") + (e.by ? " from " + e.by : "") })
             else if (e.kind === "setting" && d.model !== undefined) add(e, { kind: "note", text: modelNote(d, e.by) })
+            else if (e.kind === "setting" && (d.skills !== undefined || d.responsibilities !== undefined)) add(e, { kind: "note", text: rolesNote(d, e.by) })
             else if (e.kind === "claude") {
                 if (d.type === "assistant" && d.message && d.message.content) {
                     var c = d.message.content
@@ -1889,6 +1890,50 @@ Item {
         root.saidBad = false
         return true
     }
+    // What the session is for (ADR-063): its skills, a line each as
+    // "Name: what it means #tag #tag", and what it may do without asking, a
+    // line each. The phone writes the same lines (Agents.kt, rolesText).
+    function skillsText(sk) {
+        return (sk || []).map(function(x) {
+            return x.name + (x.description ? ": " + x.description : "") + (x.tags || []).map(function(t) { return " #" + t }).join("")
+        }).join("\n")
+    }
+    function parseSkills(text) {
+        var out = []
+        String(text || "").split("\n").forEach(function(line) {
+            var tags = []
+            line = line.replace(/(^|\s)#([^\s#]+)/g, function(m, pre, t) { tags.push(t.toLowerCase()); return "" }).trim()
+            if (!line) return
+            var c = line.indexOf(":")
+            var name = (c > 0 ? line.slice(0, c) : line).trim(), desc = c > 0 ? line.slice(c + 1).trim() : ""
+            if (name) out.push({ name: name, description: desc, tags: tags })
+        })
+        return out
+    }
+    function parseDuties(text) {
+        return String(text || "").split("\n").map(function(x) { return x.trim() }).filter(function(x) { return x !== "" })
+    }
+    function askRoles() {
+        if (!agentOpen) return
+        rolesSkills.text = skillsText(agentInfo ? agentInfo.skills : [])
+        rolesDuties.text = (agentInfo && agentInfo.responsibilities ? agentInfo.responsibilities : []).join("\n")
+        rolesDialog.open()
+    }
+    function setRolesOpenSession(skillsTxt, dutiesTxt) {
+        if (!agentOpen) return false
+        var body = { skills: parseSkills(skillsTxt), responsibilities: parseDuties(dutiesTxt) }
+        if (agentCall("agentPost", [agentOpen.address, "/v1/sessions/" + agentOpen.session + "/settings", JSON.stringify(body)]) === null) return false
+        root.said = "what " + agentOpen.session + " is for is on its card now"
+        root.saidBad = false
+        refreshAgents()
+        return true
+    }
+    function rolesNote(d, by) {
+        var n = (d.skills || []).length
+        return (n ? "good at: " + d.skills.map(function(x) { return x.name }).join(", ") : "no skills set")
+               + ((d.responsibilities || []).length ? "; responsible for: " + d.responsibilities.join("; ") : "")
+               + (by ? " — set from " + by : "")
+    }
     function modelNote(d, by) {
         return (d.model ? "model set to " + d.model : "model back to its machine's default") + (by ? " from " + by : "")
     }
@@ -2659,7 +2704,7 @@ Item {
     readonly property var boardCardList: boardCards(meshHosts)
     readonly property var boardEdgeList: boardEdges(meshHosts)
     function askDelete() { deleteDialog.open() }
-    function dialogs() { return [usageDialog, voiceDialog, deleteDialog, renameDialog, modelDialog, restartDialog, readingDialog, cageDialog] }
+    function dialogs() { return [usageDialog, voiceDialog, deleteDialog, renameDialog, modelDialog, rolesDialog, restartDialog, readingDialog, cageDialog] }
     function closeDialogs() { dialogs().forEach(function(d) { d.close() }) }
     function deleteDialogOpen() { return deleteDialog.visible }
     function deleteOpenSession() {
@@ -3271,6 +3316,63 @@ Item {
                 Lnk { text: "CANCEL"; base: cBone; font.pixelSize: root.fs(12); onClicked: modelDialog.close() }
                 Lnk { text: "SET"; base: cSky; font.pixelSize: root.fs(12)
                       onClicked: if (root.setModelOpenSession(modelField.text)) modelDialog.close() }
+            }
+        }
+    }
+    Dialog {
+        id: rolesDialog
+        modal: true
+        anchors.centerIn: parent
+        width: Math.min(root.sz(620), root.width - root.sz(40))
+        padding: root.sz(20)
+        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+        Overlay.modal: Rectangle { color: Qt.rgba(0, 0, 0, 0.6) }
+        background: Rectangle { color: cPanel; radius: root.sz(12); border.color: cSky }
+        header: Item {}
+        footer: Item {}
+        onOpened: rolesSkills.forceActiveFocus()
+        contentItem: ColumnLayout {
+            spacing: root.sz(10)
+            Text {
+                Layout.fillWidth: true; wrapMode: Text.Wrap
+                text: root.agentOpen ? "What \"" + root.agentOpen.session + "\" on " + root.agentOpen.name + " is for" : ""
+                color: cBone; font.family: "monospace"; font.pixelSize: root.fs(14)
+            }
+            Text {
+                Layout.fillWidth: true; wrapMode: Text.Wrap
+                text: "GOOD AT — a line each: name: what it means #tags"
+                color: cAsh; font.family: "monospace"; font.pixelSize: root.fs(10); font.letterSpacing: 1
+            }
+            TextArea {
+                id: rolesSkills; objectName: "rolesSkills"; Layout.fillWidth: true; Layout.preferredHeight: root.sz(110)
+                color: cBone; font.family: "monospace"; font.pixelSize: root.fs(12); wrapMode: TextEdit.Wrap
+                placeholderText: "Basecamp apps: QML views and core modules #basecamp #qml"
+                placeholderTextColor: cAsh
+                background: Rectangle { color: cPanel; border.color: rolesSkills.activeFocus ? cSky : cLine; radius: 6 }
+            }
+            Text {
+                Layout.fillWidth: true; wrapMode: Text.Wrap
+                text: "RESPONSIBLE FOR — what it may do without asking you, a line each"
+                color: cAsh; font.family: "monospace"; font.pixelSize: root.fs(10); font.letterSpacing: 1
+            }
+            TextArea {
+                id: rolesDuties; objectName: "rolesDuties"; Layout.fillWidth: true; Layout.preferredHeight: root.sz(80)
+                color: cBone; font.family: "monospace"; font.pixelSize: root.fs(12); wrapMode: TextEdit.Wrap
+                placeholderText: "publishes to the LAN repos"
+                placeholderTextColor: cAsh
+                background: Rectangle { color: cPanel; border.color: rolesDuties.activeFocus ? cSky : cLine; radius: 6 }
+            }
+            Text {
+                Layout.fillWidth: true; wrapMode: Text.Wrap
+                text: "On its card for other agents to read: they ask the one whose skills fit. Only you set these; a session cannot set its own."
+                color: cAsh; font.family: "monospace"; font.pixelSize: root.fs(11)
+            }
+            RowLayout {
+                Layout.alignment: Qt.AlignRight
+                spacing: root.sz(20)
+                Lnk { text: "CANCEL"; base: cBone; font.pixelSize: root.fs(12); onClicked: rolesDialog.close() }
+                Lnk { objectName: "rolesSave"; text: "SET"; base: cSky; font.pixelSize: root.fs(12)
+                      onClicked: if (root.setRolesOpenSession(rolesSkills.text, rolesDuties.text)) rolesDialog.close() }
             }
         }
     }
@@ -4782,6 +4884,10 @@ Item {
                         Lnk { readonly property bool chosen: !!(root.agentInfo && root.agentInfo.model_setting)
                               objectName: "modelLink"; text: chosen ? "MODEL" : "model"; base: chosen ? cSky : cAsh
                               onClicked: Qt.callLater(root.askModel) }
+                        // What it is for (ADR-063), lit when its owner said.
+                        Lnk { readonly property bool set: !!(root.agentInfo && ((root.agentInfo.skills || []).length || (root.agentInfo.responsibilities || []).length))
+                              objectName: "rolesLink"; text: set ? "SKILLS" : "skills"; base: set ? cSky : cAsh
+                              onClicked: Qt.callLater(root.askRoles) }
                         Lnk { text: "restart"; base: cAsh; onClicked: root.askRestart() }
                         Lnk { text: "delete"; base: cAsh; onClicked: root.askDelete() }
                         Lnk { visible: root.agentWorking; text: "■ stop"; base: cRust; onClicked: root.stopTurn() }
@@ -4791,6 +4897,7 @@ Item {
                               root.agentInfo ? root.harnessLabel(root.agentInfo.harness) : "",
                               root.agentInfo && root.agentInfo.cage ? "in a cage (" + root.cageWords(root.agentInfo.cage) + ")" + (root.agentInfo.cage.outbox ? ", results in " + root.agentInfo.cage.outbox : "") : "",
                               root.agentInfo ? root.shortModel(root.agentInfo.model) : "",
+                              root.agentInfo && (root.agentInfo.skills || []).length ? "good at " + root.agentInfo.skills.map(function(x) { return x.name }).join(", ") : "",
                               root.agentInfo ? root.rateLabel(root.agentInfo.tokens_per_second) : "",
                               root.agentInfo ? root.contextLabel(root.agentInfo.context_used, root.agentInfo.context_window) : "",
                               root.agentKept > 0 ? "offline — as it was " + root.keptWhen(root.agentKept) : "",

@@ -446,3 +446,16 @@ class RateLabelTest {
         assertEquals("", rateLabel(0.0))
     }
 }
+
+class RolesTest {
+    // The lines both apps write: "Name: what it means #tag", a line each,
+    // read back as written (ADR-063); and the note a change leaves.
+    @Test fun skillsAreLinesBothWays() {
+        val sk = parseSkills("Basecamp apps: QML views #Basecamp #qml\n\nAndroid\n")
+        assertEquals(listOf(Skill("Basecamp apps", "QML views", listOf("basecamp", "qml")), Skill("Android")), sk)
+        assertEquals("Basecamp apps: QML views #basecamp #qml\nAndroid", skillsText(sk))
+        assertEquals(listOf("publishes to the LAN repos"), parseDuties(" publishes to the LAN repos \n\n"))
+        val d = JSONObject("""{"skills":[{"name":"Basecamp apps"},{"name":"Android"}],"responsibilities":["publishes to the LAN repos"]}""")
+        assertEquals("good at: Basecamp apps, Android; responsible for: publishes to the LAN repos", rolesNote(d))
+    }
+}

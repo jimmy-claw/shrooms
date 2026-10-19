@@ -62,6 +62,9 @@ data class AgentSession(
     val modelSetting: String = "",
     /** How fast its model wrote in its last turn, output tokens a second; 0 when not known. */
     val tokensPerSecond: Double = 0.0,
+    /** What it is good at, and what it may do without asking: as its owner set them (ADR-063). */
+    val skills: List<Skill> = emptyList(),
+    val responsibilities: List<String> = emptyList(),
     /**
      * Where it is reached, when not at its machine's address as shown: under
      * "all", a session there only for another of the machine's meshes (onMesh).
@@ -69,6 +72,28 @@ data class AgentSession(
     val at: String = "",
     val atMesh: String = "",
 )
+
+/** One thing a session is good at, as A2A's AgentSkill (ADR-063). */
+data class Skill(val name: String, val description: String = "", val tags: List<String> = emptyList())
+
+/**
+ * Skills as lines, "Name: what it means #tag #tag", one each; the same lines
+ * Basecamp writes (Main.qml, skillsText). Pure, for the tests.
+ */
+fun skillsText(skills: List<Skill>): String = skills.joinToString("\n") { k ->
+    k.name + (if (k.description.isNotEmpty()) ": ${k.description}" else "") + k.tags.joinToString("") { " #$it" }
+}
+
+fun parseSkills(text: String): List<Skill> = text.lines().mapNotNull { raw ->
+    val tags = mutableListOf<String>()
+    val line = Regex("""(^|\s)#([^\s#]+)""").replace(raw) { tags += it.groupValues[2].lowercase(); "" }.trim()
+    if (line.isEmpty()) return@mapNotNull null
+    val c = line.indexOf(':')
+    val name = (if (c > 0) line.substring(0, c) else line).trim()
+    if (name.isEmpty()) null else Skill(name, if (c > 0) line.substring(c + 1).trim() else "", tags)
+}
+
+fun parseDuties(text: String): List<String> = text.lines().map { it.trim() }.filter { it.isNotEmpty() }
 
 /** A sender a session refused files from, and what it tried to send. */
 data class FileRequest(val from: String, val name: String, val size: Long)
@@ -225,6 +250,10 @@ class AgentClient(private val address: String) {
                 meshes = s.optJSONArray("meshes")?.let { a -> (0 until a.length()).map { a.getString(it) } }.orEmpty(),
                 modelSetting = s.optString("model_setting"),
                 tokensPerSecond = s.optDouble("tokens_per_second", 0.0),
+                skills = s.optJSONArray("skills")?.let { a -> (0 until a.length()).map { val k = a.getJSONObject(it)
+                    Skill(k.optString("name"), k.optString("description"),
+                        k.optJSONArray("tags")?.let { t -> (0 until t.length()).map { t.getString(it) } }.orEmpty()) } }.orEmpty(),
+                responsibilities = s.optJSONArray("responsibilities")?.let { a -> (0 until a.length()).map { a.getString(it) } }.orEmpty(),
                 fileRequests = s.optJSONArray("file_requests")?.let { a ->
                     (0 until a.length()).map { val f = a.getJSONObject(it); FileRequest(f.optString("from"), f.optString("name"), f.optLong("size")) }
                 }.orEmpty(),
@@ -294,6 +323,14 @@ class AgentClient(private val address: String) {
     /** The model it runs on; "" goes back to its harness's default. The agent stops it to change it. */
     fun setModel(session: String, model: String) {
         request("POST", "/v1/sessions/${enc(session)}/settings", JSONObject().put("model", model).toString())
+    }
+
+    /** What it is for (ADR-063); only the owner's devices reach this. */
+    fun setRoles(session: String, skills: List<Skill>, responsibilities: List<String>) {
+        val sk = org.json.JSONArray(skills.map { JSONObject().put("name", it.name).put("description", it.description)
+            .put("tags", org.json.JSONArray(it.tags)) })
+        request("POST", "/v1/sessions/${enc(session)}/settings",
+            JSONObject().put("skills", sk).put("responsibilities", org.json.JSONArray(responsibilities)).toString())
     }
 
     /** A caged session's memory and CPUs, "" for the machine's: set on its cage where it is. */

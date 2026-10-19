@@ -971,6 +971,8 @@ private fun SessionScreen(o: OpenSession, onBack: () -> Unit, onRenamed: (String
     var renaming by remember { mutableStateOf<String?>(null) }
     // The model dialog: what is typed, and the models its machine's sessions run on, to pick from.
     var modelDraft by remember { mutableStateOf<String?>(null) }
+    // What it is for (ADR-063), as edited: skills' lines, responsibilities' lines.
+    var rolesDraft by remember { mutableStateOf<Pair<String, String>?>(null) }
     var modelsSeen by remember { mutableStateOf<List<String>>(emptyList()) }
     // How many of the last events are loaded: 0 is everything, once asked for;
     // more, to reach a search result further back.
@@ -1398,6 +1400,44 @@ private fun SessionScreen(o: OpenSession, onBack: () -> Unit, onRenamed: (String
             },
         )
     }
+    rolesDraft?.let { (skillsDraft, dutiesDraft) ->
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { rolesDraft = null },
+            containerColor = Palette.Panel,
+            title = { Text("What ${o.session} is for", color = Palette.Bone) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("GOOD AT — a line each: name: what it means #tags", style = MaterialTheme.typography.labelSmall, color = Palette.Ash)
+                    OutlinedTextField(value = skillsDraft, onValueChange = { rolesDraft = it to dutiesDraft }, minLines = 3,
+                        placeholder = { Text("Basecamp apps: QML views and core modules #basecamp", color = Palette.Ash) },
+                        textStyle = MaterialTheme.typography.bodySmall.copy(color = Palette.Bone), modifier = Modifier.fillMaxWidth())
+                    Text("RESPONSIBLE FOR — what it may do without asking you, a line each", style = MaterialTheme.typography.labelSmall, color = Palette.Ash)
+                    OutlinedTextField(value = dutiesDraft, onValueChange = { rolesDraft = skillsDraft to it }, minLines = 2,
+                        placeholder = { Text("publishes to the LAN repos", color = Palette.Ash) },
+                        textStyle = MaterialTheme.typography.bodySmall.copy(color = Palette.Bone), modifier = Modifier.fillMaxWidth())
+                    Text("On its card for other agents to read: they ask the one whose skills fit. Only you set these.",
+                        style = MaterialTheme.typography.bodySmall, color = Palette.Ash)
+                }
+            },
+            confirmButton = {
+                Text("SET", style = MaterialTheme.typography.labelSmall, color = Palette.Phosphor,
+                    modifier = Modifier.clickable {
+                        val sk = parseSkills(skillsDraft)
+                        val ds = parseDuties(dutiesDraft)
+                        rolesDraft = null
+                        scope.launch {
+                            withContext(Dispatchers.IO) { runCatching { client.setRoles(o.session, sk, ds) } }
+                                .onSuccess { info = info?.copy(skills = sk, responsibilities = ds) }
+                                .onFailure { actionError = it.message ?: "could not set what it is for" }
+                        }
+                    }.padding(12.dp))
+            },
+            dismissButton = {
+                Text("CANCEL", style = MaterialTheme.typography.labelSmall, color = Palette.Ash,
+                    modifier = Modifier.clickable { rolesDraft = null }.padding(12.dp))
+            },
+        )
+    }
     if (cageAsk) {
         val caged = info?.cage != null
         fun move(to: SessionCage?) {
@@ -1517,6 +1557,7 @@ private fun SessionScreen(o: OpenSession, onBack: () -> Unit, onRenamed: (String
             val facts = listOf(o.host, o.mesh, harnessLabel(i?.harness ?: "claude"),
                 i?.cage?.let { "in a cage (${cageWords(it)})" + if (it.outbox.isNotEmpty()) ", results in ${it.outbox}" else "" } ?: "", shortModel(i?.model ?: ""),
                 rateLabel(i?.tokensPerSecond ?: 0.0),
+                i?.skills?.takeIf { it.isNotEmpty() }?.let { "good at ${it.joinToString(", ") { k -> k.name }}" } ?: "",
                 contextLabel(i?.contextUsed ?: 0, i?.contextWindow ?: 0)).filter { it.isNotEmpty() }
             // All of it, wrapped: on one line the model was cut off at the
             // phone's edge ("ven…"), with no way to read the rest.
@@ -1580,6 +1621,11 @@ private fun SessionScreen(o: OpenSession, onBack: () -> Unit, onRenamed: (String
                                 .flatMap { listOf(it.model, it.modelSetting) }.filter { it.isNotEmpty() && it != "<synthetic>" }.distinct().sorted()
                         }
                     }
+                }
+                // What it is for (ADR-063), lit when its owner said.
+                val hasRoles = !info?.skills.isNullOrEmpty() || !info?.responsibilities.isNullOrEmpty()
+                Link(if (hasRoles) "SKILLS" else "skills", if (hasRoles) Palette.Sky else Palette.Ash) {
+                    rolesDraft = skillsText(info?.skills.orEmpty()) to info?.responsibilities.orEmpty().joinToString("\n")
                 }
                 Link("restart", Palette.Ash) { askRestart = true }
                 Link("delete", Palette.Ash) { askDelete = true }
