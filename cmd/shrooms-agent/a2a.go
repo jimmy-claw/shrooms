@@ -383,6 +383,8 @@ func (c a2aClient) list() (string, error) {
 			var d struct {
 				Sessions []struct {
 					Name, State, Harness, Dir string
+					Skills                    []agent.Skill
+					Responsibilities          []string
 				}
 			}
 			if json.NewDecoder(resp.Body).Decode(&d) != nil {
@@ -390,7 +392,19 @@ func (c a2aClient) list() (string, error) {
 			}
 			mu.Lock()
 			for _, s := range d.Sessions {
-				lines = append(lines, fmt.Sprintf("%s/%s\t%s, %s, in %s", m.Name, s.Name, s.Harness, s.State, s.Dir))
+				line := fmt.Sprintf("%s/%s\t%s, %s, in %s", m.Name, s.Name, s.Harness, s.State, s.Dir)
+				// What it is for, as its owner set it (ADR-063).
+				if len(s.Skills) > 0 {
+					var names []string
+					for _, sk := range s.Skills {
+						names = append(names, sk.Name)
+					}
+					line += "; good at: " + strings.Join(names, ", ")
+				}
+				if len(s.Responsibilities) > 0 {
+					line += "; responsible for: " + strings.Join(s.Responsibilities, "; ")
+				}
+				lines = append(lines, line)
 			}
 			mu.Unlock()
 		}(m)

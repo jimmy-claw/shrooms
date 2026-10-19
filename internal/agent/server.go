@@ -233,6 +233,9 @@ func (h *handler) update(w http.ResponseWriter, r *http.Request) {
 		IgnoreFileRequest *string `json:"ignore_file_request"`
 		// The model it runs on; "" for its harness's default (SetModel).
 		Model *string `json:"model"`
+		// What it is for (ADR-063): its skills, and what it may do without asking.
+		Skills           *[]Skill  `json:"skills"`
+		Responsibilities *[]string `json:"responsibilities"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		fail(w, http.StatusBadRequest, err)
@@ -251,6 +254,13 @@ func (h *handler) update(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		h.log.Info("meshes changed", "session", s.Name(), "meshes", *req.Meshes, "by", h.caller(r))
+	}
+	if req.Skills != nil || req.Responsibilities != nil {
+		if err := s.SetRoles(req.Skills, req.Responsibilities, h.caller(r)); err != nil {
+			fail(w, http.StatusBadRequest, err)
+			return
+		}
+		h.log.Info("roles set", "session", s.Name(), "by", h.caller(r))
 	}
 	if req.Model != nil {
 		if err := s.SetModel(*req.Model, h.caller(r)); err != nil {

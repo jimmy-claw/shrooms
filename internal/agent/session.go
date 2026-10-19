@@ -74,6 +74,10 @@ type Info struct {
 	// TokensPerSecond is how fast its model wrote in its last turn: output
 	// tokens over the time spent generating (rate.go); 0 when not known.
 	TokensPerSecond float64 `json:"tokens_per_second,omitempty"`
+	// Skills and Responsibilities are what it is for, as its owner set them
+	// (ADR-063, roles.go).
+	Skills           []Skill  `json:"skills,omitempty"`
+	Responsibilities []string `json:"responsibilities,omitempty"`
 	// Harness runs it ("claude", "pi"), and what that harness can do.
 	Harness string `json:"harness"`
 	Caps    Caps   `json:"caps"`
@@ -156,6 +160,8 @@ type Session struct {
 	fileAsks    []FileAsk // senders refused lately
 	meshes      []string  // the meshes it is there for; none is all (meshes.go)
 	modelSet    string    // the model chosen for it; "" for its harness's default
+	skills      []Skill   // what it is good at, as its owner set it (roles.go)
+	duties      []string  // what it owns and may do without asking
 	turns       uint64
 	// ids are the device-made ids of messages and voice notes already taken,
 	// so a device that sends again — it did not hear the answer, the
@@ -273,6 +279,8 @@ type record struct {
 	AcceptFiles []string `json:"accept_files_from,omitempty"`
 	Meshes      []string `json:"meshes,omitempty"`
 	ModelSet    string   `json:"model_setting,omitempty"`
+	Skills      []Skill  `json:"skills,omitempty"`
+	Duties      []string `json:"responsibilities,omitempty"`
 }
 
 // NewManager loads the sessions kept in stateDir.
@@ -315,6 +323,7 @@ func NewManager(ctx context.Context, log *slog.Logger, stateDir, claudeBin strin
 			s.acceptFiles = r.AcceptFiles
 			s.meshes = r.Meshes
 			s.modelSet = r.ModelSet
+			s.skills, s.duties = r.Skills, r.Duties
 			s.loadEvents()
 			m.sessions[r.Name] = s
 		}
@@ -430,7 +439,8 @@ func (m *Manager) save() error {
 	for _, s := range m.sessions {
 		s.mu.Lock()
 		r := record{Name: s.Name(), Dir: s.dir, ConvID: s.convID, AutoApprove: s.autoApprove, Starred: s.starred,
-			KeepRunning: s.keepRunning, Cage: s.cage, AcceptCaged: s.acceptCaged, AcceptFiles: s.acceptFiles, Meshes: s.meshes, ModelSet: s.modelSet}
+			KeepRunning: s.keepRunning, Cage: s.cage, AcceptCaged: s.acceptCaged, AcceptFiles: s.acceptFiles, Meshes: s.meshes, ModelSet: s.modelSet,
+			Skills: s.skills, Duties: s.duties}
 		if s.harness.Name() != "claude" {
 			r.Harness = s.harness.Name()
 		}
@@ -661,7 +671,8 @@ func (s *Session) Info() Info {
 		Harness: s.harness.Name(), Caps: s.harness.Caps(), Starred: s.starred, Turns: s.turns,
 		KeepRunning: s.keepRunning, AcceptCaged: s.acceptsCaged(),
 		AcceptFilesFrom: append([]string(nil), s.acceptFiles...), FileRequests: append([]FileAsk(nil), s.fileAsks...),
-		Meshes: append([]string(nil), s.meshes...), ModelSetting: s.modelSet, TokensPerSecond: s.tokRate}
+		Meshes: append([]string(nil), s.meshes...), ModelSetting: s.modelSet, TokensPerSecond: s.tokRate,
+		Skills: append([]Skill(nil), s.skills...), Responsibilities: append([]string(nil), s.duties...)}
 	if s.cage != nil {
 		in.Cage = &CageInfo{Image: s.cage.Image, Nix: s.cage.Nix, GitHub: s.cage.GitHub, Shared: s.sharedFor(), Sealed: s.cage.Sealed, Outbox: s.cage.Outbox,
 			Memory: s.cage.Memory, CPUs: s.cage.CPUs}

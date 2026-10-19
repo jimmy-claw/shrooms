@@ -25,7 +25,7 @@ const mcpInstructions = "The agents on this shrooms mesh: other machines' coding
 var mcpTools = []map[string]any{
 	{
 		"name":        "list_agents",
-		"description": "List the coding-agent sessions on the shrooms mesh, as MACHINE/SESSION with their harness, state (idle, working, waiting) and working directory.",
+		"description": "List the coding-agent sessions on the shrooms mesh, as MACHINE/SESSION with their harness, state (idle, working, waiting) and working directory, and, where their owner set them, what each is good at and responsible for: ask the one whose skills fit.",
 		"inputSchema": map[string]any{"type": "object", "properties": map[string]any{}},
 	},
 	{

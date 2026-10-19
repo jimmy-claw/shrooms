@@ -41,7 +41,7 @@ You do nothing to switch this on. Each session starts with:
 
 | Tool | Who uses it | What it does |
 |---|---|---|
-| `list_agents` | anyone | every session on the mesh: `MACHINE/SESSION`, harness, state (idle, working, waiting), directory |
+| `list_agents` | anyone | every session on the mesh: `MACHINE/SESSION`, harness, state (idle, working, waiting), directory, and what it is good at and responsible for ([below](#what-each-agent-is-for)) |
 | `ask_agent` | the asker | sends a message to `MACHINE/SESSION`, with a short `title` that lists of tasks show; waits for the reply (up to 10 minutes) unless `wait` is false; with `task` set, answers a task that is blocked |
 | `task_status` | the asker | where a task stands, and the reply so far |
 | `task_update` | the worker | finishes a task: `done` with a summary, `blocked` with what it needs, or `failed` with why |
@@ -63,6 +63,22 @@ MCP servers only from `~/.pi/agent/mcp.json`; the agent adds a `shrooms` entry
 there when it starts, and leaves alone one of yours by that name.
 
 A session started with `--mcp=false` gets neither the tools nor the note.
+
+## What each agent is for
+
+Each session can say what it is **good at** (its skills) and what it is
+**responsible for**: what it owns and may do without asking you. A reviewer
+reviews; a publisher publishes to the LAN repos; one session knows Basecamp
+apps, another SPEL. You set them per session, in either app or through its
+settings (`POST /v1/sessions/NAME/settings` with `skills` and
+`responsibilities`); a session cannot set its own, and a caged one cannot
+reach its settings at all.
+
+They are on the session's A2A card, the skills as A2A's own skills and the
+responsibilities as an extension, and `list_agents` shows both, so an agent
+that needs help reads them and asks the one that fits. Nothing is sent to a
+skill on its own, and a responsibility does not enforce anything: a public
+release still waits for the code from your phone. ADR-063.
 
 ## A worked example
 

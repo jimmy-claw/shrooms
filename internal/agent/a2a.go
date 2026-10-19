@@ -149,17 +149,37 @@ func (h *handler) cardBase(r *http.Request) string { return "http://" + r.Host +
 func (h *handler) sessionCard(r *http.Request, in Info) map[string]any {
 	host, _ := os.Hostname()
 	desc := fmt.Sprintf("%s session %q on %s, working in %s.", harnessTitle(h.m, in.Harness), in.Name, host, in.Dir)
+	// Its skills as its owner set them (ADR-063); without any, the session itself.
+	skills := []map[string]any{{"id": in.Name, "name": in.Name, "description": desc,
+		"tags": []string{"shrooms", in.Harness}}}
+	if len(in.Skills) > 0 {
+		skills = nil
+		for i, sk := range in.Skills {
+			d := sk.Description
+			if d == "" {
+				d = sk.Name
+			}
+			skills = append(skills, map[string]any{"id": fmt.Sprintf("%s-%d", in.Name, i+1), "name": sk.Name,
+				"description": d, "tags": append([]string{"shrooms", in.Harness}, sk.Tags...)})
+		}
+	}
+	caps := a2aCapabilities()
+	if len(in.Responsibilities) > 0 {
+		caps["extensions"] = append(caps["extensions"].([]map[string]any), map[string]any{
+			"uri": responsibilitiesExtension, "required": false,
+			"description": "What this session owns and may do without asking its owner, as the owner set it.",
+			"params":      map[string]any{"responsibilities": in.Responsibilities}})
+	}
 	return map[string]any{
 		"name":        host + "/" + in.Name,
 		"description": desc,
 		"version":     "1",
 		"supportedInterfaces": []map[string]any{{"url": h.cardBase(r) + in.Name,
 			"protocolBinding": "JSONRPC", "protocolVersion": "1.0"}},
-		"capabilities":       a2aCapabilities(),
+		"capabilities":       caps,
 		"defaultInputModes":  []string{"text/plain"},
 		"defaultOutputModes": []string{"text/plain"},
-		"skills": []map[string]any{{"id": in.Name, "name": in.Name, "description": desc,
-			"tags": []string{"shrooms", in.Harness}}},
+		"skills":             skills,
 	}
 }
 
