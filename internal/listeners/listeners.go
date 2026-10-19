@@ -196,6 +196,8 @@ func WellKnown(port uint16) string {
 		return "proxmox"
 	case 8080, 8000:
 		return "http-alt"
+	case 7392:
+		return "loam" // Loam's shrooms_mesh bearer: Scala and other Loam apps syncing over the mesh (ADR-064)
 	case 8096:
 		return "jellyfin"
 	case 9090:
