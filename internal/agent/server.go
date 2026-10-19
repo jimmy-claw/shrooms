@@ -93,7 +93,21 @@ func Handler(log *slog.Logger, m *Manager, who Who) http.Handler {
 	mux.HandleFunc("POST /v1/tasks/{id}/answer", h.taskAnswer)
 	mux.HandleFunc("POST /v1/tasks/{id}/nudge", h.taskNudge)
 	mux.HandleFunc("POST /v1/tasks/{id}/cancel", h.taskCancel)
-	return mux
+	// A request from this machine's own mesh address is refused: any local
+	// user can make one, so it says nothing about who asks. This machine's
+	// user reaches the agent through its socket, as its own tools, its cages'
+	// proxy and Foray do (audit F-24, 2026-10-19).
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !overSocket(r) {
+			if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
+				if a, err := netip.ParseAddr(host); err == nil && m.isSelf(a.Unmap()) {
+					fail(w, http.StatusForbidden, errors.New("a request from this machine's own mesh address: on this machine, use the agent's socket ("+SocketPath()+")"))
+					return
+				}
+			}
+		}
+		mux.ServeHTTP(w, r)
+	})
 }
 
 type handler struct {

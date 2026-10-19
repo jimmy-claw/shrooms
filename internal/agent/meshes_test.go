@@ -121,3 +121,20 @@ func TestACallerIsHereOrOnAMesh(t *testing.T) {
 		}
 	}
 }
+
+// A request from this machine's own mesh address is refused: any local user
+// can make one (audit F-24). Another device's is served.
+func TestTheAgentRefusesItsOwnMeshAddress(t *testing.T) {
+	m := newTestManager(t, t.TempDir())
+	m.Meshes = func() []MeshInfo { return []MeshInfo{{"office", netip.MustParseAddr("fd00::1")}} }
+	h := Handler(slog.New(slog.DiscardHandler), m, nil)
+	for from, want := range map[string]int{"[fd00::1]:4444": http.StatusForbidden, "[fd00::7]:4444": http.StatusOK} {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest("GET", "/v1/sessions", nil)
+		req.RemoteAddr = from
+		h.ServeHTTP(rec, req)
+		if rec.Code != want {
+			t.Errorf("from %s: %d, want %d", from, rec.Code, want)
+		}
+	}
+}

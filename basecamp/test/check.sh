@@ -280,7 +280,7 @@ ORDER
 expect "LOAD laptop/review=6 owed,laptop/shrooms=2 asked,pi5/jimmy=2 asked" "a card does not show what it owes and what it is waiting for"
 expect "NEEDSYOU true,false,false,false,false,false,false" "a card is amber without a needs-you task, or is not amber with one"
 # This device first: an agent on the machine Basecamp runs on is no peer of it.
-expect "PROBED=desk|office|fdb0:9afc:a5ef:1111:2222:3333:4444:5555;laptop|office|fdb0:9afc:a5ef:388c" "this device's own agent is not looked for"
+expect "PROBED=desk||local;laptop|office|fdb0:9afc:a5ef:388c" "this device's own agent is not looked for on its socket (audit F-24)"
 # History before the conversation, the conversation's rows in order, the
 # setting note, and the prompt still open.
 expect "ROWS=you,said,you,said,tool,output,note,note,you,tool,prompt" "the conversation rows are wrong"

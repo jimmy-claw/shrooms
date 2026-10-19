@@ -401,8 +401,12 @@ Item {
     }
     // The same, in the board's and the tasks' order (by name): they lay
     // themselves out by it, and this machine first would move every card.
+    // This machine, reached on its socket, is on every mesh it is on.
+    function localMeshes() {
+        return ((root.st && root.st.meshes) ? root.st.meshes : []).map(function(m) { return m.label || "" }).filter(function(l) { return l !== "" })
+    }
     readonly property var meshHosts: meshPick !== ""
-        ? agentHosts.filter(function(h) { return (h.mesh || "") === meshPick })
+        ? agentHosts.filter(function(h) { return (h.mesh || "") === meshPick || (h.address === "local" && localMeshes().indexOf(meshPick) >= 0) })
         : oneEach(agentHosts)
     // Each machine once, as it last answered, with every mesh it answers on
     // (a mesh that stopped answering keeps an old copy, not the one to show).
@@ -415,7 +419,8 @@ Item {
                 by[h.name] = Object.assign({}, h, { meshes: cur.meshes })
                 out[out.indexOf(cur)] = by[h.name]
             }
-            if (h.mesh && by[h.name].meshes.indexOf(h.mesh) < 0) by[h.name].meshes.push(h.mesh)
+            var hm = h.address === "local" ? localMeshes() : (h.mesh ? [h.mesh] : [])
+            for (var k = 0; k < hm.length; k++) if (by[h.name].meshes.indexOf(hm[k]) < 0) by[h.name].meshes.push(hm[k])
         }
         // With the sessions there only for another of its meshes, reached
         // there: a session for the home mesh alone was missing when the
@@ -522,9 +527,10 @@ Item {
         if (root.noMesh) return "this device||local"
         var out = []
         var ms = (root.st && root.st.meshes) ? root.st.meshes : []
-        for (var m = 0; m < ms.length; m++) {
-            if (ms[m] && ms[m].overlay) out.push((root.st.name || "this device") + "|" + (ms[m].label || "") + "|" + ms[m].overlay)
-        }
+        // This machine once, through its agent's socket: the agent refuses
+        // its own mesh address, which any local user could use (audit F-24,
+        // 2026-10-19). Its meshes are all of this machine's (localMeshes).
+        if (ms.length > 0) out.push((root.st.name || "this device") + "||local")
         for (var i = 0; i < root.peers.length; i++) {
             var p = root.peers[i]
             if (p.online && p.overlay) out.push(p.name + "|" + (p.mesh || "") + "|" + p.overlay)
