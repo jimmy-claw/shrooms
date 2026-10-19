@@ -50,6 +50,9 @@ func run() error {
 	if len(os.Args) > 1 && os.Args[1] == "files" {
 		return filesMain(os.Args[2:])
 	}
+	if len(os.Args) > 1 && os.Args[1] == "llm-forward" {
+		os.Exit(llmForwardMain(os.Args[2:]))
+	}
 	if len(os.Args) > 1 && os.Args[1] == "mcp" {
 		return mcpMain(os.Args[2:])
 	}
@@ -69,6 +72,9 @@ func run() error {
 	sttThreads := flag.Int("stt-threads", 0, "threads for transcription (default: this machine's cores, up to 12)")
 	piBin := flag.String("pi", "pi", "pi (pi.dev), offered for new sessions when found; \"\" to leave it out")
 	piArgs := flag.String("pi-args", "", "extra arguments for every pi session, e.g. \"--provider ollama --model qwen3\"")
+	openCodeBin := flag.String("opencode", "opencode", "OpenCode (opencode.ai), offered for new sessions when found; \"\" to leave it out")
+	openCodeModel := flag.String("opencode-model", "",
+		"the model an OpenCode session on this machine uses unless the session names one; empty leaves OpenCode's own config to decide")
 	agentSock := flag.String("agent-socket", agent.SocketPath(), "this agent's own unix socket, for this machine's user only (ADR-056)")
 	mcp := flag.Bool("mcp", true, "give every session the mesh's agents as MCP tools (shrooms-agent mcp) and tell it how to use them")
 	flag.Parse()
@@ -189,6 +195,12 @@ func run() error {
 			}
 		}
 	}
+	if *openCodeBin != "" {
+		if bin, err := exec.LookPath(*openCodeBin); err == nil {
+			m.Register(agent.OpenCode{Model: *openCodeModel}, bin)
+			log.Info("harness", "name", "opencode", "bin", bin, "model", *openCodeModel)
+		}
+	}
 	if _, err := os.Stat(*sttModel); err != nil {
 		log.Info("voice notes off: no speech-to-text model", "model", *sttModel)
 	} else if bin, err := exec.LookPath(sttEngine(*sttBin, *sttModel)); err != nil {
@@ -212,7 +224,8 @@ func run() error {
 	// own). Names and mesh addresses only: what any member already sees.
 	mux.HandleFunc("GET /v1/peers", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{"peers": names.list()})
+		peers, self := names.list()
+		json.NewEncoder(w).Encode(map[string]any{"peers": peers, "self": self})
 	})
 	srv := &http.Server{Handler: mux, ReadHeaderTimeout: 10 * time.Second, ConnContext: agent.MarkLocal}
 	var wg sync.WaitGroup
@@ -367,6 +380,10 @@ type peerNames struct {
 	mu    sync.Mutex
 	by    map[netip.Addr]string
 	peers []peer
+	// self is this machine on each of its meshes: a phone that found it on
+	// one finds it on the others, and the sessions there only for them
+	// (k11, home only, was never found on the laptop's home address).
+	self []peer
 }
 
 // peer is one member as /v1/peers reports it.
@@ -376,10 +393,10 @@ type peer struct {
 	Overlay string `json:"overlay"`
 }
 
-func (p *peerNames) list() []peer {
+func (p *peerNames) list() (peers, self []peer) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	return append([]peer{}, p.peers...)
+	return append([]peer{}, p.peers...), append([]peer{}, p.self...)
 }
 
 func (p *peerNames) update(st status) {
@@ -403,8 +420,14 @@ func (p *peerNames) update(st status) {
 			}
 		}
 	}
+	var self []peer
+	for _, m := range st.Meshes {
+		if _, err := netip.ParseAddr(m.Overlay); err == nil {
+			self = append(self, peer{Name: st.Name, Mesh: m.Label, Overlay: m.Overlay})
+		}
+	}
 	p.mu.Lock()
-	p.by, p.peers = by, peers
+	p.by, p.peers, p.self = by, peers, self
 	p.mu.Unlock()
 }
 

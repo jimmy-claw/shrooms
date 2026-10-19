@@ -58,6 +58,16 @@ data class AgentSession(
     val fileRequests: List<FileRequest> = emptyList(),
     /** The meshes it is there for, by its machine's labels; empty is every one (ADR-049). */
     val meshes: List<String> = emptyList(),
+    /** The model chosen for it; "" for its harness's default on its machine. */
+    val modelSetting: String = "",
+    /** How fast its model wrote in its last turn, output tokens a second; 0 when not known. */
+    val tokensPerSecond: Double = 0.0,
+    /**
+     * Where it is reached, when not at its machine's address as shown: under
+     * "all", a session there only for another of the machine's meshes (onMesh).
+     */
+    val at: String = "",
+    val atMesh: String = "",
 )
 
 /** A sender a session refused files from, and what it tried to send. */
@@ -85,11 +95,16 @@ fun quotaClock(ms: Long, now: Long): String {
     return if (t.toLocalDate() == java.time.Instant.ofEpochMilli(now).atZone(z).toLocalDate()) hm else "${t.dayOfMonth}.${t.monthValue}. $hm"
 }
 
-/** A cage: its image, and whether it has the machine's nix and the owner's GitHub login. */
+/** A cage: its image, and whether it has the machine's nix, the owner's GitHub login and the shared folder. */
 data class SessionCage(
     val image: String, val nix: Boolean = false, val github: Boolean = false,
     /** Sealed (ADR-045): for code nobody vouches for; results in [outbox] on the machine. */
     val sealed: Boolean = false, val outbox: String = "",
+    /** The shared folder (ADR-057), at /shared; never for a sealed cage. */
+    val shared: Boolean = false,
+    /** Its own memory and CPUs, "" for the machine's, which follow. */
+    val memory: String = "", val cpus: String = "",
+    val machineMemory: String = "", val machineCpus: String = "",
 ) {
     fun json(): JSONObject = JSONObject().apply {
         if (image.isNotEmpty()) put("image", image)
@@ -97,11 +112,16 @@ data class SessionCage(
         if (sealed) { put("sealed", true); return@apply }
         if (nix) put("nix", true)
         if (github) put("github", true)
+        if (shared) put("shared", true)
     }
 
     companion object {
         fun parse(o: JSONObject?): SessionCage? = o?.let {
-            SessionCage(it.optString("image"), it.optBoolean("nix"), it.optBoolean("github"), it.optBoolean("sealed"), it.optString("outbox"))
+            // The list names the folder's volume; a note says true.
+            SessionCage(it.optString("image"), it.optBoolean("nix"), it.optBoolean("github"), it.optBoolean("sealed"), it.optString("outbox"),
+                shared = it.opt("shared").let { v -> v == true || (v is String && v.isNotEmpty()) },
+                memory = it.optString("memory"), cpus = it.optString("cpus"),
+                machineMemory = it.optString("machine_memory"), machineCpus = it.optString("machine_cpus"))
         }
     }
 }
@@ -116,6 +136,8 @@ data class CageOffer(
     val images: List<String> = listOf(image), val nix: Boolean = false,
     /** Whether the machine has a token of its own for sealed cages. */
     val sealed: Boolean = false,
+    /** Whether it offers the shared folder (ADR-057), and where a cage sees it. */
+    val shared: Boolean = false, val sharedIn: String = "/shared",
 )
 
 /** What "+ session" offers on a machine: its harnesses, and a cage if it has podman. */
@@ -201,6 +223,8 @@ class AgentClient(private val address: String) {
                 acceptCaged = s.optBoolean("accept_caged"),
                 acceptFilesFrom = s.optJSONArray("accept_files_from")?.let { a -> (0 until a.length()).map { a.getString(it) } }.orEmpty(),
                 meshes = s.optJSONArray("meshes")?.let { a -> (0 until a.length()).map { a.getString(it) } }.orEmpty(),
+                modelSetting = s.optString("model_setting"),
+                tokensPerSecond = s.optDouble("tokens_per_second", 0.0),
                 fileRequests = s.optJSONArray("file_requests")?.let { a ->
                     (0 until a.length()).map { val f = a.getJSONObject(it); FileRequest(f.optString("from"), f.optString("name"), f.optLong("size")) }
                 }.orEmpty(),
@@ -267,6 +291,16 @@ class AgentClient(private val address: String) {
     }
 
     /** Whether the session takes tasks from caged agents. */
+    /** The model it runs on; "" goes back to its harness's default. The agent stops it to change it. */
+    fun setModel(session: String, model: String) {
+        request("POST", "/v1/sessions/${enc(session)}/settings", JSONObject().put("model", model).toString())
+    }
+
+    /** A caged session's memory and CPUs, "" for the machine's: set on its cage where it is. */
+    fun setCageLimits(session: String, memory: String, cpus: String): SessionCage? =
+        SessionCage.parse(JSONObject(request("POST", "/v1/sessions/${enc(session)}/cage/limits",
+            JSONObject().put("memory", memory).put("cpus", cpus).toString())).optJSONObject("cage"))
+
     fun setAcceptCaged(session: String, on: Boolean) {
         request("POST", "/v1/sessions/${enc(session)}/settings", JSONObject().put("accept_caged", on).toString())
     }
@@ -445,13 +479,7 @@ class AgentClient(private val address: String) {
     }
 
     /** The mesh as the agent's machine sees it: (name, mesh, overlay address). */
-    fun peers(): List<Triple<String, String, String>> {
-        val a = JSONObject(request("GET", "/v1/peers", null, 4000)).optJSONArray("peers") ?: return emptyList()
-        return (0 until a.length()).map { i ->
-            val o = a.getJSONObject(i)
-            Triple(o.optString("name"), o.optString("mesh"), o.optString("overlay"))
-        }.filter { isMeshAddress(it.third) }
-    }
+    fun peers(): List<Triple<String, String, String>> = parsePeerList(request("GET", "/v1/peers", null, 4000))
 
     fun interrupt(session: String) {
         request("POST", "/v1/sessions/${enc(session)}/interrupt", null)
@@ -600,6 +628,23 @@ fun parseOffer(raw: String): SessionOffer {
         val ims = it.optJSONArray("images")
         CageOffer(it.optString("image"), it.optBoolean("ready"), it.optBoolean("building"), it.optString("error"),
             (0 until (ims?.length() ?: 0)).map { i -> ims!!.getString(i) }.ifEmpty { listOf(it.optString("image")) },
-            it.optBoolean("nix"), it.optBoolean("sealed"))
+            it.optBoolean("nix"), it.optBoolean("sealed"),
+            it.optBoolean("shared"), it.optString("shared_in").ifEmpty { "/shared" })
     })
+}
+
+/**
+ * An agent's /v1/peers: its machine's peers, and the machine itself on each of
+ * its meshes ("self", from 0.53.4), so that a machine found on one mesh is
+ * looked for on the others too. Mesh addresses only. Pure, for the tests.
+ */
+fun parsePeerList(json: String): List<Triple<String, String, String>> {
+    val o = JSONObject(json)
+    return listOf("peers", "self").flatMap { k ->
+        val a = o.optJSONArray(k) ?: return@flatMap emptyList()
+        (0 until a.length()).map { i ->
+            val p = a.getJSONObject(i)
+            Triple(p.optString("name"), p.optString("mesh"), p.optString("overlay"))
+        }
+    }.filter { AgentClient.isMeshAddress(it.third) }
 }

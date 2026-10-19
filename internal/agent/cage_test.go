@@ -31,17 +31,33 @@ echo "$*" >> $D/calls
 case "$1" in
 image) ` + imageExists + ` ;;
 container) [ -f "$D/c-$3" ]; exit $? ;;
-create) while [ "$1" != "--name" ]; do shift; done; touch "$D/c-$2" ;;
-rm) eval last=\${$#}; rm -f "$D/c-$last" "$D/c-$last.old" ;;
+create) shared=$(echo "$*" | sed -n 's/.*xyz\.vpavlin\.shrooms\.shared=\([^ ]*\).*/\1/p')
+  while [ "$1" != "--name" ]; do shift; done; touch "$D/c-$2"
+  [ -z "$shared" ] || echo "$shared" > "$D/c-$2.shared" ;;
+volume)
+  eval last=\${$#}
+  case "$2" in
+  inspect) [ -f "$D/v-$last" ] || exit 1; cat "$D/v-$last" ;;
+  create) echo "local map[]" > "$D/v-$last" ;;
+  esac ;;
+rm) eval last=\${$#}; rm -f "$D/c-$last" "$D/c-$last.old" "$D/c-$last.shared" ;;
 inspect)
   case "$3" in
   *Pid*) echo 4242 ;;
-  *proxy*) [ -f "$D/c-$4.old" ] || echo 2 ;;
-  *sealed*) echo 1 ;;
+  *proxy*) [ -f "$D/c-$4.old" ] || echo ` + cageGeneration + ` ;;
+  *sealed*) echo ` + sealedGeneration + ` ;;
+  *shared*) cat "$D/c-$4.shared" 2>/dev/null ;;
   esac ;;
 unshare) cat > "$D/nft-rules" ;;
 build) cat > $D/Containerfile ;;
 exec)
+  # The gateway's forwarder, started in the background: nothing to run here.
+  case "$*" in *llm-forward*) exit 0 ;; esac
+  case "$*" in *if_inet6*)
+    # A cage whose pasta is gone, once: loopback only.
+    if [ -f "$D/nonet-$2" ]; then rm "$D/nonet-$2"; echo "00000000000000000000000000000001 01 80 10 80       lo"; exit 0; fi
+    echo "fd5eca9e000100000000000000000002 02 40 00 00     eth0"; exit 0 ;;
+  esac
   shift
   while :; do
     case "$1" in
@@ -141,9 +157,12 @@ func TestACagedSessionRunsInItsOwnContainer(t *testing.T) {
 		t.Fatalf("the agent port is not closed in the cage before the harness runs: %q", cs)
 	}
 
-	// What the harness is given: its keys and who it is, not the machine's.
+	// What the harness is given: who it is and where things are; no keys, and nothing of the machine's.
 	env, _ := os.ReadFile(filepath.Join(state, "cages", name[1]+".env"))
-	for _, want := range []string{"ANTHROPIC_API_KEY=sk-test\n", "IS_SANDBOX=1\n", "SHROOMS_AGENT_SESSION=box\n", "HOME=" + home + "\n",
+	if strings.Contains(string(env), "sk-test") {
+		t.Errorf("the agent's API key is in the cage, which reaches its model through the gateway:\n%s", env)
+	}
+	for _, want := range []string{"IS_SANDBOX=1\n", "SHROOMS_AGENT_SESSION=box\n", "HOME=" + home + "\n",
 		"SHROOMS_AGENT_PROXY=" + CageProxyDir + "/proxy.sock\n"} {
 		if !strings.Contains(string(env), want) {
 			t.Errorf("the cage's environment lacks %q:\n%s", want, env)
@@ -243,15 +262,22 @@ func TestWorkLeftRunningInACage(t *testing.T) {
 	}
 }
 
+// Only what is named goes into a cage: the locale, the time zone, the
+// proxies and its harness's settings; no key or token of any name, and none
+// of the machine's own.
 func TestWhatACageIsGiven(t *testing.T) {
-	if passedToCage("GH_TOKEN", false) || passedToCage("GITHUB_TOKEN", false) || !passedToCage("GITHUB_TOKEN", true) {
-		t.Error("GitHub's tokens reach a cage without the GitHub login, or not with it")
-	}
-	for k, want := range map[string]bool{"ANTHROPIC_API_KEY": true, "VENICE_API_KEY": true, "CLAUDE_CODE_OAUTH_TOKEN": true,
-		"CLAUDE_CODE_SESSION_ID": false, "CLAUDE_CODE_MESSAGING_TOKEN": false, "PATH": false, "HOME": false, "SSH_AUTH_SOCK": false, "DISPLAY": false, "DBUS_SESSION_BUS_ADDRESS": false} {
-		if passedToCage(k, false) != want {
+	claude := cageHarnessEnv(Claude{})
+	for k, want := range map[string]bool{"TZ": true, "LANG": true, "LC_ALL": true, "HTTPS_PROXY": true, "no_proxy": true,
+		"ANTHROPIC_MODEL": true, "ANTHROPIC_API_KEY": false, "ANTHROPIC_AUTH_TOKEN": false, "VENICE_API_KEY": false,
+		"VENICE_INFERENCE_KEY": false, "OPENROUTER_API_KEY": false, "CLAUDE_CODE_OAUTH_TOKEN": false, "GH_TOKEN": false,
+		"GITHUB_TOKEN": false, "MY_SECRET": false, "SOME_NEW_THING": false, "CLAUDE_CODE_SESSION_ID": false, "PATH": false,
+		"HOME": false, "SSH_AUTH_SOCK": false, "DISPLAY": false, "DBUS_SESSION_BUS_ADDRESS": false} {
+		if cageEnvAllowed(k, claude) != want {
 			t.Errorf("%s given to a cage: %v, want %v", k, !want, want)
 		}
+	}
+	if cageEnvAllowed("ANTHROPIC_MODEL", cageHarnessEnv(Pi{})) {
+		t.Error("Claude Code's settings go to pi's cage")
 	}
 }
 
@@ -470,4 +496,78 @@ func TestAnOldCageIsMadeAgain(t *testing.T) {
 		t.Fatalf("an old cage is not made again before it is used: %q", cs)
 	}
 	waitFor(t, s, 0, func(e Event) bool { return e.Kind == "caged" && strings.Contains(string(e.Data), "made again") })
+}
+
+// A cage is started in a systemd scope of its own when the agent runs under
+// systemd, so restarting the agent does not kill its network; and one found
+// running without its network is stopped and started again.
+func TestACageKeepsItsNetwork(t *testing.T) {
+	podman, log := fakePodman(t, false)
+	dir := filepath.Dir(log)
+	sr := filepath.Join(t.TempDir(), "systemd-run")
+	os.WriteFile(sr, []byte("#!/bin/sh\necho \"systemd-run $*\" >> "+log+"\nwhile [ \"$1\" != -- ]; do shift; done; shift; exec \"$@\"\n"), 0o755)
+	m := newTestManager(t, t.TempDir())
+	m.Cages = &Cages{Podman: podman, Image: "localhost/bench:1", Nft: "nft", SystemdRun: sr}
+	if _, err := m.CreateCaged("box", t.TempDir(), "claude", &Cage{}); err != nil {
+		t.Fatal(err)
+	}
+	s, _ := m.Get("box")
+	name := s.cage.Container
+	os.WriteFile(filepath.Join(dir, "nonet-"+name), nil, 0o600)
+	if err := s.Send("hello", "phone"); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, s, 0, func(e Event) bool { return strings.Contains(assistantText(e), "hello") })
+	cs := calls(t, log)
+	scoped := indexOf(cs, `^systemd-run --user --scope .* -- \S+ start `+name+`$`)
+	stop := indexOf(cs, `^stop -t 3 `+name+`$`)
+	again := -1
+	if stop >= 0 {
+		again = indexOf(cs[stop:], `^systemd-run --user --scope .* start `+name+`$`)
+	}
+	if scoped < 0 || stop < scoped || again < 0 {
+		t.Fatalf("the cage is not started in a scope of its own, or not started again without its network: %q", cs)
+	}
+}
+
+// A cage's own limits: made with them, changed on the cage that exists (not
+// made again, so what was installed stays), refused for nonsense, and "" is
+// the machine's again.
+func TestACagesLimitsAreItsOwn(t *testing.T) {
+	podman, log := fakePodman(t, false)
+	m := newTestManager(t, t.TempDir())
+	m.Cages = &Cages{Podman: podman, Image: "localhost/bench:1", Memory: "4g", CPUs: "2", Nft: "nft"}
+	if _, err := m.CreateCaged("box", t.TempDir(), "claude", &Cage{Memory: "8g"}); err != nil {
+		t.Fatal(err)
+	}
+	s, _ := m.Get("box")
+	if err := s.Send("hello", "phone"); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, s, 0, func(e Event) bool { return strings.Contains(assistantText(e), "hello") })
+	cs := calls(t, log)
+	create := indexOf(cs, `^create `)
+	if create < 0 || !strings.Contains(cs[create], "--memory 8g ") || !strings.Contains(cs[create], "--cpus 2 ") {
+		t.Fatalf("not made with its own memory and the machine's CPUs: %q", cs)
+	}
+	in, err := m.SetCageLimits("box", "16g", "1", "phone")
+	if err != nil || in.Cage.Memory != "16g" || in.Cage.CPUs != "1" || in.Cage.MachineMemory != "4g" {
+		t.Fatalf("set: %v %+v", err, in.Cage)
+	}
+	cs = calls(t, log)
+	if indexOf(cs, `^update --memory 16g --cpus 1 `+s.cage.Container+`$`) < 0 || indexOf(cs[create+1:], `^(create|rm) `) >= 0 {
+		t.Fatalf("the cage was not changed where it is, or was made again: %q", cs[create:])
+	}
+	for _, bad := range [][2]string{{"lots", ""}, {"", "-1"}, {"", "100000"}, {"16g; rm", ""}} {
+		if _, err := m.SetCageLimits("box", bad[0], bad[1], "phone"); err == nil {
+			t.Errorf("%q / %q taken as limits", bad[0], bad[1])
+		}
+	}
+	if in, _ := m.SetCageLimits("box", "", "", "phone"); in.Cage.Memory != "" {
+		t.Errorf("back to the machine's: %+v", in.Cage)
+	}
+	m2 := newTestManager(t, m.dir)
+	if s2, _ := m2.Get("box"); s2 == nil || s2.cage.Memory != "" {
+		t.Error("the limits set are not what is kept")
+	}
 }

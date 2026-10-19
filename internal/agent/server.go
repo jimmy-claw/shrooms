@@ -34,6 +34,8 @@ func Handler(log *slog.Logger, m *Manager, who Who) http.Handler {
 	mux.HandleFunc("GET /v1/meshes", h.meshList)
 	// What the model did, turn by turn, by day, session, the device that asked
 	// and model (usage.go); ?since=2006-01-02 limits it.
+	// For Prometheus, beside the daemon's own (metrics.go).
+	mux.HandleFunc("GET /metrics", h.metrics)
 	mux.HandleFunc("GET /v1/usage", func(w http.ResponseWriter, r *http.Request) {
 		host, _ := os.Hostname()
 		// Rows first: reading them is what brings the limits up to date.
@@ -70,6 +72,7 @@ func Handler(log *slog.Logger, m *Manager, who Who) http.Handler {
 	mux.HandleFunc("POST /v1/sessions/{name}/restart", h.restart)
 	mux.HandleFunc("POST /v1/sessions/{name}/rename", h.rename)
 	mux.HandleFunc("POST /v1/sessions/{name}/cage", h.cage)
+	mux.HandleFunc("POST /v1/sessions/{name}/cage/limits", h.cageLimits)
 	// A2A (a2a.go): the machine's card, each session's, and JSON-RPC.
 	mux.HandleFunc("GET /.well-known/agent-card.json", h.machineCard)
 	mux.HandleFunc("GET /a2a/{name}/.well-known/agent-card.json", h.a2aCard)
@@ -96,6 +99,11 @@ type handler struct {
 }
 
 func (h *handler) caller(r *http.Request) string {
+	if overSocket(r) {
+		// This machine's own user (ADR-056): named as the machine, so a
+		// session's claim beside it is kept and the board can link it.
+		return h.m.selfName()
+	}
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
 		return ""
@@ -142,7 +150,8 @@ func (h *handler) list(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"sessions": list, "limits": h.m.Limits(), "credits": h.m.Credits()})
+	writeJSON(w, http.StatusOK, map[string]any{"sessions": list, "limits": h.m.Limits(), "credits": h.m.Credits(),
+		"machine": h.m.selfName()})
 }
 
 func (h *handler) create(w http.ResponseWriter, r *http.Request) {
@@ -222,6 +231,8 @@ func (h *handler) update(w http.ResponseWriter, r *http.Request) {
 		Meshes *[]string `json:"meshes"`
 		// A refused sender's request, set aside without allowing it.
 		IgnoreFileRequest *string `json:"ignore_file_request"`
+		// The model it runs on; "" for its harness's default (SetModel).
+		Model *string `json:"model"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		fail(w, http.StatusBadRequest, err)
@@ -240,6 +251,13 @@ func (h *handler) update(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		h.log.Info("meshes changed", "session", s.Name(), "meshes", *req.Meshes, "by", h.caller(r))
+	}
+	if req.Model != nil {
+		if err := s.SetModel(*req.Model, h.caller(r)); err != nil {
+			fail(w, http.StatusConflict, err)
+			return
+		}
+		h.log.Info("model changed", "session", s.Name(), "model", *req.Model, "by", h.caller(r))
 	}
 	if req.IgnoreFileRequest != nil {
 		s.IgnoreFileAsk(*req.IgnoreFileRequest)
@@ -674,6 +692,34 @@ func (h *handler) events(w http.ResponseWriter, r *http.Request) {
 
 // cage moves a session into a cage, changes it, or takes it out:
 // {"cage": {image?, nix?, github?}} or {"cage": null}.
+// cageLimits sets a caged session's memory and CPUs, without making its cage
+// again: {"memory":"16g","cpus":"8"}, "" for the machine's.
+func (h *handler) cageLimits(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Memory string `json:"memory"`
+		CPUs   string `json:"cpus"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		fail(w, http.StatusBadRequest, err)
+		return
+	}
+	// Not from a cage: a caged agent does not give itself more of the machine.
+	if r.Header.Get(cagedHeader) != "" {
+		fail(w, http.StatusForbidden, errors.New("a caged agent cannot change a cage's limits"))
+		return
+	}
+	if _, ok := h.session(w, r); !ok {
+		return
+	}
+	in, err := h.m.SetCageLimits(r.PathValue("name"), req.Memory, req.CPUs, h.caller(r))
+	if err != nil {
+		fail(w, http.StatusConflict, err)
+		return
+	}
+	h.log.Info("cage limits changed", "session", in.Name, "memory", req.Memory, "cpus", req.CPUs, "by", h.caller(r))
+	writeJSON(w, http.StatusOK, in)
+}
+
 func (h *handler) cage(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Cage *Cage `json:"cage"`

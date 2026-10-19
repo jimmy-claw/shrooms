@@ -112,6 +112,26 @@ func remoteAddr(r *http.Request) (netip.Addr, error) {
 	return a.Unmap(), nil
 }
 
+// selfName is this machine's name as its sessions sign their tasks: the
+// mesh's name for it, or the hostname with no mesh (machines, first).
+func (m *Manager) selfName() string {
+	if ms, err := m.machines(); err == nil && len(ms) > 0 {
+		return ms[0].Name
+	}
+	host, _ := os.Hostname()
+	return host
+}
+
+// remote is whether a request came from another device: a mesh peer the
+// agent can name. Not the socket, whose caller is now named as this machine
+// (so its sessions' tasks keep their asker), and which only this machine's
+// user can open. Checking "caller has a name" for "remote" refused this
+// machine's own sessions their task_update once the socket was named
+// (2026-10-14, the no-mesh demo's pi sessions).
+func (h *handler) remote(r *http.Request) bool {
+	return !overSocket(r) && h.caller(r) != ""
+}
+
 // mcpArgs tell the MCP tools a session starts which daemon and which agent
 // are theirs: this agent's own.
 func (m *Manager) mcpArgs() []string {

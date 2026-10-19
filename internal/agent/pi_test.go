@@ -164,6 +164,23 @@ func TestAPiErrorIsShown(t *testing.T) {
 	waitFor(t, s, 0, func(e Event) bool { return assistantText(e) == "error: connection refused" })
 }
 
+// A turn that runs out of output while still thinking, with no answer, says
+// so and ends as failed, rather than as a success with nothing to show.
+func TestAPiTurnOutOfOutputSaysSo(t *testing.T) {
+	_, s := newPiSession(t)
+	s.Send("ramble", "")
+	r := waitFor(t, s, 0, isResult)
+	if claudeType(r) != "result/error_during_execution" {
+		t.Errorf("result %s", r.Data)
+	}
+	waitFor(t, s, 0, func(e Event) bool {
+		return strings.HasPrefix(assistantText(e), "error: the model used all its output (5 tokens) before it answered")
+	})
+	if in := s.Info(); !strings.Contains(in.Preview, "used all its output") {
+		t.Errorf("the session list does not say it: %q", in.Preview)
+	}
+}
+
 // What was said in pi before the agent had the session — read from pi's own
 // session file — is its history, and searchable.
 func TestAPiSessionsHistoryIsItsTranscript(t *testing.T) {
@@ -203,6 +220,7 @@ func TestAPiSessionsHistoryIsItsTranscript(t *testing.T) {
 func TestHarnessesOverHTTP(t *testing.T) {
 	m := newTestManager(t, t.TempDir())
 	m.Register(Pi{}, fakePiBin(t))
+	m.Register(OpenCode{}, fakeOpenCodeBin(t))
 	srv := httptest.NewServer(Handler(slog.New(slog.DiscardHandler), m, nil))
 	t.Cleanup(srv.Close)
 
@@ -213,9 +231,30 @@ func TestHarnessesOverHTTP(t *testing.T) {
 	var hs struct{ Harnesses []HarnessInfo }
 	json.NewDecoder(r.Body).Decode(&hs)
 	r.Body.Close()
-	if len(hs.Harnesses) != 2 || hs.Harnesses[0].Name != "claude" || !hs.Harnesses[0].Caps.Approve ||
-		hs.Harnesses[1].Name != "pi" || hs.Harnesses[1].Caps.Approve {
-		t.Errorf("harnesses %+v", hs.Harnesses)
+	// Three now. Looked up by NAME: the API sorts them, so an index would be
+	// asserting the order of a list nothing promises.
+	if len(hs.Harnesses) != 3 {
+		t.Fatalf("harnesses %+v", hs.Harnesses)
+	}
+	byName := map[string]HarnessInfo{}
+	for _, h := range hs.Harnesses {
+		byName[h.Name] = h
+	}
+	for _, name := range []string{"claude", "pi", "opencode"} {
+		if _, ok := byName[name]; !ok {
+			t.Errorf("%s is not offered to the apps: %+v", name, hs.Harnesses)
+		}
+	}
+	if !byName["claude"].Caps.Approve {
+		t.Error("Claude Code does ask before using tools, so it offers auto-approve")
+	}
+	// pi and OpenCode never ask, so auto-approve would mean nothing and must
+	// not be offered — for OpenCode that is measured, not assumed.
+	if byName["pi"].Caps.Approve || byName["opencode"].Caps.Approve {
+		t.Errorf("auto-approve offered where nothing asks: %+v", byName)
+	}
+	if byName["opencode"].Title != "OpenCode" {
+		t.Errorf("its title: %q", byName["opencode"].Title)
 	}
 	post := func(body string) (int, string) {
 		r, err := http.Post(srv.URL+"/v1/sessions", "application/json", bytes.NewReader([]byte(body)))
@@ -426,7 +465,7 @@ func TestAPiConversationFromElsewhereIsContinued(t *testing.T) {
 // be working while no turn is known to run here — retrying a 429 after the
 // failed attempt's agent_end — and an idle pi starts a follow-up at once.
 func TestAPiMessageIsNeverRefusedAsBusy(t *testing.T) {
-	c := Pi{}.Codec()
+	c := Pi{}.Codec(StartOptions{})
 	c.Decode(json.RawMessage(`{"type":"agent_start"}`))
 	c.Decode(json.RawMessage(`{"type":"agent_end","messages":[]}`))
 	for _, cmd := range c.Turn("there should be api docs in the repo") {

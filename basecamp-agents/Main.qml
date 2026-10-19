@@ -36,6 +36,36 @@ Item {
     // hand the view a stand-in (test/AgentsHarness.qml).
     property var bridge: typeof logos !== "undefined" ? logos : null
     readonly property bool haveCore: !!bridge && !!bridge.callModule
+
+    // Told by the core when something shown changed (agentChanged, core
+    // 0.26): read at once, rather than polling fast to notice. Events are not
+    // guaranteed to arrive in every host, so the poll stays as a safety net:
+    // every 3 s once events have been seen, as before with a core that sends
+    // none. Subscribed after the first paint: a call to the core during
+    // construction freezes the view.
+    property bool coreEvents: false
+    property bool pumpQueued: false
+    function subscribeCore() {
+        if (bridge && bridge.onModuleEvent) bridge.onModuleEvent("shrooms_core", "agentChanged")
+    }
+    function coreChanged(what) {
+        root.coreEvents = true
+        if (!agentOpen) return
+        if (what === "events") {
+            if (pumpQueued) return
+            root.pumpQueued = true
+            Qt.callLater(function() { root.pumpQueued = false; root.pumpAgent() })
+        } else if (what === "jobs") Qt.callLater(root.readJobs)
+        else if (what === "outbox") Qt.callLater(root.refreshOutbox)
+    }
+    Connections {
+        target: root.bridge
+        ignoreUnknownSignals: true
+        function onModuleEventReceived(moduleName, eventName, data) {
+            if (moduleName === "shrooms_core" && eventName === "agentChanged")
+                root.coreChanged(data && data.length ? String(data[0]) : "events")
+        }
+    }
     function callCore(method, args) {
         if (!haveCore) return ""
         try {
@@ -296,6 +326,9 @@ Item {
         prefsLoaded = true
         // The machines as last seen, at once (mergeHosts).
         try {
+            // Only a mesh's name: anything else (an error, nothing kept) is all.
+            var mp = String(callCore("getPref", ["agent_mesh"]) || "")
+            root.meshPick = /^[A-Za-z0-9._-]{1,40}$/.test(mp) ? mp : ""
             var kept = JSON.parse(String(callCore("getPref", ["agent_hosts"]) || "[]"))
             if (Array.isArray(kept) && root.agentHosts.length === 0)
                 root.agentHosts = kept.filter(function(h) { return h && h.name && h.address && Array.isArray(h.sessions) })
@@ -319,7 +352,7 @@ Item {
         callCore("setPref", [key, String(value)])
     }
     // After the first paint: a call during construction freezes the view.
-    Component.onCompleted: Qt.callLater(function() { root.loadPrefs(); root.reload() })
+    Component.onCompleted: Qt.callLater(function() { root.loadPrefs(); root.reload(); root.subscribeCore() })
 
     Rectangle { anchors.fill: parent; color: cVoid }
 
@@ -344,6 +377,69 @@ Item {
     // Always open: this module is the panel.
     readonly property bool agentsOpen: true
     property var agentHosts: []
+    // Which mesh's agents are shown: "" for all of them. Each mesh is a world
+    // of its own (a home mesh beside an office one), and seen together the
+    // machines of both crowd one list. Kept as a preference.
+    property string meshPick: ""
+    readonly property var meshNames: {
+        var seen = {}, out = []
+        for (var i = 0; i < agentHosts.length; i++) {
+            var m = agentHosts[i].mesh || ""
+            if (m !== "" && !seen[m]) { seen[m] = true; out.push(m) }
+        }
+        return out.sort()
+    }
+    // This machine: the one this Basecamp runs on, first in the list and
+    // marked, since its agent is the one most often talked to from here.
+    function isHere(h) { return h.address === "local" || (!!root.st.name && h.name === root.st.name) }
+    // As shown: one mesh's entries, or with "all" each machine once, with
+    // every mesh it answers on; this machine first, then by name.
+    readonly property var shownHosts: {
+        var out = meshHosts.map(function(h) { return Object.assign({}, h, { here: isHere(h) }) })
+        out.sort(function(a, b) { return a.here !== b.here ? (a.here ? -1 : 1) : (a.name < b.name ? -1 : a.name > b.name ? 1 : 0) })
+        return out
+    }
+    // The same, in the board's and the tasks' order (by name): they lay
+    // themselves out by it, and this machine first would move every card.
+    readonly property var meshHosts: meshPick !== ""
+        ? agentHosts.filter(function(h) { return (h.mesh || "") === meshPick })
+        : oneEach(agentHosts)
+    // Each machine once, as it last answered, with every mesh it answers on
+    // (a mesh that stopped answering keeps an old copy, not the one to show).
+    function oneEach(hosts) {
+        var out = [], by = {}
+        for (var i = 0; i < hosts.length; i++) {
+            var h = hosts[i], cur = by[h.name]
+            if (!cur) { by[h.name] = Object.assign({}, h, { meshes: [] }); out.push(by[h.name]) }
+            else if ((h.lastSeen || 0) > (cur.lastSeen || 0)) {
+                by[h.name] = Object.assign({}, h, { meshes: cur.meshes })
+                out[out.indexOf(cur)] = by[h.name]
+            }
+            if (h.mesh && by[h.name].meshes.indexOf(h.mesh) < 0) by[h.name].meshes.push(h.mesh)
+        }
+        // With the sessions there only for another of its meshes, reached
+        // there: a session for the home mesh alone was missing when the
+        // office copy was shown (k11, 2026-10-16). Agents.kt's onMesh.
+        return out.map(function(x) {
+            var ss = (x.sessions || []).slice(), others = hosts.filter(function(o) { return o.name === x.name && o !== x && o.address !== x.address })
+            others.sort(function(a, b) { return (b.lastSeen || 0) - (a.lastSeen || 0) })
+            var more = 0
+            for (var i = 0; i < others.length; i++)
+                for (var j = 0; j < (others[i].sessions || []).length; j++) {
+                    var o = others[i].sessions[j]
+                    if (ss.some(function(y) { return y.name === o.name })) continue
+                    ss.push(Object.assign({}, o, { at: others[i].address, atMesh: others[i].mesh })); more++
+                }
+            if (more) ss.sort(function(a, b) { return a.name < b.name ? -1 : a.name > b.name ? 1 : 0 })
+            return Object.assign({}, x, { meshes: x.meshes.slice().sort(), sessions: ss })
+        })
+    }
+    // The machine as a session is reached: on the mesh it is there for.
+    function hostFor(h, s) { return (s && s.at) ? Object.assign({}, h, { address: s.at, mesh: s.atMesh }) : h }
+    function pickMesh(m) {
+        root.meshPick = m
+        savePref("agent_mesh", m)
+    }
     property var agentOpen: null          // {address, name, mesh, session}
     property var agentEventsList: []      // the agent's events, partials left out
     property var agentEarlier: []         // from the transcript, before the events
@@ -443,11 +539,18 @@ Item {
         var hosts = [], seen = {}
         for (var i = 0; i < r.length; i++) {
             var h = r[i]
-            // One machine on several meshes answers on each of its addresses;
-            // it is one machine with one set of sessions.
-            if (seen[h.name]) continue
-            seen[h.name] = true
-            hosts.push({ name: h.name, mesh: h.mesh, address: h.address,
+            // One machine on several meshes answers on each of its addresses,
+            // and each mesh may see other sessions of it (ADR-049): one entry
+            // per machine and mesh. Kept once by name, a machine was listed on
+            // whichever mesh answered first ("default"), and the mesh switch
+            // could not find it on the others (2026-10-16).
+            if (seen[h.name + "@" + h.mesh]) continue
+            seen[h.name + "@" + h.mesh] = true
+            // Without a mesh the machine is "this device" to the view but
+            // its hostname to its sessions, which sign their tasks with it:
+            // named as the agent says, so the board's links find their cards.
+            var hname = (h.address === "local" && h.list && h.list.machine) ? h.list.machine : h.name
+            hosts.push({ name: hname, mesh: h.mesh, address: h.address,
                          sessions: (h.list && h.list.sessions) ? h.list.sessions : [],
                          tasks: (h.tasks && h.tasks.tasks) ? h.tasks.tasks : [] })
             // Where its subscription stands comes with the list: kept for the
@@ -470,27 +573,29 @@ Item {
     // The list kept between rounds of finding — the phone's HostCache: a
     // machine that misses a round stays where it is, with its sessions as last
     // seen, rather than vanishing, coming back, and moving everything under
-    // the reader. Greyed once quiet for staleMs; forgotten after forgetMs.
-    readonly property double staleMs: 25000
+    // the reader. Offline once it has missed missedRounds rounds in a row,
+    // by rounds and not by time (the phone's, 2026-10-16); forgotten after
+    // forgetMs.
+    readonly property int missedRounds: 2
     readonly property double forgetMs: 7 * 24 * 3600 * 1000
     property double nowMs: Date.now()
     property double lastHostsSave: 0
     function mergeHosts(prev, found, now) {
         var out = [], names = {}
         for (var i = 0; i < found.length; i++) {
-            var h = Object.assign({}, found[i], { lastSeen: now })
-            names[h.name] = true
+            var h = Object.assign({}, found[i], { lastSeen: now, missed: 0 })
+            names[h.name + "@" + h.mesh] = true
             out.push(h)
         }
         for (i = 0; i < (prev || []).length; i++) {
             var p = prev[i]
-            if (names[p.name] || !(now - (p.lastSeen || 0) < forgetMs)) continue
-            out.push(p)
+            if (names[p.name + "@" + p.mesh] || !(now - (p.lastSeen || 0) < forgetMs)) continue
+            out.push(Object.assign({}, p, { missed: (p.missed || 0) + 1 }))
         }
-        out.sort(function(a, b) { return a.name < b.name ? -1 : 1 })
+        out.sort(function(a, b) { return a.name < b.name ? -1 : a.name > b.name ? 1 : 0 })
         return out
     }
-    function hostReachable(h, now) { return (now === undefined ? nowMs : now) - (h.lastSeen || 0) < staleMs }
+    function hostReachable(h) { return (h.missed || 0) < missedRounds }
 
     // Replies not yet seen in this Basecamp, per session (the phone's Unread):
     // the session's turns — one per reply, counted by the agent — less those
@@ -566,7 +671,9 @@ Item {
         chatModel.clear()
         // fresh: without the copy kept by the core (it is of a session since
         // made again), which a negative tail says.
-        agentCall("agentWatch", [h.address, s, String(fresh && t > 0 ? -t : t)])
+        var watched = agentCall("agentWatch", [h.address, s, String(fresh && t > 0 ? -t : t)])
+        // A core that sends agentChanged says so: poll only as a safety net.
+        if (watched && watched.events) root.coreEvents = true
         root.agentEarlierAsked = false
         root.agentCaughtUp = false
         // The last session's connection says nothing about this one's.
@@ -605,7 +712,19 @@ Item {
         })
     }
 
+    // One read at a time. A call to the core blocks in a nested event loop,
+    // in which a core event (agentChanged) or the timer can start another
+    // read from the same point: both appended the same events, and replies
+    // showed twice (2026-10-16). A read asked for meanwhile runs after.
+    property bool pumping: false
+    property bool pumpAgain: false
     function pumpAgent() {
+        if (pumping) { root.pumpAgain = true; return }
+        root.pumping = true
+        try { pumpAgentOnce() } finally { root.pumping = false }
+        if (pumpAgain) { root.pumpAgain = false; Qt.callLater(pumpAgent) }
+    }
+    function pumpAgentOnce() {
         if (!agentOpen) return
         var r = unwrap(callCore("agentEvents", [String(agentNext)]))
         if (!r || r.next === undefined) return
@@ -637,15 +756,31 @@ Item {
             fetchEarlier()
             return
         }
-        var evs = root.agentEventsList.slice()
         var streaming = root.agentStreaming
+        var fresh = []
         for (var i = 0; i < r.events.length; i++) {
             var e = r.events[i]
             if (e.kind === "partial") { streaming += (e.data && e.data.text) || ""; continue }
             var t = e.data ? e.data.type : ""
             if (e.kind === "claude" && (t === "assistant" || t === "result")) streaming = ""
-            evs.push(e)
+            fresh.push(e)
         }
+        // Only pieces of the reply as it streams: the streaming row grows, and
+        // the conversation is left as it is. Rebuilding it from every event on
+        // each tick of a stream cost the whole conversation, three times a
+        // second, on the GUI thread (85% of a core on the Duet tablet while a
+        // session streamed, 2026-10-15).
+        if (fresh.length === 0) {
+            root.agentNext = r.next
+            root.agentStreaming = streaming
+            if (r.more) Qt.callLater(pumpAgent)
+            return
+        }
+        // And never the same event twice, whatever reads overlapped.
+        var lastSeq = root.agentEventsList.length ? root.agentEventsList[root.agentEventsList.length - 1].seq : -1
+        fresh = fresh.filter(function(e) { return !(e.seq > 0 && e.seq <= lastSeq) })
+        if (fresh.length === 0) { root.agentNext = r.next; root.agentStreaming = streaming; if (r.more) Qt.callLater(pumpAgent); return }
+        var evs = root.agentEventsList.concat(fresh)
         // The machine's own new events (not the copy kept here): auto-play.
         if (!(r.kept > 0)) heardEvents(r.events)
         root.agentNext = r.next
@@ -974,6 +1109,7 @@ Item {
             else if (e.kind === "caged") add(e, { kind: "note", text: cagedNote(d, e.by) })
             else if (e.kind === "setting" && d.auto_approve !== undefined)
                 add(e, { kind: "note", text: (d.auto_approve ? "auto-approve on" : "auto-approve off") + (e.by ? " from " + e.by : "") })
+            else if (e.kind === "setting" && d.model !== undefined) add(e, { kind: "note", text: modelNote(d, e.by) })
             else if (e.kind === "claude") {
                 if (d.type === "assistant" && d.message && d.message.content) {
                     var c = d.message.content
@@ -1012,7 +1148,9 @@ Item {
     // Updates the model in place where it can: rows are only ever appended or
     // changed (a prompt being answered), so the view keeps its place. History
     // arriving after the events is the one case that rebuilds it.
+    property int rebuilds: 0   // for the harness: a stream alone must not rebuild
     function rebuildChat() {
+        root.rebuilds++
         var items = chatItems()
         var i = 0
         for (; i < chatModel.count && i < items.length; i++) {
@@ -1333,7 +1471,7 @@ Item {
         root.nsHarness = "claude"
         root.cageStatus = null
         root.nsCage = false
-        root.cageOpts = { image: "", nix: false, github: false }
+        root.cageOpts = { image: "", nix: false, github: false, shared: false }
         if (!h) return
         var r = unwrap(callCore("agentGet", [h.address, "/v1/harnesses"]))
         if (r && r.harnesses && r.harnesses.length > 0) root.harnesses = r.harnesses
@@ -1345,7 +1483,9 @@ Item {
     property bool nsCage: false
     function cageNote(st) {
         if (!st) return ""
-        var what = "root inside, and of this machine only the project, the files sent to it and the harness's settings; what it installs stays until the session is deleted"
+        // Caged, in one sentence (docs/agents/cages.md): kept true, so the three
+        // choices (not caged, caged, sealed) stay easy to tell apart.
+        var what = "your agent, kept in its folder: its project and its own conversations, none of your credentials, other conversations or the rest of your home; the network stays open and its memory and CPUs are limited. For code you do not trust, seal it"
         if (st.error) return what + ". The last build of the image failed: " + st.error
         if (st.building) return what + ". The image is being built (a few minutes)."
         if (!st.ready) return what + ". The image is built with the first one (a few minutes)."
@@ -1360,8 +1500,9 @@ Item {
     }
     function cageLabel(sess) { return sess && sess.cage ? "caged" : "" }
     // What a cage is given, chosen in "+ session" and in the cage dialog:
-    // its image ("" for the machine's), nix, the GitHub login.
-    property var cageOpts: ({ image: "", nix: false, github: false, sealed: false })
+    // its image ("" for the machine's), nix, the GitHub login, the shared
+    // folder (ADR-057).
+    property var cageOpts: ({ image: "", nix: false, github: false, shared: false, sealed: false })
     function cageBody(o) {
         var b = {}
         if (o && o.image) b.image = o.image
@@ -1369,6 +1510,7 @@ Item {
         if (o && o.sealed) { b.sealed = true; return b }
         if (o && o.nix) b.nix = true
         if (o && o.github) b.github = true
+        if (o && o.shared) b.shared = true
         return b
     }
     function imageLabel(img) {
@@ -1378,7 +1520,7 @@ Item {
     }
     function shortImage(img) { return img === "localhost/shrooms-workbench:latest" ? "workbench" : img === "localhost/shrooms-workbench:desktop" ? "desktop" : String(img || "") }
     function cageWords(c) {
-        return [c.sealed ? "sealed" : "", shortImage(c.image), c.nix ? "nix" : "", c.github ? "GitHub login" : ""].filter(function(x) { return x !== "" }).join(", ")
+        return [c.sealed ? "sealed" : "", shortImage(c.image), c.nix ? "nix" : "", c.github ? "GitHub login" : "", c.shared ? "shared folder" : ""].filter(function(x) { return x !== "" }).join(", ")
     }
     function cagedNote(d, by) {
         return (d && d.caged ? "moved into a cage (" + cageWords(d) + ")" : "taken out of its cage") + (by ? " from " + by : "")
@@ -1399,8 +1541,25 @@ Item {
             if (r && r.cage && r.cage.available) root.cageStatus = r.cage
         }
         var c = agentInfo && agentInfo.cage
-        root.cageOpts = c ? { image: c.image, nix: !!c.nix, github: !!c.github, sealed: !!c.sealed } : { image: "", nix: false, github: false, sealed: false }
+        root.cageOpts = c ? { image: c.image, nix: !!c.nix, github: !!c.github, shared: !!c.shared, sealed: !!c.sealed } : { image: "", nix: false, github: false, shared: false, sealed: false }
         cageDialog.open()
+    }
+    // How fast its model wrote in its last turn (the agent's rate.go).
+    function rateLabel(r) {
+        if (!(r > 0)) return ""
+        return (r >= 100 ? Math.round(r) : Math.round(r * 10) / 10) + " tok/s"
+    }
+    // A caged session's memory and CPUs, set on its cage where it is.
+    function setCageLimits(memory, cpus) {
+        if (!agentOpen) return false
+        var r = agentCall("agentPost", [agentOpen.address, "/v1/sessions/" + agentOpen.session + "/cage/limits",
+                                        JSON.stringify({ memory: String(memory || "").trim(), cpus: String(cpus || "").trim() })])
+        if (r === null) return false
+        if (r.cage) root.agentInfo = Object.assign({}, root.agentInfo || {}, { cage: r.cage })
+        root.said = "session " + agentOpen.session + "'s cage: " + (r.cage && r.cage.memory ? r.cage.memory : "the machine's memory")
+                    + ", " + (r.cage && r.cage.cpus ? r.cage.cpus + " CPUs" : "the machine's CPUs")
+        root.saidBad = false
+        return true
     }
     // Files between agents (ADR-048): who the open session takes files from, who
     // asked and was refused, and what it was sent.
@@ -1545,9 +1704,16 @@ Item {
     }
     // Uploads and voice notes finish in the core's own time: picked up here.
     function pumpJobs() {
-        // The outbox about once a second: it changes as the core sends.
+        // The outbox and the jobs about once a second while something moves
+        // (the poll's 300 ms); while nothing does, every third tick. With
+        // the core's events they come when they change (coreChanged).
         root.outboxTick = (outboxTick + 1) % 3
+        if (outboxTick !== 0 && !agentBusy) return
         if (outboxTick === 0) refreshOutbox()
+        if (coreEvents && agentSending === "" && !agentTranscribing && !agentRecording) return
+        readJobs()
+    }
+    function readJobs() {
         var r = unwrap(callCore("agentJobs", []))
         if (!r || !r.jobs) return
         root.agentRecording = !!r.recording
@@ -1627,9 +1793,9 @@ Item {
     // starredFirst). The star is kept on the agent, so the phone shows it too.
     readonly property var starredSessions: {
         var out = []
-        for (var i = 0; i < agentHosts.length; i++) {
-            var ss = agentHosts[i].sessions || []
-            for (var j = 0; j < ss.length; j++) if (ss[j].starred) out.push({ host: agentHosts[i], sess: ss[j] })
+        for (var i = 0; i < shownHosts.length; i++) {
+            var ss = shownHosts[i].sessions || []
+            for (var j = 0; j < ss.length; j++) if (ss[j].starred) out.push({ host: shownHosts[i], sess: ss[j] })
         }
         out.sort(function(a, b) { return a.sess.name === b.sess.name ? (a.host.name < b.host.name ? -1 : 1) : (a.sess.name < b.sess.name ? -1 : 1) })
         return out
@@ -1693,6 +1859,39 @@ Item {
         renamedTo(to)
         return true
     }
+    // The model a session runs on (the agent's model setting): typed, or picked
+    // from those its machine's sessions of the same harness run on.
+    property var modelsSeen: []
+    function askModel() {
+        if (!agentOpen) return
+        var i = agentInfo || {}
+        modelField.text = i.model_setting || i.model || ""
+        var seen = {}, out = []
+        var r = unwrap(callCore("agentGet", [agentOpen.address, "/v1/sessions"]))
+        var ss = r && r.sessions ? r.sessions : []
+        for (var k = 0; k < ss.length; k++) {
+            if ((ss[k].harness || "claude") !== (i.harness || "claude")) continue
+            var ms = [ss[k].model, ss[k].model_setting]
+            for (var j = 0; j < ms.length; j++)
+                if (ms[j] && ms[j] !== "<synthetic>" && !seen[ms[j]]) { seen[ms[j]] = true; out.push(ms[j]) }
+        }
+        out.sort()
+        root.modelsSeen = out
+        modelDialog.open()
+    }
+    function setModelOpenSession(model) {
+        if (!agentOpen) return false
+        model = String(model || "").trim()
+        var path = "/v1/sessions/" + agentOpen.session + "/settings"
+        if (agentCall("agentPost", [agentOpen.address, path, JSON.stringify({ model: model })]) === null) return false
+        root.said = model ? "session " + agentOpen.session + " now runs on " + model + ", from your next message"
+                          : "session " + agentOpen.session + " is back on its machine's default model"
+        root.saidBad = false
+        return true
+    }
+    function modelNote(d, by) {
+        return (d.model ? "model set to " + d.model : "model back to its machine's default") + (by ? " from " + by : "")
+    }
     function renamedTo(to) {
         if (!agentOpen || !to || to === agentOpen.session) return
         var o = agentOpen, from = o.session
@@ -1716,10 +1915,34 @@ Item {
         return to
     }
     // Where the session list is scrolled to; given y, scrolls it there.
+    // Where the list was scrolled to, kept across its rebuilds: each refresh
+    // hands it new hosts, its rows are made again, and for a moment it is
+    // empty and back at the top (it jumped to the top, 2026-10-07).
+    // Where the reader is: every move of theirs, the top included, but not
+    // what a rebuild does to it. Keeping only positions below the top (as
+    // first written) "restored" an old place after the reader had scrolled
+    // up to the top: the list jumped down under them (2026-10-16).
+    property real hostScrollKept: 0
+    property bool hostRebuilding: false
+    Connections {
+        target: typeof hostList !== "undefined" && hostList.contentItem ? hostList.contentItem : null
+        ignoreUnknownSignals: true
+        function onContentYChanged() { if (!root.hostRebuilding) root.hostScrollKept = hostList.contentItem.contentY }
+    }
+    onShownHostsChanged: {
+        if (typeof hostList === "undefined" || !hostList.contentItem) return
+        root.hostRebuilding = true
+        Qt.callLater(function() {
+            if (root.hostScrollKept > 0 && hostList.contentItem.contentY === 0) hostList.contentItem.contentY = root.hostScrollKept
+            root.hostRebuilding = false
+        })
+    }
     function hostScroll(y) {
-        if (y !== undefined) hostList.contentItem.contentY = y
+        if (y !== undefined) { hostList.contentItem.contentY = y; root.hostScrollKept = y }
         return hostList.contentItem.contentY
     }
+    // For the harness: scrolled as the reader scrolls, nothing else set.
+    function hostScrollByHand(y) { hostList.contentItem.contentY = y }
     // A2A tasks from other agents (the phone's AgentChat.taskNote and the
     // session list's lines).
     function taskNote(id, state, summary) { return "task " + id + " " + String(state).replace(/_/g, " ") + (summary ? " — " + summary : "") }
@@ -1886,8 +2109,11 @@ Item {
     }
     function openTaskRow(row) {
         if (!row || row.kind !== "task") return
-        for (var i = 0; i < agentHosts.length; i++) {
-            if (agentHosts[i].name !== row.machine) continue
+        // By name, among the machines as shown: a machine on two meshes is
+        // there once, as it last answered (meshHosts).
+        var hs = meshHosts
+        for (var i = 0; i < hs.length; i++) {
+            if (hs[i].name !== row.machine) continue
             // Arm the jump BEFORE the session loads: rebuildChat matches on the id as
             // soon as the events arrive, and falls back to the search if they never do.
             root.jumpRef = String(row.id || "")
@@ -1896,7 +2122,7 @@ Item {
             // negates it), which is ONE event - the session opened with a single line and
             // "N earlier events not loaded" (2026-10-10). The default tail is what opens a
             // session the way the list does.
-            openSession(agentHosts[i], row.session)
+            openSession(hostFor(hs[i], (hs[i].sessions || []).filter(function(x) { return x.name === row.session })[0]), row.session)
             return
         }
     }
@@ -1914,7 +2140,7 @@ Item {
         for (var i = 0; i < hosts.length; i++) {
             var ss = hosts[i].sessions || []
             for (var j = 0; j < ss.length; j++) {
-                var c = { key: boardKey(hosts[i], ss[j].name), host: hosts[i], sess: ss[j] }
+                var c = { key: boardKey(hosts[i], ss[j].name), host: hostFor(hosts[i], ss[j]), sess: ss[j] }
                 if (ss[j].starred) starred.push(c); else out.push(c)
             }
         }
@@ -2007,7 +2233,7 @@ Item {
         }
         return out
     }
-    readonly property var boardLinkData: boardLinkList(agentHosts)
+    readonly property var boardLinkData: boardLinkList(meshHosts)
     // What a session OWES and what it is WAITING FOR: the tasks it is working on,
     // and the tasks it asked others for. A card doing four things should say so.
     function cardLoad(hosts) {
@@ -2029,7 +2255,7 @@ Item {
         }
         return out
     }
-    readonly property var cardLoadData: cardLoad(agentHosts)
+    readonly property var cardLoadData: cardLoad(meshHosts)
     // A short label for a load count: "2 owed · 1 asked", and nothing when idle.
     function loadLabel(l) {
         if (!l) return ""
@@ -2286,7 +2512,7 @@ Item {
         })
         return out
     }
-    readonly property var taskRowList: taskRows(agentHosts)
+    readonly property var taskRowList: taskRows(meshHosts)
     // The panel's rows INCLUDING a header before each group that has something in
     // it. One flat list, because a QML Repeater cannot insert a header when a
     // value changes - and a group with nothing in it gets no header, so the
@@ -2370,7 +2596,7 @@ Item {
     // Where the link badges were drawn, so a tap on one can filter the panel to its
     // pair. Written by the canvas, read by the tap handler.
     property var badgeHit: []
-    readonly property var taskPanelList: taskPanelRows(agentHosts, linkFilter, showDone)
+    readonly property var taskPanelList: taskPanelRows(meshHosts, linkFilter, showDone)
 
     function edgeTint(state) {
         return state === "working" ? cPhosphor : state === "input-required" ? cAmber : state === "stalled" ? cRust : cAsh
@@ -2430,10 +2656,10 @@ Item {
         ctx.closePath(); ctx.fill()
         ctx.beginPath(); ctx.arc(p[0].x, p[0].y, width * 1.6, 0, 2 * Math.PI); ctx.fill()
     }
-    readonly property var boardCardList: boardCards(agentHosts)
-    readonly property var boardEdgeList: boardEdges(agentHosts)
+    readonly property var boardCardList: boardCards(meshHosts)
+    readonly property var boardEdgeList: boardEdges(meshHosts)
     function askDelete() { deleteDialog.open() }
-    function dialogs() { return [usageDialog, voiceDialog, deleteDialog, renameDialog, restartDialog, readingDialog, cageDialog] }
+    function dialogs() { return [usageDialog, voiceDialog, deleteDialog, renameDialog, modelDialog, restartDialog, readingDialog, cageDialog] }
     function closeDialogs() { dialogs().forEach(function(d) { d.close() }) }
     function deleteDialogOpen() { return deleteDialog.visible }
     function deleteOpenSession() {
@@ -2621,7 +2847,7 @@ Item {
         root.usageMissing = []
         root.usagePlans = []
         var since = usageSince(usageDays)
-        root.usageHosts = agentHosts.map(function(h) { return { name: h.name, address: h.address } })
+        root.usageHosts = oneEach(agentHosts).map(function(h) { return { name: h.name, address: h.address } })
         root.usageWaiting = usageHosts.map(function(h) { return h.name })
         if (usageHosts.length === 0) { root.usageRows = []; return }
         agentCall("agentGather", [usageHosts.map(function(h) { return h.address }).join("\n"),
@@ -2679,6 +2905,9 @@ Item {
         var r = usageRows || [], m = usageMeasure
         return [
             { title: "WHO ASKED", tint: cPhosphor, lines: usageGroup(r, usageDevice, m) },
+            // Per agent: a machine runs several sessions, and which of them
+            // used what says more than the machine they share.
+            { title: "WHICH AGENT", tint: cChartreuse, lines: usageGroup(r, function(x) { return x.machine + "/" + x.session }, m) },
             { title: "WHERE IT RAN", tint: cSky, lines: usageGroup(r, function(x) { return x.machine }, m) },
             { title: "MODEL", tint: cViolet, lines: usageGroup(r, function(x) { return x.model || "?" }, m) }
         ]
@@ -2981,6 +3210,71 @@ Item {
         }
     }
     Dialog {
+        id: modelDialog
+        modal: true
+        anchors.centerIn: parent
+        width: Math.min(root.sz(520), root.width - root.sz(40))
+        padding: root.sz(20)
+        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+        Overlay.modal: Rectangle { color: Qt.rgba(0, 0, 0, 0.6) }
+        background: Rectangle { color: cPanel; radius: root.sz(12); border.color: cSky }
+        header: Item {}
+        footer: Item {}
+        onOpened: modelField.forceActiveFocus()
+        contentItem: ColumnLayout {
+            spacing: root.sz(12)
+            Text {
+                Layout.fillWidth: true; wrapMode: Text.Wrap
+                text: root.agentOpen ? "Model for \"" + root.agentOpen.session + "\" on " + root.agentOpen.name : ""
+                color: cBone; font.family: "monospace"; font.pixelSize: root.fs(14)
+            }
+            Text {
+                Layout.fillWidth: true; wrapMode: Text.Wrap
+                text: "Now: " + (root.agentInfo && root.agentInfo.model ? root.agentInfo.model : "not known yet")
+                      + (root.agentInfo && root.agentInfo.model_setting ? ", chosen" : ", its machine's default")
+                color: cAsh; font.family: "monospace"; font.pixelSize: root.fs(11)
+            }
+            TextField {
+                id: modelField; objectName: "modelField"; Layout.fillWidth: true; color: cBone; font.family: "monospace"
+                background: Rectangle { color: cPanel; border.color: modelField.activeFocus ? cSky : cLine; radius: 6 }
+                onAccepted: if (root.setModelOpenSession(text)) modelDialog.close()
+            }
+            Flow {
+                Layout.fillWidth: true
+                spacing: root.sz(8)
+                Repeater {
+                    model: root.modelsSeen
+                    delegate: Text {
+                        id: mchip
+                        required property var modelData
+                        text: mchip.modelData
+                        color: cSky; font.family: "monospace"; font.pixelSize: root.fs(10)
+                        leftPadding: root.sz(10); rightPadding: root.sz(10); topPadding: root.sz(5); bottomPadding: root.sz(5)
+                        Rectangle { anchors.fill: parent; z: -1; radius: root.sz(10); color: "transparent"; border.color: cLine }
+                        MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: modelField.text = mchip.modelData }
+                    }
+                }
+            }
+            Text {
+                Layout.fillWidth: true; wrapMode: Text.Wrap
+                text: (root.agentInfo && root.agentInfo.harness === "pi"
+                       ? "As pi names it: provider/model, e.g. venice/claude-haiku-5-5."
+                       : "As Claude Code takes it: haiku, sonnet, opus, or a full model name.")
+                      + " It is stopped, and your next message carries on in the same conversation on the new model."
+                color: cAsh; font.family: "monospace"; font.pixelSize: root.fs(11)
+            }
+            RowLayout {
+                Layout.alignment: Qt.AlignRight
+                spacing: root.sz(20)
+                Lnk { visible: !!(root.agentInfo && root.agentInfo.model_setting); text: "DEFAULT"; base: cAsh; font.pixelSize: root.fs(12)
+                      onClicked: if (root.setModelOpenSession("")) modelDialog.close() }
+                Lnk { text: "CANCEL"; base: cBone; font.pixelSize: root.fs(12); onClicked: modelDialog.close() }
+                Lnk { text: "SET"; base: cSky; font.pixelSize: root.fs(12)
+                      onClicked: if (root.setModelOpenSession(modelField.text)) modelDialog.close() }
+            }
+        }
+    }
+    Dialog {
         id: meshesDialog
         modal: true
         anchors.centerIn: parent
@@ -3183,7 +3477,41 @@ Item {
                       + (parent.caged ? "; a cage changed or left is deleted, with what was installed in it." : ".")
                 color: cAsh; font.family: "monospace"; font.pixelSize: root.fs(11)
             }
-            CageOptions { visible: root.cageStatus !== null; Layout.fillWidth: true }
+            CageOptions { forSession: true; visible: root.cageStatus !== null; Layout.fillWidth: true }
+            // Its cage's memory and CPUs, set on the cage that exists: not made
+            // again, so what was installed in it stays (a nix, a toolchain).
+            ColumnLayout {
+                objectName: "cageLimits"
+                visible: !!(root.agentInfo && root.agentInfo.cage)
+                Layout.fillWidth: true
+                spacing: root.sz(6)
+                Text {
+                    Layout.fillWidth: true; wrapMode: Text.Wrap
+                    text: "RESOURCES — set on its cage as it is, nothing reinstalled. Empty is the machine's ("
+                          + (root.agentInfo && root.agentInfo.cage ? (root.agentInfo.cage.machine_memory || "no limit") + ", "
+                             + (root.agentInfo.cage.machine_cpus || "all") + " CPUs" : "") + ")."
+                    color: cAsh; font.family: "monospace"; font.pixelSize: root.fs(10)
+                }
+                RowLayout {
+                    spacing: root.sz(8)
+                    Text { text: "memory"; color: cAsh; font.family: "monospace"; font.pixelSize: root.fs(10) }
+                    TextField {
+                        id: limitMemory; objectName: "limitMemory"; Layout.preferredWidth: root.sz(90)
+                        text: root.agentInfo && root.agentInfo.cage ? (root.agentInfo.cage.memory || "") : ""
+                        placeholderText: "e.g. 16g"; placeholderTextColor: cAsh; color: cBone; font.family: "monospace"
+                        background: Rectangle { color: cPanel; border.color: limitMemory.activeFocus ? cPhosphor : cLine; radius: 6 }
+                    }
+                    Text { text: "CPUs"; color: cAsh; font.family: "monospace"; font.pixelSize: root.fs(10) }
+                    TextField {
+                        id: limitCpus; objectName: "limitCpus"; Layout.preferredWidth: root.sz(60)
+                        text: root.agentInfo && root.agentInfo.cage ? (root.agentInfo.cage.cpus || "") : ""
+                        placeholderText: "e.g. 8"; placeholderTextColor: cAsh; color: cBone; font.family: "monospace"
+                        background: Rectangle { color: cPanel; border.color: limitCpus.activeFocus ? cPhosphor : cLine; radius: 6 }
+                    }
+                    Lnk { text: "SET"; base: cPhosphor; font.pixelSize: root.fs(11)
+                          onClicked: root.setCageLimits(limitMemory.text, limitCpus.text) }
+                }
+            }
             Text {
                 visible: root.agentWorking
                 Layout.fillWidth: true; wrapMode: Text.Wrap
@@ -3248,7 +3576,19 @@ Item {
     function chatModelAt(i) { return chatModel.get(i) }
     function composerText() { return composer.text }
     function nsAutoChecked() { return nsAuto.checked }
+    function pollState() { return sessionPoll.interval + "/" + sessionPoll.running }
 
+    // Polled fast only while something moves. Every poll is a synchronous
+    // call to the core on the GUI thread, and Basecamp logs each: on the Duet
+    // tablet (MT8183) an open session held its main thread at 75-80% of a
+    // core, 12 agentEvents and 12 agentJobs calls a second (duet/duet,
+    // 2026-10-15). Not gated on being visible: Basecamp 0.3.1 hosts a view in
+    // a window that reports itself hidden while it is on screen, and the view's
+    // own visible stays true on another tab, so 0.51.1, which went by them,
+    // stopped polling altogether and never listed an agent.
+    readonly property bool agentBusy: agentWorking || agentStreaming !== "" || agentSending !== ""
+        || agentTranscribing || agentRecording || searchBusy || aloud !== null || speakQueue.length > 0
+        || agentQueued.length > 0 || !agentCaughtUp
     Timer {
         // Finding agents: cheap, since the core probes in the background and
         // this returns at once what it has.
@@ -3259,8 +3599,10 @@ Item {
     }
     Timer {
         // The open session: collected by the core, read here several times a
-        // second so a streamed reply grows smoothly.
-        interval: 300
+        // second while a reply streams, so it grows smoothly; every 1.5 s
+        // while nothing moves.
+        id: sessionPoll
+        interval: root.coreEvents ? 3000 : root.agentBusy ? 300 : 1500
         running: root.agentsOpen && root.agentOpen !== null && root.haveCore
         repeat: true
         onTriggered: { root.pumpAgent(); root.pumpJobs(); root.pumpSearch(); root.pumpSpeech() }
@@ -3275,7 +3617,7 @@ Item {
         property bool showHost: false
         readonly property bool up: root.hostReachable(srow.host)
         // Dimmed too while it cannot work for want of quota (QuotaTag).
-        opacity: !up ? 0.5 : (sess.limited ? 0.6 : 1)
+        opacity: sess.limited ? 0.6 : 1
 
         readonly property bool isOpen: root.agentOpen !== null && root.agentOpen.address === srow.host.address && root.agentOpen.session === srow.sess.name
         height: sCol.implicitHeight + root.sz(16)
@@ -3305,8 +3647,8 @@ Item {
                 Pulse { visible: srow.up && srow.sess.state !== "idle"; tint: srow.sess.state === "waiting" ? cAmber : cPhosphor }
                 Text {
                     Layout.rightMargin: root.sz(22)
-                    text: !srow.up ? "unreachable" : srow.sess.state === "waiting" ? "NEEDS YOU" : (srow.sess.state === "working" ? "WORKING" : (srow.sess.running ? "idle" : "asleep"))
-                    color: !srow.up ? cAsh : srow.sess.state === "waiting" ? cAmber : (srow.sess.state === "working" ? cPhosphor : cAsh)
+                    text: !srow.up ? "offline" : srow.sess.state === "waiting" ? "NEEDS YOU" : (srow.sess.state === "working" ? "WORKING" : (srow.sess.running ? "idle" : "asleep"))
+                    color: !srow.up ? cAmber : srow.sess.state === "waiting" ? cAmber : (srow.sess.state === "working" ? cPhosphor : cAsh)
                     font.family: "monospace"; font.pixelSize: root.fs(9); font.letterSpacing: 1
                 }
             }
@@ -3350,9 +3692,17 @@ Item {
         }
     }
 
-    // What a cage is given: its image, nix, the GitHub login (root.cageOpts),
-    // as the machine offers them (root.cageStatus).
+    // What a cage is given: its image, nix, the GitHub login, the shared
+    // folder (root.cageOpts), as the machine offers them (root.cageStatus).
+    // forSession: in the cage dialog, of the open session (root.agentInfo).
     component CageOptions: ColumnLayout {
+        id: cageOptions
+        property bool forSession: false
+        // Where the open session's shared folder is on its machine: podman's
+        // volumes, then the session's volume (one per set of meshes).
+        readonly property string sharedHost: forSession && root.agentInfo && root.agentInfo.cage && root.agentInfo.cage.shared
+            && root.cageStatus && root.cageStatus.shared_root
+            ? root.cageStatus.shared_root + "/" + root.agentInfo.cage.shared + "/_data" : ""
         spacing: root.sz(6)
         Flow {
             Layout.fillWidth: true
@@ -3405,6 +3755,63 @@ Item {
             contentItem: Text { leftPadding: ghBox.indicator.width + 6; text: ghBox.text; color: cAsh; wrapMode: Text.Wrap; font.family: "monospace"; font.pixelSize: root.fs(10); verticalAlignment: Text.AlignVCenter }
             Layout.fillWidth: true
         }
+
+        // The shared folder (ADR-057): asked for, like nix and the login, and
+        // never for a sealed cage, which gets nothing local.
+        CheckBox {
+            id: sharedCheck
+            objectName: "sharedCheck"
+            visible: !!(root.cageStatus && root.cageStatus.shared) && !root.cageOpts.sealed
+            checked: !!root.cageOpts.shared
+            onToggled: root.cageOpts = Object.assign({}, root.cageOpts, { shared: checked })
+            text: "shared folder — " + (root.cageStatus && root.cageStatus.shared_in ? root.cageStatus.shared_in : "/shared")
+                + ", read-write, the same folder as the other caged sessions on that machine that have it and are on the same meshes"
+            contentItem: Text { leftPadding: sharedCheck.indicator.width + 6; text: sharedCheck.text; color: cAsh; wrapMode: Text.Wrap; font.family: "monospace"; font.pixelSize: root.fs(10); verticalAlignment: Text.AlignVCenter }
+            Layout.fillWidth: true
+        }
+        // Where the open session's shared folder is, to copy or open. The path
+        // is a TextEdit with selectByMouse, so it can be copied, and the open
+        // action is a SEPARATE link: a MouseArea child of the TextEdit swallows
+        // the press and makes the path unselectable.
+        Rectangle {
+            objectName: "sharedBox"
+            visible: cageOptions.sharedHost !== "" && !!root.cageOpts.shared && !root.cageOpts.sealed
+            Layout.fillWidth: true
+            implicitHeight: sharedCol.implicitHeight + root.sz(16)
+            radius: root.sz(6)
+            color: "transparent"
+            border.color: cLine
+            ColumnLayout {
+                id: sharedCol
+                anchors.fill: parent
+                anchors.margins: root.sz(8)
+                spacing: root.sz(5)
+                Text {
+                    text: "SHARED FOLDER, ON THAT MACHINE"
+                    color: cPhosphor
+                    font.family: "monospace"; font.pixelSize: root.fs(10)
+                }
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: root.sz(8)
+                    TextEdit {
+                        objectName: "sharedHostPath"
+                        // A maximum, not fillWidth: OPEN then sits beside the
+                        // path, not at the far edge of the box.
+                        Layout.maximumWidth: sharedCol.width * 0.65
+                        text: cageOptions.sharedHost
+                        readOnly: true; selectByMouse: true
+                        wrapMode: TextEdit.WrapAtWordBoundaryOrAnywhere
+                        color: cBone; font.family: "monospace"; font.pixelSize: root.fs(10)
+                    }
+                    Lnk {
+                        objectName: "sharedOpen"
+                        text: "OPEN"
+                        onClicked: Qt.openUrlExternally("file://" + cageOptions.sharedHost)
+                    }
+                }
+            }
+        }
     }
 
     // A hand over a link in text: TextEdit shows none of its own. Hover only
@@ -3437,7 +3844,7 @@ Item {
         readonly property bool up: root.hostReachable(bcard.host)
         readonly property int tailLines: 6
         // Dimmed too while it cannot work for want of quota (QuotaTag).
-        opacity: !up ? 0.5 : (sess.limited ? 0.6 : 1)
+        opacity: sess.limited ? 0.6 : 1
         height: bCol.implicitHeight + root.sz(16)
         radius: root.sz(8)
         color: cPanel
@@ -3474,8 +3881,8 @@ Item {
                 Text { text: bcard.host.name; color: root.meshTint(bcard.host.mesh); font.family: "monospace"; font.pixelSize: root.fs(10); elide: Text.ElideRight; Layout.fillWidth: true }
                 Pulse { visible: bcard.up && bcard.sess.state !== "idle"; tint: bcard.sess.state === "waiting" ? cAmber : cPhosphor }
                 Text {
-                    text: !bcard.up ? "unreachable" : bcard.sess.state === "waiting" ? "NEEDS YOU" : (bcard.sess.state === "working" ? "WORKING" : (bcard.sess.running ? "idle" : "asleep"))
-                    color: !bcard.up ? cAsh : bcard.sess.state === "waiting" ? cAmber : (bcard.sess.state === "working" ? cPhosphor : cAsh)
+                    text: !bcard.up ? "offline" : bcard.sess.state === "waiting" ? "NEEDS YOU" : (bcard.sess.state === "working" ? "WORKING" : (bcard.sess.running ? "idle" : "asleep"))
+                    color: !bcard.up ? cAmber : bcard.sess.state === "waiting" ? cAmber : (bcard.sess.state === "working" ? cPhosphor : cAsh)
                     font.family: "monospace"; font.pixelSize: root.fs(9); font.letterSpacing: 1
                 }
             }
@@ -3886,6 +4293,37 @@ Item {
         }
     }
 
+    // What a tag says on hover, drawn in the view rather than as a ToolTip:
+    // a ToolTip is a popup Qt shares per window, and the list's rows are made
+    // again on every refresh; one made again under the mouse left the popup
+    // with an item that was gone, and the next mouse event crashed Basecamp
+    // in QQuickPopup::overlayEvent (2026-10-19).
+    property var hintFor: null
+    property string hintText: ""
+    property point hintAt: Qt.point(0, 0)
+    function showHint(item, text) {
+        if (text) {
+            root.hintFor = item
+            root.hintText = text
+            root.hintAt = item.mapToItem(root, 0, item.height + root.sz(4))
+        } else if (root.hintFor === item) {
+            root.hintFor = null
+            root.hintText = ""
+        }
+    }
+    Rectangle {
+        objectName: "hoverHint"
+        visible: root.hintText !== ""
+        z: 1000
+        x: Math.max(0, Math.min(root.hintAt.x, root.width - width))
+        y: Math.min(root.hintAt.y, root.height - height)
+        width: Math.min(hintLabel.implicitWidth, root.width * 0.6) + root.sz(12)
+        height: hintLabel.implicitHeight + root.sz(8)
+        radius: root.sz(4); color: cPanel; border.color: cLine; border.width: 1
+        Text { id: hintLabel; anchors.centerIn: parent; width: parent.width - root.sz(12); text: root.hintText
+               color: cBone; font.family: "monospace"; font.pixelSize: root.fs(10); wrapMode: Text.Wrap }
+    }
+
     // A session in a cage, by its name: a tag in the cage's violet, its
     // details (image, nix, GitHub login) on hover and in the line below.
     component CageTag: Text {
@@ -3899,9 +4337,9 @@ Item {
         font.family: "monospace"; font.pixelSize: root.fs(9); font.letterSpacing: 1; font.bold: true
         leftPadding: root.sz(5); rightPadding: root.sz(5); topPadding: root.sz(1); bottomPadding: root.sz(1)
         Rectangle { anchors.fill: parent; z: -1; radius: root.sz(4); color: "transparent"; border.color: ctag.color; border.width: 1 }
-        ToolTip.visible: ctagMouse.containsMouse && visible
-        ToolTip.text: sess && sess.cage ? "in a cage: " + root.cageWords(sess.cage) + (sess.cage.outbox ? "; results in " + sess.cage.outbox : "") : ""
-        MouseArea { id: ctagMouse; anchors.fill: parent; hoverEnabled: true; acceptedButtons: Qt.NoButton }
+        MouseArea { id: ctagMouse; anchors.fill: parent; hoverEnabled: true; acceptedButtons: Qt.NoButton
+                     onContainsMouseChanged: root.showHint(ctag, containsMouse ? (sess && sess.cage ? "in a cage: " + root.cageWords(sess.cage) + (sess.cage.outbox ? "; results in " + sess.cage.outbox : "") : "") : "") }
+        Component.onDestruction: root.showHint(ctag, "")
     }
 
     // Out of quota, by the name: when it comes back; why, on hover.
@@ -3915,20 +4353,20 @@ Item {
         font.family: "monospace"; font.pixelSize: root.fs(9); font.letterSpacing: 1; font.bold: true
         leftPadding: root.sz(5); rightPadding: root.sz(5); topPadding: root.sz(1); bottomPadding: root.sz(1)
         Rectangle { anchors.fill: parent; z: -1; radius: root.sz(4); color: "transparent"; border.color: cAmber; border.width: 1 }
-        ToolTip.visible: qtagMouse.containsMouse && visible
-        ToolTip.text: sess && sess.limited ? sess.limited.reason : ""
-        MouseArea { id: qtagMouse; anchors.fill: parent; hoverEnabled: true; acceptedButtons: Qt.NoButton }
+        MouseArea { id: qtagMouse; anchors.fill: parent; hoverEnabled: true; acceptedButtons: Qt.NoButton
+                     onContainsMouseChanged: root.showHint(qtag, containsMouse ? (sess && sess.limited ? sess.limited.reason : "") : "") }
+        Component.onDestruction: root.showHint(qtag, "")
     }
 
+    // A lit dot, still: beside "WORKING" or "NEEDS YOU" it says enough, and
+    // anything that moves repaints the window. A running Qt Quick animation
+    // repaints all of it at vsync for as long as it runs: on the Duet tablet
+    // ~53 frames a second and 72% of the main thread with the view idle
+    // (duet/duet, 2026-10-15). No infinite animations here.
     component Pulse: Rectangle {
         property color tint: cPhosphor
         width: root.sz(8); height: width; radius: width / 2
         color: tint
-        SequentialAnimation on opacity {
-            loops: Animation.Infinite
-            NumberAnimation { from: 1; to: 0.25; duration: 900 }
-            NumberAnimation { from: 0.25; to: 1; duration: 900 }
-        }
     }
 
     Rectangle {
@@ -3969,6 +4407,35 @@ Item {
                           font.pixelSize: root.fs(10); onClicked: Qt.callLater(root.openUsage) }
                     Lnk { visible: root.haveCore; text: "voice"; base: cAsh; font.pixelSize: root.fs(10); onClicked: Qt.callLater(root.openVoice) }
                     Lnk { visible: root.haveCore; objectName: "toBoard"; text: "board"; base: cAsh; font.pixelSize: root.fs(10); onClicked: Qt.callLater(root.showBoard) }
+                }
+                // The meshes, when there is more than one: all, or one of them.
+                Flow {
+                    objectName: "meshSwitch"
+                    Layout.fillWidth: true
+                    visible: root.meshNames.length > 1 || root.meshPick !== ""
+                    spacing: root.sz(8)
+                    Repeater {
+                        model: [""].concat(root.meshNames)
+                        delegate: Text {
+                            id: mchoice
+                            required property var modelData
+                            readonly property bool on: root.meshPick === mchoice.modelData
+                            text: mchoice.modelData === "" ? "all" : mchoice.modelData
+                            color: on ? cVoid : root.meshTint(mchoice.modelData)
+                            font.family: "monospace"; font.pixelSize: root.fs(10)
+                            leftPadding: root.sz(10); rightPadding: root.sz(10); topPadding: root.sz(4); bottomPadding: root.sz(4)
+                            Rectangle { anchors.fill: parent; z: -1; radius: root.sz(10)
+                                        color: mchoice.on ? root.meshTint(mchoice.modelData) : "transparent"; border.color: root.meshTint(mchoice.modelData) }
+                            MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: root.pickMesh(mchoice.modelData) }
+                        }
+                    }
+                }
+                Text {
+                    Layout.fillWidth: true
+                    visible: root.haveCore && root.agentHosts.length > 0 && root.shownHosts.length === 0
+                    wrapMode: Text.Wrap
+                    text: "No agents on " + root.meshPick + " yet."
+                    color: cAsh; font.family: "monospace"; font.pixelSize: root.fs(11)
                 }
                 Text {
                     Layout.fillWidth: true
@@ -4013,14 +4480,14 @@ Item {
                             delegate: SessionCard {
                                 required property var modelData
                                 width: hostList.availableWidth
-                                host: modelData.host
+                                host: root.hostFor(modelData.host, modelData.sess)
                                 sess: modelData.sess
                                 showHost: true
                             }
                         }
                     }
                     Repeater {
-                    model: root.agentHosts
+                    model: root.shownHosts
                     delegate: Column {
                         id: hostCol
                         required property var modelData
@@ -4030,13 +4497,16 @@ Item {
                         RowLayout {
                             width: parent.width
                             spacing: 8
-                            opacity: hostCol.up ? 1 : 0.45
                             Rectangle { width: root.sz(9); height: width; radius: width / 2; color: "transparent"; border.width: 2; border.color: root.meshTint(hostCol.modelData.mesh) }
-                            Text { text: hostCol.modelData.name; color: cBone; font.family: "monospace"; font.pixelSize: root.fs(14) }
-                            Text { text: hostCol.modelData.mesh; color: root.meshTint(hostCol.modelData.mesh); font.family: "monospace"; font.pixelSize: root.fs(10) }
-                            Text { visible: !hostCol.up; text: "unreachable · seen " + root.clock(hostCol.modelData.lastSeen); color: cAsh; font.family: "monospace"; font.pixelSize: root.fs(10) }
-                            Item { Layout.fillWidth: true }
-                            Lnk { visible: hostCol.up; text: "+ session"; onClicked: {
+                            Text { text: hostCol.modelData.name; color: hostCol.modelData.here ? cPhosphor : cBone; font.family: "monospace"; font.pixelSize: root.fs(14) }
+                            Text { visible: !!hostCol.modelData.here; objectName: "hereTag"; text: "THIS MACHINE"; color: cPhosphor; font.family: "monospace"; font.pixelSize: root.fs(9); font.letterSpacing: 1 }
+                            Text { visible: !hostCol.up; text: "offline · seen " + root.clock(hostCol.modelData.lastSeen); color: cAmber; font.family: "monospace"; font.pixelSize: root.fs(10) }
+                            // The meshes give way on a narrow panel, cut short:
+                            // "+ session" stays (it was pushed out, 2026-10-19).
+                            Text { objectName: "hostMeshes"; Layout.fillWidth: true; Layout.minimumWidth: 0; elide: Text.ElideRight
+                                   text: hostCol.modelData.meshes && hostCol.modelData.meshes.length ? hostCol.modelData.meshes.join(" · ") : hostCol.modelData.mesh
+                                   color: root.meshTint(hostCol.modelData.mesh); font.family: "monospace"; font.pixelSize: root.fs(10) }
+                            Lnk { objectName: "newSessionLink"; visible: hostCol.up; text: "+ session"; onClicked: {
                                 newSession.host = hostCol.modelData
                                 root.agentCreating = true
                                 Qt.callLater(function() { root.loadHarnesses(hostCol.modelData); root.loadConversations(hostCol.modelData) })
@@ -4055,7 +4525,7 @@ Item {
                             delegate: SessionCard {
                                 required property var modelData
                                 width: hostCol.width
-                                host: hostCol.modelData
+                                host: root.hostFor(hostCol.modelData, modelData)
                                 sess: modelData
                             }
                         }
@@ -4273,6 +4743,13 @@ Item {
                         Lnk { text: root.agentOpen ? root.agentOpen.session : ""; base: cBone; font.pixelSize: root.fs(16); onClicked: root.askRename() }
                         Pulse { visible: root.agentWorking; }
                         Item { Layout.fillWidth: true }
+                    }
+                    // The switches, wrapped onto more lines when the window is
+                    // narrow (a tablet): in one row the last ones were out of reach.
+                    Flow {
+                        objectName: "sessionSwitches"
+                        Layout.fillWidth: true
+                        spacing: 8
                         Lnk {
                             // A harness that never asks has nothing to approve.
                             visible: !(root.agentInfo && root.agentInfo.caps && !root.agentInfo.caps.approve)
@@ -4301,6 +4778,10 @@ Item {
                         Lnk { readonly property var only: root.agentInfo && root.agentInfo.meshes ? root.agentInfo.meshes : []
                               objectName: "meshesLink"; text: only.length ? "on " + only.join(", ") : "meshes"
                               base: only.length ? cSky : cAsh; onClicked: Qt.callLater(root.openMeshes) }
+                        // The model it runs on, lit when one was chosen for it.
+                        Lnk { readonly property bool chosen: !!(root.agentInfo && root.agentInfo.model_setting)
+                              objectName: "modelLink"; text: chosen ? "MODEL" : "model"; base: chosen ? cSky : cAsh
+                              onClicked: Qt.callLater(root.askModel) }
                         Lnk { text: "restart"; base: cAsh; onClicked: root.askRestart() }
                         Lnk { text: "delete"; base: cAsh; onClicked: root.askDelete() }
                         Lnk { visible: root.agentWorking; text: "■ stop"; base: cRust; onClicked: root.stopTurn() }
@@ -4310,12 +4791,14 @@ Item {
                               root.agentInfo ? root.harnessLabel(root.agentInfo.harness) : "",
                               root.agentInfo && root.agentInfo.cage ? "in a cage (" + root.cageWords(root.agentInfo.cage) + ")" + (root.agentInfo.cage.outbox ? ", results in " + root.agentInfo.cage.outbox : "") : "",
                               root.agentInfo ? root.shortModel(root.agentInfo.model) : "",
+                              root.agentInfo ? root.rateLabel(root.agentInfo.tokens_per_second) : "",
                               root.agentInfo ? root.contextLabel(root.agentInfo.context_used, root.agentInfo.context_window) : "",
                               root.agentKept > 0 ? "offline — as it was " + root.keptWhen(root.agentKept) : "",
                               root.agentConnected ? "" : ("reconnecting" + (root.agentProblem ? " — " + root.agentProblem : ""))
                              ].filter(function(x) { return x !== "" }).join("  ·  ") : ""
                         color: root.agentConnected ? cAsh : cAmber
                         font.family: "monospace"; font.pixelSize: root.fs(10)
+                        Layout.fillWidth: true; wrapMode: Text.Wrap
                     }
                     Rectangle {
                         visible: root.agentInfo !== null && root.agentInfo.context_window > 0

@@ -30,7 +30,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -65,6 +68,16 @@ type Cage struct {
 	Nix bool `json:"nix,omitempty"`
 	// GitHub gives it the owner's GitHub CLI login (~/.config/gh), read-only.
 	GitHub bool `json:"github,omitempty"`
+	// Shared gives it the folder the caged sessions it was made alongside
+	// share, read-write at /shared (ADR-057): the one of its meshes, so a
+	// session limited to the home mesh shares nothing with an office one.
+	Shared bool `json:"shared,omitempty"`
+	// Memory and CPUs are this cage's limits, "" for the machine's (Cages);
+	// a podman memory ("16g") and a number of CPUs ("8"). Changed on a
+	// cage that exists without making it again (SetCageLimits), so what
+	// was installed in it stays.
+	Memory string `json:"memory,omitempty"`
+	CPUs   string `json:"cpus,omitempty"`
 	// Sealed: for code nobody vouches for (sealed.go, ADR-045) — the
 	// internet and nothing local, a credential of its own, no agents to
 	// ask, results through Outbox (a directory on the machine).
@@ -76,9 +89,10 @@ type Cage struct {
 // container name, and for a sealed one its outbox and none of the options
 // that widen a cage.
 func newCage(asked *Cage, session string) *Cage {
-	c := &Cage{Image: asked.Image, Nix: asked.Nix, GitHub: asked.GitHub, Sealed: asked.Sealed, Container: newContainerName(session)}
+	c := &Cage{Image: asked.Image, Nix: asked.Nix, GitHub: asked.GitHub, Shared: asked.Shared, Sealed: asked.Sealed,
+		Memory: asked.Memory, CPUs: asked.CPUs, Container: newContainerName(session)}
 	if c.Sealed {
-		c.Nix, c.GitHub = false, false
+		c.Nix, c.GitHub, c.Shared = false, false, false
 		c.Outbox = sealedOutbox(session)
 	}
 	return c
@@ -103,6 +117,14 @@ type Cages struct {
 	Socket string
 	// Nft is the nft program closing the agent port in cages; "" finds it.
 	Nft string
+	// SystemdRun starts cages in a systemd scope of their own; "" starts
+	// them as the agent's children (startCage).
+	SystemdRun string
+	// volumesMu guards the cached volume directory below, apart from c.mu:
+	// finding it shells out to podman, which must not hold up the cages.
+	volumesMu  sync.Mutex
+	volumesDir string
+	volumesAt  time.Time
 	// SealedToken is the file with the Claude Code token sealed cages run
 	// on; "" for sealed-claude-token in the state directory.
 	SealedToken string
@@ -117,8 +139,16 @@ type CageInfo struct {
 	Image  string `json:"image"`
 	Nix    bool   `json:"nix,omitempty"`
 	GitHub bool   `json:"github,omitempty"`
-	Sealed bool   `json:"sealed,omitempty"`
-	Outbox string `json:"outbox,omitempty"`
+	// Shared: the volume of the folder it shares (ADR-057), "" for none.
+	Shared string `json:"shared,omitempty"`
+	// Memory and CPUs: its limits as set for it, "" for the machine's; and
+	// the machine's, for the apps to show what "" means.
+	Memory        string `json:"memory,omitempty"`
+	CPUs          string `json:"cpus,omitempty"`
+	MachineMemory string `json:"machine_memory,omitempty"`
+	MachineCPUs   string `json:"machine_cpus,omitempty"`
+	Sealed        bool   `json:"sealed,omitempty"`
+	Outbox        string `json:"outbox,omitempty"`
 }
 
 // CageStatus is what the apps are told: whether sessions can be caged here.
@@ -130,10 +160,17 @@ type CageStatus struct {
 	// Nix: the machine has nix to give a cage.
 	Nix bool `json:"nix,omitempty"`
 	// Sealed: the machine has a token for sealed cages (sealed.go).
-	Sealed   bool   `json:"sealed,omitempty"`
-	Ready    bool   `json:"ready"`              // the image is there
-	Building bool   `json:"building,omitempty"` // it is being built
-	Error    string `json:"error,omitempty"`    // why the last build failed
+	Sealed bool `json:"sealed,omitempty"`
+	// Shared: a cage can be given a shared folder (ADR-057), at SharedIn in
+	// it. SharedRoot is podman's directory of volumes on this machine, so the
+	// app can show where a session's folder is (SharedRoot/VOLUME/_data)
+	// rather than making someone find a volume by hand; "" when unknown.
+	Shared     bool   `json:"shared,omitempty"`
+	SharedIn   string `json:"shared_in,omitempty"`
+	SharedRoot string `json:"shared_root,omitempty"`
+	Ready      bool   `json:"ready"`              // the image is there
+	Building   bool   `json:"building,omitempty"` // it is being built
+	Error      string `json:"error,omitempty"`    // why the last build failed
 }
 
 // NewCages finds podman; nil when the machine has none.
@@ -145,7 +182,71 @@ func NewCages(image string) *Cages {
 	if image == "" {
 		image = WorkbenchImage
 	}
-	return &Cages{Podman: p, Image: image, Memory: "4g", CPUs: "2", Pids: 2048, Socket: "/run/shrooms/shrooms.sock"}
+	c := &Cages{Podman: p, Image: image, Memory: "4g", CPUs: "2", Pids: 2048, Socket: "/run/shrooms/shrooms.sock"}
+	// Under systemd (INVOCATION_ID is set for a unit's processes): a scope of
+	// their own for the cages, see startCage.
+	if os.Getenv("INVOCATION_ID") != "" {
+		if sr, err := exec.LookPath("systemd-run"); err == nil {
+			c.SystemdRun = sr
+		}
+	}
+	return c
+}
+
+// startCage starts a cage, and makes sure it has its network.
+//
+// `podman start` forks pasta, which carries the cage's network, in the
+// caller's cgroup: the agent's service. Restarting the agent then killed
+// pasta while the container ran on, and every caged session on the machine
+// had loopback only and "Connection error." on each turn (proteus, the
+// 2026-10-15 rollout). Under systemd the cage is started in a transient scope
+// of its own, which a restart of the agent leaves alone. A cage still running
+// without its network (started before this, or by an agent not under
+// systemd) is stopped and started again.
+func (c *Cages) startCage(ctx context.Context, name string) error {
+	start := func() error {
+		if c.SystemdRun == "" {
+			_, err := c.run(ctx, "start", name)
+			return err
+		}
+		var errb bytes.Buffer
+		cmd := exec.CommandContext(ctx, c.SystemdRun, "--user", "--scope", "--quiet", "--collect",
+			"--description=shrooms cage "+name, "--", c.Podman, "start", name)
+		cmd.Stderr = &errb
+		if err := cmd.Run(); err != nil {
+			return fmt.Errorf("podman start: %s", lastLine(strings.TrimSpace(errb.String()+" "+err.Error())))
+		}
+		return nil
+	}
+	if err := start(); err != nil {
+		return err
+	}
+	if c.hasNetwork(ctx, name) {
+		return nil
+	}
+	c.run(ctx, "stop", "-t", "3", name)
+	if err := start(); err != nil {
+		return err
+	}
+	if !c.hasNetwork(ctx, name) {
+		return fmt.Errorf("the cage %s has no network after starting it again", name)
+	}
+	return nil
+}
+
+// hasNetwork is whether a running cage has an interface besides loopback:
+// none means its pasta is gone.
+func (c *Cages) hasNetwork(ctx context.Context, name string) bool {
+	out, err := c.run(ctx, "exec", name, "cat", "/proc/net/if_inet6")
+	if err != nil {
+		return true // cannot tell; the harness's own errors will say
+	}
+	for _, l := range strings.Split(out, "\n") {
+		if f := strings.Fields(l); len(f) == 6 && f[5] != "lo" {
+			return true
+		}
+	}
+	return false
 }
 
 func (c *Cages) run(ctx context.Context, args ...string) (string, error) {
@@ -198,9 +299,13 @@ func (c *Cages) Status() CageStatus {
 	if c == nil {
 		return CageStatus{}
 	}
+	// Resolved BEFORE the lock: it shells out to podman (bounded, but up to a
+	// few seconds), and holding c.mu across that would block every other cage
+	// operation on the machine.
+	volumes := c.volumesPath()
 	c.mu.Lock()
 	st := CageStatus{Available: true, Image: c.Image, Building: c.building, Error: c.buildErr,
-		Images: []string{c.Image}, Nix: nixHere(), Sealed: tokenIn(c.SealedToken)}
+		Images: []string{c.Image}, Nix: nixHere(), Sealed: tokenIn(c.SealedToken) || claudeLoginHere()}
 	c.mu.Unlock()
 	for _, im := range []string{WorkbenchImage, DesktopImage} {
 		if im != c.Image {
@@ -208,8 +313,68 @@ func (c *Cages) Status() CageStatus {
 		}
 	}
 	st.Ready = !st.Building && c.imageExists(c.Image)
+	st.Shared, st.SharedIn, st.SharedRoot = true, CageSharedDir, volumes
 	return st
 }
+
+// volumesPath is podman's directory of volumes, where the owner finds a
+// shared folder: VOLUME/_data under it. Only volumes ensureSharedVolume let
+// through are mounted, and those are local ones with no options, which is
+// where podman keeps them.
+func (c *Cages) volumesPath() string {
+	if c == nil || c.Podman == "" {
+		return ""
+	}
+	// A podman machine on macOS reports a path inside its VM, which does not
+	// exist where the app runs: better no path than one that opens nothing.
+	if runtime.GOOS != "linux" {
+		return ""
+	}
+	// Cached: Status() is polled by the apps, and a slow or hung podman would
+	// otherwise stall the whole status view for the timeout, every poll.
+	c.volumesMu.Lock()
+	defer c.volumesMu.Unlock()
+	if time.Since(c.volumesAt) < sharedPathTTL {
+		return c.volumesDir
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), sharedPathTimeout)
+	defer cancel()
+	p := ""
+	if out, err := c.run(ctx, "info", "--format", "{{.Store.VolumePath}}"); err == nil {
+		p = strings.TrimSpace(out)
+	}
+	c.volumesDir, c.volumesAt = p, time.Now()
+	return p
+}
+
+// ensureSharedVolume makes the shared folder's volume, or checks that the one
+// there is what this would have made: local, with no options. The names are
+// fixed, so whoever makes one first decides what it is, and one made as a bind
+// (`--opt o=bind --opt device=DIR`) would hand DIR read-write to every cage
+// given it. Checked before every cage is made, not only shown.
+func (c *Cages) ensureSharedVolume(ctx context.Context, name string) error {
+	out, err := c.run(ctx, "volume", "inspect", "--format", "{{.Driver}} {{.Options}}", name)
+	if err != nil {
+		if _, err := c.run(ctx, "volume", "create", "--label", sharedLabel+"=1", name); err != nil {
+			return fmt.Errorf("the shared folder's volume %s: %w", name, err)
+		}
+		return nil
+	}
+	if got := strings.TrimSpace(out); got != "local map[]" {
+		return fmt.Errorf("the volume %s is not a plain one (%s), so it is not given to cages as their shared folder: remove it (podman volume rm %s), or move the session into a cage without the shared folder", name, got, name)
+	}
+	return nil
+}
+
+const (
+	// sharedPathTTL is how long the volume directory is reused: a poll does
+	// not shell out each time.
+	sharedPathTTL = 60 * time.Second
+	// sharedPathTimeout bounds the one lookup that is actually made. Shorter
+	// than the poll interval on purpose: a status view should be stale, not
+	// blocked.
+	sharedPathTimeout = 3 * time.Second
+)
 
 // Prepare builds an image of ours, in the background, if it is the one a
 // cage needs and it is not there, or was built from an older Containerfile
@@ -254,10 +419,60 @@ func newContainerName(session string) string {
 }
 
 // mount is one path of the machine's in a cage, at the same path.
+//
+// volume says `path` is a podman named volume, not a path on this machine. A
+// volume has no path to stat, so the mount filter must not drop it for not
+// existing.
 type mount struct {
-	path string
-	ro   bool
-	at   string // where in the cage, when not at the same path
+	path   string
+	ro     bool
+	at     string // where in the cage, when not at the same path
+	volume bool
+}
+
+// CageSharedDir is where a cage given the shared folder sees it, and the one
+// path in a cage that is not this machine's. It is a podman named volume, so
+// the machine's own filesystem is not what a cage writes into: the owner (and
+// the agent, which reads it as the user that owns it) can look at it.
+const CageSharedDir = "/shared"
+
+// sharedVolume is the shared folder's volume for sessions on every mesh.
+// Deliberately not a host path: a folder the owner keeps on the machine and a
+// folder cages share are different things, and only one of them may be written
+// by a cage.
+const sharedVolume = "shrooms-shared"
+
+// sharedVolumeFor is the shared folder's volume for a session on these meshes
+// (none is all): one per set of meshes, so sessions share only with sessions
+// seen from the same meshes (ADR-049). The labels in the name are for a person
+// reading `podman volume ls`; the hash keeps two sets apart that the name's
+// alphabet would make look alike.
+func sharedVolumeFor(meshes []string) string {
+	if len(meshes) == 0 {
+		return sharedVolume
+	}
+	ms := append([]string(nil), meshes...)
+	sort.Strings(ms)
+	sum := sha256.Sum256([]byte(strings.Join(ms, "\n")))
+	name := strings.Map(func(r rune) rune {
+		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '.' {
+			return r
+		}
+		return '_'
+	}, strings.Join(ms, "_"))
+	if len(name) > 40 {
+		name = name[:40]
+	}
+	return sharedVolume + "-" + name + "-" + hex.EncodeToString(sum[:3])
+}
+
+// sharedFor is the volume a session's cage is given as its shared folder, or
+// "" for none. Called with s.mu held.
+func (s *Session) sharedFor() string {
+	if s.cage == nil || !s.cage.Shared || s.cage.Sealed {
+		return ""
+	}
+	return sharedVolumeFor(s.meshes)
 }
 
 // cageRun is what one start of a caged session's process needs.
@@ -277,18 +492,29 @@ func (m *Manager) cageMounts(s *Session, harness string) []mount {
 	up := filepath.Join(m.dir, "uploads")
 	os.MkdirAll(up, 0o700)
 	ms := []mount{{path: s.dir}, {path: up, ro: true}}
-	switch harness {
-	case "claude":
-		dir := filepath.Join(home, ".claude")
-		ms = append(ms, mount{path: dir})
-		ms = append(ms, readOnlyIn(dir, claudeHostCode)...)
-		if bin, err := claudeProgram(m.binOf("claude")); err == nil {
-			ms = append(ms, mount{path: filepath.Dir(bin), ro: true})
-		}
-	case "pi":
-		dir := piAgentDir()
-		ms = append(ms, mount{path: dir})
-		ms = append(ms, readOnlyIn(dir, piHostCode)...)
+	// The shared folder, read-write, when it was asked for: a caged session is
+	// the owner's own agent, and the point of the folder is that several of
+	// them work in it together.
+	if v := s.sharedFor(); v != "" {
+		ms = append(ms, mount{path: v, at: CageSharedDir, volume: true})
+	}
+	// The harness's directory: a private one of the cage's own, with the
+	// owner's settings in it read-only and the session's own conversations
+	// read-write, from the real folder for its project. Nothing else of the
+	// owner's: not other sessions' conversations, not the prompt history,
+	// running sessions' keys, backups of the config or an ssh key someone
+	// kept there, and no login. Built from what is let in rather than from
+	// what is kept out, so what lands there later is out by default. Caged
+	// is the owner's agent kept in its folder; sealed is for what nobody
+	// vouches for (docs/agents/cages.md).
+	// What goes in is the harness's to say (ADR-062): its home, which of it is
+	// the owner's settings, and where one project's conversations live. A
+	// harness that cannot say is not caged at all, which is refused where
+	// caging is asked for.
+	// The session's own harness, not a lookup by name: what is caged is the
+	// harness the session runs on.
+	if c, ok := s.harness.(Cageable); ok {
+		ms = append(ms, c.CageMounts(m.cageFacts(s, harness))...)
 	}
 	if s.cage.Nix {
 		ms = append(ms, nixMounts(home)...)
@@ -315,8 +541,20 @@ func (m *Manager) cageMounts(s *Session, harness string) []mount {
 	// announced, and restart the daemon — the machine, from a cage (found
 	// 2026-10-09). The tools find the machines through the cage's own socket
 	// to its agent now (cageproxy.go).
+	return keepMounts(ms)
+}
+
+// keepMounts drops the mounts that are not there. A named volume is not a path
+// here (ensureSharedVolume makes it), so stat'ing one would drop the shared
+// folder silently - which is why the volume case is in this function and not
+// repeated in each caller.
+func keepMounts(ms []mount) []mount {
 	var out []mount
 	for _, x := range ms {
+		if x.volume {
+			out = append(out, x)
+			continue
+		}
 		if _, err := os.Stat(x.path); err == nil {
 			out = append(out, x)
 		}
@@ -405,19 +643,40 @@ func (m *Manager) binOf(harness string) string {
 
 // createArgs makes a session's container.
 func (c *Cages) createArgs(name, session, image string, ms []mount, extra ...string) []string {
+	return c.createArgsWith(nil, name, session, image, ms, extra...)
+}
+
+// limits are a cage's memory and CPUs: its own, or the machine's.
+func (c *Cages) limits(cage *Cage) (memory, cpus string) {
+	memory, cpus = c.Memory, c.CPUs
+	if cage != nil && cage.Memory != "" {
+		memory = cage.Memory
+	}
+	if cage != nil && cage.CPUs != "" {
+		cpus = cage.CPUs
+	}
+	return memory, cpus
+}
+
+// createArgsWith makes a session's container, with its cage's own limits.
+func (c *Cages) createArgsWith(cage *Cage, name, session, image string, ms []mount, extra ...string) []string {
 	args := []string{"create", "--name", name, "--label", "xyz.vpavlin.shrooms.session=" + session,
 		// A cage made with its own agent's socket (ADR-044); one without is
 		// made again.
 		"--label", proxyLabel + "=" + cageGeneration,
+		// label=disable, NOT :Z. A :Z relabel on a mount shared between
+		// containers takes it away from the others on an SELinux host
+		// (measured 2026-10-14); do not "harden" this to :Z.
 		"--network", cageNetwork, "--security-opt", "label=disable",
 		// Not in podman's defaults either; said so, since the rule that
 		// closes the agent port depends on it.
 		"--cap-drop", "NET_ADMIN"}
-	if c.Memory != "" {
-		args = append(args, "--memory", c.Memory)
+	memory, cpus := c.limits(cage)
+	if memory != "" {
+		args = append(args, "--memory", memory)
 	}
-	if c.CPUs != "" {
-		args = append(args, "--cpus", c.CPUs)
+	if cpus != "" {
+		args = append(args, "--cpus", cpus)
 	}
 	if c.Pids > 0 {
 		args = append(args, "--pids-limit", fmt.Sprint(c.Pids))
@@ -427,9 +686,22 @@ func (c *Cages) createArgs(name, session, image string, ms []mount, extra ...str
 		if x.at != "" {
 			at = x.at
 		}
-		v := x.path + ":" + at
+		var opts []string
 		if x.ro {
-			v += ":ro"
+			opts = append(opts, "ro")
+		}
+		// nocopy: an empty named volume is seeded from the image's content at
+		// the mount point on first mount - including from an owner-provided
+		// image, and even on a :ro mount, since the copy comes from the image
+		// side. Costs nothing and keeps the shared folder empty.
+		if x.volume {
+			opts = append(opts, "nocopy")
+		}
+		// After a colon, comma-separated: "VOL:/shared,nocopy" is a mount
+		// at a directory called "/shared,nocopy" (podman 5, 2026-10-14).
+		v := x.path + ":" + at
+		if len(opts) > 0 {
+			v += ":" + strings.Join(opts, ",")
 		}
 		args = append(args, "-v", v)
 	}
@@ -456,10 +728,28 @@ func (m *Manager) prepareCage(s *Session, bin string) (*cageRun, error) {
 		if s.cage.Sealed {
 			sealedOut, _ = c.run(ctx, "inspect", "--format", "{{index .Config.Labels \""+sealedLabel+"\"}}", name)
 		}
-		if strings.TrimSpace(out) != cageGeneration || strings.TrimSpace(sealedOut) != sealedGeneration {
+		// Made with the gateway's files (ADR-059)? A cage made before them
+		// keeps its keys until it is made again, rather than losing what
+		// was installed in it to an upgrade.
+		gwOut, _ := c.run(ctx, "inspect", "--format", "{{index .Config.Labels \""+gatewayLabel+"\"}}", name)
+		s.cageGateway = strings.TrimSpace(gwOut) == "1"
+		// Its shared folder, which is set when it is made: one asked for
+		// later, or another one since its meshes changed, is a new cage.
+		sharedOut, _ := c.run(ctx, "inspect", "--format", "{{index .Config.Labels \""+sharedLabel+"\"}}", name)
+		if v := strings.TrimSpace(sharedOut); v == "<no value>" {
+			sharedOut = ""
+		}
+		why := ""
+		switch {
+		case strings.TrimSpace(out) != cageGeneration || strings.TrimSpace(sealedOut) != sealedGeneration:
+			why = "made again for a newer generation of the cage"
+		case strings.TrimSpace(sharedOut) != s.sharedFor():
+			why = "made again for its shared folder"
+		}
+		if why != "" {
 			c.run(ctx, "rm", "-f", "-t", "3", name)
 			s.record("caged", "shrooms", map[string]any{"caged": true, "image": image, "nix": s.cage.Nix, "github": s.cage.GitHub,
-				"remade": "made again, to reach agents only through its own; what was installed in it is gone"})
+				"shared": s.cage.Shared, "remade": why + "; what was installed in it is gone"})
 		}
 	}
 	if _, err := c.run(ctx, "container", "exists", name); err != nil {
@@ -486,14 +776,43 @@ func (m *Manager) prepareCage(s *Session, bin string) (*cageRun, error) {
 			}
 			extra = append([]string{"--security-opt", "seccomp=" + prof, "--label", sealedLabel + "=" + sealedGeneration}, sealedDNSArgs()...)
 		}
-		if _, err := c.run(ctx, c.createArgs(name, s.Name(), image, ms, extra...)...); err != nil {
+		if v := s.sharedFor(); v != "" {
+			if err := c.ensureSharedVolume(ctx, v); err != nil {
+				return nil, err
+			}
+			extra = append(extra, "--label", sharedLabel+"="+v)
+		}
+		// Through the gateway (ADR-059): its files laid over the cage's,
+		// and the label that says so.
+		if _, files, ok := m.gatewayFor(s); ok {
+			for at := range files {
+				// In place of what is mounted there already: pi's models.json
+				// is one of its settings mounted read-only (piHostCode), and
+				// podman refuses two mounts at one place.
+				kept := ms[:0]
+				for _, x := range ms {
+					if x.at != at && !(x.at == "" && x.path == at) {
+						kept = append(kept, x)
+					}
+				}
+				ms = append(kept, mount{path: m.gatewayFile(name, at), at: at, ro: true})
+			}
+			extra = append(extra, "--label", gatewayLabel+"=1")
+			s.cageGateway = true
+		} else {
+			s.cageGateway = false
+		}
+		if err := m.writeGatewayFiles(s, name); err != nil {
+			return nil, err
+		}
+		if _, err := c.run(ctx, c.createArgsWith(s.cage, name, s.Name(), image, ms, extra...)...); err != nil {
 			return nil, err
 		}
 	}
 	if err := m.startCageProxy(s, name); err != nil {
 		return nil, fmt.Errorf("the cage's socket to its agent: %w", err)
 	}
-	if _, err := c.run(ctx, "start", name); err != nil {
+	if err := c.startCage(ctx, name); err != nil {
 		return nil, err
 	}
 	if err := c.closeAgentPort(ctx, name, s.cage.Sealed); err != nil {
@@ -501,15 +820,41 @@ func (m *Manager) prepareCage(s *Session, bin string) (*cageRun, error) {
 		c.run(ctx, "stop", "-t", "3", name)
 		return nil, err
 	}
+	// The forwarder to the gateway, on the cage's loopback, before the
+	// harness that will use it (ADR-059). It holds no secret; a second one
+	// in a cage that kept running finds the port taken and goes.
+	// A sealed Claude cage needs no files, only its environment: the
+	// gateway, whatever the cage was made with.
+	if genv, files, ok := m.gatewayFor(s); ok && s.cage.Sealed && len(files) == 0 && len(genv) > 0 {
+		s.cageGateway = true
+	}
+	if err := m.writeGatewayFiles(s, name); err != nil {
+		return nil, err
+	}
+	if !s.cage.Sealed {
+		m.carryProjectTrust(s, name)
+	}
+	if s.cageGateway {
+		if _, err := c.run(ctx, "exec", "-d", name, m.Self, "llm-forward",
+			"--listen", GatewayListen, "--socket", CageProxyDir+"/proxy.sock"); err != nil {
+			return nil, fmt.Errorf("the cage's way to its model: %w", err)
+		}
+	}
 	env, err := m.cageEnv(s)
 	if err != nil {
 		return nil, err
 	}
 	r := &cageRun{c: c, container: name, dir: s.dir, envFile: env, bin: s.harness.Bin()}
-	if s.harness.Name() == "claude" {
-		if p, err := claudeProgram(bin); err == nil {
-			r.bin = p
+	// The program to run inside is the harness's to say. A harness that
+	// cannot name one is refused here rather than quietly falling back to the
+	// host's name, which may be a path the cage does not have — the bug that
+	// broke every caged pi session (2026-10-16).
+	if cg, ok := s.harness.(Cageable); ok {
+		p, err := cg.CageProgram(m.cageFacts(s, s.harness.Name()))
+		if err != nil {
+			return nil, fmt.Errorf("%s cannot be caged: %w", s.harness.Title(), err)
 		}
+		r.bin = p
 	}
 	return r, nil
 }
@@ -539,14 +884,31 @@ func (m *Manager) cageEnv(s *Session) (string, error) {
 		"SHROOMS_AGENT_PROXY": CageProxyDir + "/proxy.sock",
 		"PATH":                cagePath(home, s.cage.Nix),
 	}
+	// Where the folder cages share is mounted (ADR-057), only in a cage that
+	// has it. Told, not discovered: a folder nobody is told about is a folder
+	// nobody uses.
+	if s.cage.Shared {
+		vars["SHROOMS_SHARED"] = CageSharedDir
+	}
 	if s.cage.Nix {
 		if _, err := os.Stat(nixDaemonSocket); err == nil {
 			vars["NIX_REMOTE"] = "daemon"
 		}
 	}
+	// Of the agent's own environment, only what is named here: a cage gets
+	// what it is given, not whatever the agent happens to carry. Its model
+	// is reached through the gateway (ADR-059), so no key need go in, and a
+	// variable added to the agent later stays out by default.
+	allowed := cageHarnessEnv(s.harness)
 	for _, kv := range os.Environ() {
 		k, v, _ := strings.Cut(kv, "=")
-		if passedToCage(k, s.cage.GitHub) {
+		if cageEnvAllowed(k, allowed) {
+			vars[k] = v
+		}
+	}
+	if s.cageGateway {
+		genv, _, _ := m.gatewayFor(s)
+		for k, v := range genv {
 			vars[k] = v
 		}
 	}
@@ -575,35 +937,50 @@ func (m *Manager) writeCageEnv(s *Session, vars map[string]string) (string, erro
 	return p, os.WriteFile(p, []byte(b.String()), 0o600)
 }
 
-// passedToCage: the agent's environment variables a caged harness is given —
-// the keys and settings of models and providers, not the machine's own (its
-// PATH, its desktop, its user).
-func passedToCage(k string, github bool) bool {
-	// GitHub's tokens only to a cage given the GitHub login: otherwise the
-	// *_TOKEN rule below handed the owner's GitHub to every cage.
-	if strings.HasPrefix(k, "GH_") || strings.HasPrefix(k, "GITHUB_") {
-		return github
-	}
-	// Claude Code's own CLAUDE_CODE_ variables, when the agent runs under
-	// it, are about that session — its id, its socket — not this one's.
-	if strings.HasPrefix(k, "CLAUDE_CODE_") {
-		return k == "CLAUDE_CODE_OAUTH_TOKEN" || k == "CLAUDE_CODE_USE_BEDROCK" || k == "CLAUDE_CODE_USE_VERTEX"
-	}
-	for _, p := range []string{"ANTHROPIC_", "PI_", "OLLAMA_", "OPENAI_", "VENICE_", "OPENROUTER_", "GEMINI_", "GOOGLE_API"} {
-		if strings.HasPrefix(k, p) {
-			return true
-		}
-	}
-	for _, s := range []string{"_API_KEY", "_TOKEN", "_BASE_URL"} {
-		if strings.HasSuffix(k, s) {
-			return true
-		}
-	}
+// cageEnvAllowed is whether a variable of the agent's goes into a cage: the
+// time zone, the locale and the proxies, and the settings its harness asks
+// for (CageEnv). Nothing else: not keys or tokens of any name, and not the
+// machine's own (its PATH, its desktop, its user, its ssh agent).
+func cageEnvAllowed(k string, harness []string) bool {
 	switch k {
-	case "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "no_proxy", "TZ", "LANG":
+	case "TZ", "LANG", "LANGUAGE",
+		"HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "no_proxy", "all_proxy":
 		return true
 	}
+	if strings.HasPrefix(k, "LC_") {
+		return true
+	}
+	for _, h := range harness {
+		if k == h {
+			return true
+		}
+	}
 	return false
+}
+
+// CageEnv is a harness that wants some of the agent's variables in its cage:
+// settings, never secrets (a cage's credentials come through the gateway).
+// cageableHarness refuses a harness that cannot run in a cage: one that does
+// not implement Cageable (ADR-062). It is refused where caging is asked for,
+// rather than a cage made and then failed at exec.
+//
+// AdoptCaged needs no check of its own: it requires a Transcripts harness.
+func cageableHarness(h Harness) error {
+	if _, ok := h.(Cageable); ok {
+		return nil
+	}
+	return fmt.Errorf("%s is not caged yet (ADR-062)", h.Name())
+}
+
+type CageEnv interface {
+	CageEnv() []string
+}
+
+func cageHarnessEnv(h Harness) []string {
+	if c, ok := h.(CageEnv); ok {
+		return c.CageEnv()
+	}
+	return nil
 }
 
 // command is the harness's process, run in the cage.
@@ -625,6 +1002,11 @@ func (c *Cages) remove(container string, stateDir string) {
 	defer cancel()
 	c.run(ctx, "rm", "-f", "-t", "3", container)
 	os.Remove(filepath.Join(stateDir, "cages", container+".env"))
+	// And what was the cage's alone: its harness's private home (its prompt
+	// history, caches) and the gateway's files. Its conversations are the
+	// owner's, in the real folder, and stay.
+	os.RemoveAll(filepath.Join(stateDir, "cages", container+".home"))
+	os.RemoveAll(filepath.Join(stateDir, "cages", container+".gw"))
 }
 
 // busy reports a command still running in the cage besides the harness and
@@ -662,6 +1044,12 @@ func (m *Manager) SetCage(name string, cage *Cage, by string) (Info, error) {
 	if !ok {
 		return Info{}, fmt.Errorf("no session called %q", name)
 	}
+	if cage != nil {
+		// Before the podman check, for the same reason as CreateCaged.
+		if err := cageableHarness(s.harness); err != nil {
+			return Info{}, err
+		}
+	}
 	if cage != nil && m.Cages == nil {
 		return Info{}, errors.New("this machine has no podman to cage sessions with")
 	}
@@ -683,7 +1071,7 @@ func (m *Manager) SetCage(name string, cage *Cage, by string) (Info, error) {
 	data := map[string]any{"caged": cage != nil}
 	if cage != nil {
 		data["image"] = m.Cages.image(cage)
-		data["nix"], data["github"], data["sealed"] = cage.Nix, cage.GitHub, cage.Sealed
+		data["nix"], data["github"], data["shared"], data["sealed"] = cage.Nix, cage.GitHub, cage.Shared, cage.Sealed
 	}
 	s.record("caged", by, data)
 	s.mu.Unlock()
@@ -698,4 +1086,160 @@ func (m *Manager) SetCage(name string, cage *Cage, by string) (Info, error) {
 		m.Cages.Prepare(m.Cages.image(cage), m.log.Info)
 	}
 	return s.Info(), err
+}
+
+var (
+	cageMemoryRe = regexp.MustCompile(`^[1-9][0-9]{0,6}[mMgG]$`)
+	cageCPUsRe   = regexp.MustCompile(`^[0-9]{1,3}(\.[0-9]{1,2})?$`)
+)
+
+// SetCageLimits sets a caged session's memory and CPUs; "" goes back to the
+// machine's. A cage that exists is changed where it is (podman update), not
+// made again: what was installed in it (a nix, a toolchain) stays. One that
+// does not exist yet is made with them.
+func (m *Manager) SetCageLimits(name, memory, cpus, by string) (Info, error) {
+	s, ok := m.Get(name)
+	if !ok {
+		return Info{}, fmt.Errorf("no session %s", name)
+	}
+	memory, cpus = strings.TrimSpace(memory), strings.TrimSpace(cpus)
+	if memory != "" && !cageMemoryRe.MatchString(memory) {
+		return Info{}, fmt.Errorf("%q is not a memory limit: say e.g. 16g or 512m", memory)
+	}
+	if cpus != "" {
+		n, err := strconv.ParseFloat(cpus, 64)
+		if !cageCPUsRe.MatchString(cpus) || err != nil || n <= 0 || n > float64(runtime.NumCPU()) {
+			return Info{}, fmt.Errorf("%q is not a number of CPUs between 0 and %d, this machine's", cpus, runtime.NumCPU())
+		}
+	}
+	s.mu.Lock()
+	if s.cage == nil {
+		s.mu.Unlock()
+		return Info{}, fmt.Errorf("session %s is not caged", name)
+	}
+	s.cage.Memory, s.cage.CPUs = memory, cpus
+	container := s.cage.Container
+	mem, cpu := m.Cages.limits(s.cage)
+	s.record("setting", by, map[string]string{"cage_memory": mem, "cage_cpus": cpu})
+	s.mu.Unlock()
+	m.mu.Lock()
+	err := m.save()
+	m.mu.Unlock()
+	if err != nil {
+		return Info{}, err
+	}
+	if m.Cages != nil {
+		ctx, cancel := context.WithTimeout(m.ctx, 30*time.Second)
+		defer cancel()
+		if _, err := m.Cages.run(ctx, "container", "exists", container); err == nil {
+			args := []string{"update"}
+			if mem != "" {
+				args = append(args, "--memory", mem)
+			}
+			if cpu != "" {
+				args = append(args, "--cpus", cpu)
+			}
+			if len(args) > 1 {
+				if _, err := m.Cages.run(ctx, append(args, container)...); err != nil {
+					return s.Info(), fmt.Errorf("kept for its next cage, but its cage now: %w", err)
+				}
+			}
+		}
+	}
+	return s.Info(), nil
+}
+
+// gatewayFile is where on the machine a cage's gateway file is kept, to be
+// mounted over the one at `at` in the cage.
+func (m *Manager) gatewayFile(container, at string) string {
+	return filepath.Join(m.dir, "cages", container+".gw", strings.ReplaceAll(strings.TrimPrefix(at, "/"), "/", "_"))
+}
+
+// writeGatewayFiles writes a session's gateway files, fresh at every start.
+// Written in place, not replaced: a file mounted into a cage is its inode,
+// and a new one would not be seen there.
+func (m *Manager) writeGatewayFiles(s *Session, container string) error {
+	_, files, ok := m.gatewayFor(s)
+	if !ok {
+		return nil
+	}
+	for at, content := range files {
+		p := m.gatewayFile(container, at)
+		if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
+			return err
+		}
+		f, err := os.OpenFile(p, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+		if err != nil {
+			return err
+		}
+		_, werr := f.WriteString(content)
+		if cerr := f.Close(); werr == nil {
+			werr = cerr
+		}
+		if werr != nil {
+			return werr
+		}
+	}
+	return nil
+}
+
+// privateHome is a cage's own directory for its harness's state, on the
+// machine (kept with the cage, deleted with it), where the harness writes
+// what is not its conversation: prompt history, todos, caches.
+func (m *Manager) privateHome(container, harness string) string {
+	d := filepath.Join(m.dir, "cages", container+".home", harness)
+	os.MkdirAll(d, 0o700)
+	return d
+}
+
+// cageFacts is what a harness is told about the cage it is asked to run in.
+func (m *Manager) cageFacts(s *Session, harness string) CageFacts {
+	home, _ := os.UserHomeDir()
+	return CageFacts{
+		Home:        home,
+		Dir:         s.dir,
+		PrivateHome: m.privateHome(s.cage.Container, harness),
+		Bin:         m.binOf(harness),
+	}
+}
+
+// ownConversations is the session's real conversation folder, read-write,
+// made if it is not there yet: its conversation is the owner's file as
+// before, which the terminal, the apps' history and moving it out of the
+// cage all find where they always did.
+func ownConversations(dir string) mount {
+	os.MkdirAll(dir, 0o700)
+	return mount{path: dir}
+}
+
+// claudeProjectName is Claude Code's folder for a working directory's
+// conversations: every character but a letter or a digit as a dash
+// ("/home/v/devel/github.com/x" → "-home-v-devel-github-com-x").
+func claudeProjectName(dir string) string {
+	return strings.Map(func(r rune) rune {
+		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' {
+			return r
+		}
+		return '-'
+	}, filepath.Clean(dir))
+}
+
+// piSessionsName is pi's folder for a working directory's sessions: the
+// path's slashes as dashes, between double dashes ("/home/v/k11" →
+// "--home-v-k11--").
+func piSessionsName(dir string) string {
+	return "--" + strings.ReplaceAll(strings.TrimPrefix(filepath.Clean(dir), "/"), "/", "-") + "--"
+}
+
+// carryProjectTrust gives a caged session's private harness home what the
+// owner has decided about its own project, and about no other: pi's trust
+// in it (its .pi config, MCP servers and extensions load only in a trusted
+// project), and Claude Code's entry for it (the project's .mcp.json servers
+// approved, its trust dialog accepted). Without them the foray sessions on
+// proteus lost the foray tools their project's .pi/mcp.json gives them
+// (2026-10-16). Written at every start, so a decision made since is carried.
+func (m *Manager) carryProjectTrust(s *Session, container string) {
+	if c, ok := s.harness.(Cageable); ok {
+		c.CageTrust(m.cageFacts(s, s.harness.Name()))
+	}
 }

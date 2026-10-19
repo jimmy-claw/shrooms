@@ -3,6 +3,8 @@ package agent
 import (
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sync/atomic"
 )
 
@@ -25,8 +27,12 @@ type Harness interface {
 	// Args starts a session's process: a new conversation, or the one with
 	// the id given (from an earlier init message's session_id).
 	Args(o StartOptions) []string
-	// Codec is a fresh translator for one process.
-	Codec() Codec
+	// Codec is a fresh translator for one process. It is given the same
+	// StartOptions the process was started with, because not every harness
+	// takes them on its command line: Claude Code and pi read Resume, MCP
+	// and Note out of Args, but OpenCode's ACP server is started bare and
+	// told all three over the protocol, so its codec has to know them.
+	Codec(StartOptions) Codec
 	// Caps says what the harness can do, for the apps to offer.
 	Caps() Caps
 }
@@ -48,6 +54,13 @@ type StartOptions struct {
 	// Note is added to the system prompt: who the session is, and how to
 	// deal with other agents (AgentNote).
 	Note string
+	// Model is the one chosen for the session (SetModel); "" for the
+	// harness's default.
+	Model string
+	// Dir is the session's directory, absolute. It is also the process's
+	// working directory; a codec needs it by name when its protocol takes a
+	// path (OpenCode's ACP session/new wants one, and wants it absolute).
+	Dir string
 }
 
 // AgentNote is what every session is told about the agents around it.
@@ -97,6 +110,50 @@ type Codec interface {
 	Respond(requestID string, response map[string]any) []any
 }
 
+// CageFacts is what a harness is told about the cage it is asked to run in
+// (ADR-062).
+type CageFacts struct {
+	Home        string // the owner's home on the host
+	Dir         string // the session's project directory
+	PrivateHome string // this cage's own directory for the harness, made already
+	Bin         string // the harness's binary on the host, as configured
+}
+
+// Cageable is a harness that can run in a cage (ADR-062): it says what of the
+// owner's home goes in, which program runs there, and what the owner has
+// decided about this project. Opt-in, like Transcripts and Gatewayed — a
+// harness that does not implement it is refused caging, which is what a check
+// by name used to do.
+type Cageable interface {
+	// CageMounts is what this harness needs in the cage: its private home, the
+	// owner's settings read-only over it, and THIS project's own conversations
+	// read-write. Nothing else of the owner's is in the list, so what lands in
+	// the home later is out by default.
+	CageMounts(f CageFacts) []mount
+
+	// CageProgram is the program to run inside the cage, for a binary on the
+	// host. Whatever it needs mounted comes from CageMounts.
+	CageProgram(f CageFacts) (string, error)
+
+	// CageTrust gives the cage's private home what the owner has decided about
+	// this project, and about no other.
+	CageTrust(f CageFacts) error
+}
+
+// Answering is a codec whose protocol needs a round trip before it can be
+// used, so it must write to its process WHILE decoding. OpenCode's ACP is that
+// shape: initialize is answered with session/new, and the id that comes back is
+// what every turn needs — so a turn that arrived before the session existed
+// goes out on that step. The codec queues what it must send and the read loop
+// writes it before the messages from the same line.
+//
+// Opt-in, like Transcripts and Gatewayed: Claude Code and pi write nothing
+// here, and their codecs do not carry a return value they would never use.
+type Answering interface {
+	// Decoding returns what this codec queued to write, and empties the queue.
+	Decoding() []any
+}
+
 // Transcripts is a harness whose conversations are kept on disk where the
 // agent can read them: what was said before a session came to the agent (in
 // a terminal, say), for its history and search.
@@ -114,11 +171,11 @@ type Transcripts interface {
 // own shape, so its codec passes lines through as they are.
 type Claude struct{}
 
-func (Claude) Name() string  { return "claude" }
-func (Claude) Title() string { return "Claude Code" }
-func (Claude) Bin() string   { return "claude" }
-func (Claude) Caps() Caps    { return Caps{Approve: true, Takeover: true} }
-func (Claude) Codec() Codec  { return claudeCodec{} }
+func (Claude) Name() string             { return "claude" }
+func (Claude) Title() string            { return "Claude Code" }
+func (Claude) Bin() string              { return "claude" }
+func (Claude) Caps() Caps               { return Caps{Approve: true, Takeover: true} }
+func (Claude) Codec(StartOptions) Codec { return claudeCodec{} }
 
 // Args is how a session's process is started.
 //
@@ -159,7 +216,89 @@ func (Claude) Args(o StartOptions) []string {
 	if o.Note != "" {
 		args = append(args, "--append-system-prompt", o.Note)
 	}
+	if o.Model != "" {
+		args = append(args, "--model", o.Model)
+	}
 	return args
+}
+
+// GatewayEnv points Claude Code at the gateway (ADR-059): its API's base
+// URL and a key, which the gateway replaces with the real credential: the
+// sealed token, or the owner's own login.
+func (Claude) GatewayEnv(bool) map[string]string {
+	return map[string]string{"ANTHROPIC_BASE_URL": GatewayBase("anthropic"), "ANTHROPIC_API_KEY": GatewayKey}
+}
+
+// GatewayFiles: in a caged session, whose cage has the owner's ~/.claude
+// for its conversations, an empty credentials file laid over the owner's
+// login in it: the login stays with the gateway, out of the cage's reach. A
+// sealed cage has a .claude of its own, with no login in it.
+func (Claude) GatewayFiles(sealed bool) map[string]string {
+	if sealed {
+		return nil
+	}
+	home, _ := os.UserHomeDir()
+	return map[string]string{filepath.Join(home, ".claude", ".credentials.json"): "{}\n"}
+}
+
+// CageMounts: Claude Code's own directory, a private one of the cage's with
+// the owner's settings read-only over it and this project's conversations
+// read-write.
+func (Claude) CageMounts(f CageFacts) []mount {
+	dir := filepath.Join(f.Home, ".claude")
+	ms := []mount{{path: f.PrivateHome, at: dir}}
+	ms = append(ms, readOnlyIn(dir, claudeHostCode)...)
+	ms = append(ms, ownConversations(filepath.Join(dir, "projects", claudeProjectName(f.Dir))))
+	// Its program, for a cage whose node runs npm's cli.js.
+	if bin, err := claudeProgram(f.Bin); err == nil {
+		ms = append(ms, mount{path: filepath.Dir(bin), ro: true})
+	}
+	return ms
+}
+
+func (Claude) CageProgram(f CageFacts) (string, error) { return claudeProgram(f.Bin) }
+
+// CageTrust carries the owner's entry for this project — its .mcp.json servers
+// approved, its trust dialog accepted — into the cage's own config file.
+func (Claude) CageTrust(f CageFacts) error {
+	var host struct {
+		Projects map[string]json.RawMessage `json:"projects"`
+	}
+	b, err := os.ReadFile(filepath.Join(f.Home, ".claude.json"))
+	if err != nil || json.Unmarshal(b, &host) != nil {
+		return nil
+	}
+	dir := filepath.Clean(f.Dir)
+	entry, ok := host.Projects[dir]
+	if !ok {
+		return nil
+	}
+	// Into the cage's own config file (CLAUDE_CONFIG_DIR is its ~/.claude),
+	// keeping what Claude Code wrote there itself.
+	p := filepath.Join(f.PrivateHome, ".claude.json")
+	cfg := map[string]json.RawMessage{}
+	if b, err := os.ReadFile(p); err == nil {
+		json.Unmarshal(b, &cfg)
+	}
+	projects := map[string]json.RawMessage{}
+	if raw, ok := cfg["projects"]; ok {
+		json.Unmarshal(raw, &projects)
+	}
+	projects[dir] = entry
+	cfg["projects"], _ = json.Marshal(projects)
+	out, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return nil
+	}
+	return os.WriteFile(p, out, 0o600)
+}
+
+// CageEnv: Claude Code's settings that may follow it into a cage, which
+// choose models and limits, none of them a credential.
+func (Claude) CageEnv() []string {
+	return []string{"ANTHROPIC_MODEL", "ANTHROPIC_SMALL_FAST_MODEL", "ANTHROPIC_DEFAULT_OPUS_MODEL", "ANTHROPIC_DEFAULT_SONNET_MODEL",
+		"ANTHROPIC_DEFAULT_HAIKU_MODEL", "CLAUDE_CODE_MAX_OUTPUT_TOKENS", "MAX_THINKING_TOKENS", "DISABLE_TELEMETRY",
+		"DISABLE_ERROR_REPORTING", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"}
 }
 
 func (Claude) TranscriptPath(id string) (string, error) { return transcriptPath(id) }
@@ -202,5 +341,5 @@ func (h missingHarness) Name() string               { return h.name }
 func (h missingHarness) Title() string              { return h.name }
 func (h missingHarness) Bin() string                { return "" }
 func (h missingHarness) Args(StartOptions) []string { return nil }
-func (h missingHarness) Codec() Codec               { return claudeCodec{} }
+func (h missingHarness) Codec(StartOptions) Codec   { return claudeCodec{} }
 func (h missingHarness) Caps() Caps                 { return Caps{} }

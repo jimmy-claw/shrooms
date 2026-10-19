@@ -219,7 +219,7 @@ echo "$out" | grep -qF "HOSTS=" || { echo "$out" | head -20; echo "FAIL: the vie
 if echo "$out" | grep -E "Main\.qml:[0-9]+:.*(TypeError|ReferenceError|is not a function|Cannot (read|assign)|Expected token|Unexpected token|SyntaxError|Expected a qualified name)"; then
     echo "FAIL: the view hit a script error"; exit 1
 fi
-expect "HOSTS=1 SESSIONS=2" "the agents were not listed"
+expect "HOSTS=1 SESSIONS=2 ENTRIES=2 MESHES=home,office" "the agents were not listed, or a machine on two meshes is not one machine on both (it showed on whichever answered first)"
 # The tasks panel's rows: grouped Needs you / Working / Stalled / Done unacked, with the
 # acked one gone, the ages right, and each row carrying what a person needs to judge it.
 expect "TASKROWS needs-you:m8:quiet 5m,blocked:m1:quiet 1h,blocked:m6:quiet 15m,working:m2:quiet 30m,working:m7:quiet 10m,stalled:m3:quiet 2h,unacked:m4:done 3h" "the task rows are not grouped and ordered as a person needs them: Needs you first, then oldest-first inside each group"
@@ -329,6 +329,14 @@ grep -q 'onMovementEnded: root.chatStick = root.followingEnd(chatList.atYEnd)' b
 # The ack path: /a2a/ is not forwarded by the core, so an ack could never work
 # from Basecamp at all. The path itself is pinned above (ACKPATH); this says the
 # call uses it.
+# No infinite animations in the views: one keeps the window repainting at vsync
+# for as long as it runs, ~50 frames a second on the Duet tablet (2026-10-15).
+! grep -n 'Animation.Infinite' basecamp-agents/Main.qml basecamp/Main.qml \
+    || { echo "FAIL: an infinite animation repaints the whole window all the time; blink with a Timer"; exit 1; }
+# No attached ToolTips: a shared popup whose item a list rebuild destroyed
+# crashed Basecamp in QQuickPopup::overlayEvent (2026-10-19); showHint instead.
+! grep -n 'ToolTip\.' basecamp-agents/Main.qml basecamp/Main.qml \
+    || { echo "FAIL: an attached ToolTip can outlive its row and crash Basecamp; use root.showHint"; exit 1; }
 grep -q 'ackPath(row.id)' basecamp-agents/Main.qml \
     || { echo "FAIL: an ack does not go to the /v1/ path the core forwards"; exit 1; }
 
@@ -373,7 +381,7 @@ expect 'SPEAKABLE="Results\nThe agent found three papers and go test passed.\n\n
 expect "UNDERSCORE=built basecamp_voice_core.lgx for x86_64, really" "underscores inside a word are dropped"
 expect "CZECH=true,false" "Czech is not told from English"
 expect 'SPEAK sentences="Running them|\nFirst session.go, line 654 is fixed.|Then tests." key=shrooms/3 paused=true lit=true read="en:Running them|en:Running them|en:First session.go, line 654 is fixed.|en:Then tests." done=true auto=[cs:Hotovo, všechno běží.] then=[cs:Hotovo, všechno běží.|en:Second reply.] queue=0' "replies are not read sentence by sentence, paused, resumed, skipped and lit, or auto-play reads the past, tool calls, or the same reply twice"
-expect "USAGE asked=/v1/usage?since=D who=laptop:2.0k,nothing:900 where=laptop:8 model=ollama/qwen3,claude-opus-5[1m] bycost=nothing,laptop busy=1h 0m since7=2026-09-29 sinceAll=[] first=laptop:true then=0" "usage is not asked of each machine in the background, or not summed by who, where and which model"
+expect "USAGE asked=/v1/usage?since=D who=laptop:2.0k,nothing:900 agent=laptop/notes:5,laptop/shrooms:3 where=laptop:8 model=ollama/qwen3,claude-opus-5[1m] bycost=nothing,laptop busy=1h 0m since7=2026-09-29 sinceAll=[] first=laptop:true then=0" "usage is not asked of each machine in the background, or not summed by who, where and which model"
 expect "GLANCE 21/0 50/1 80/2 30/2 live=62/1" "the usage link does not colour the session quota amber from half and red from 80%"
 expect "PLANS n=1 windows=five_hour,seven_day merged=1:desk+laptop:rejected status=[limit reached (5 hours) — back at T] warn=[past 98% of 5 hours] label=7 days" "plan limits are not read, grouped by account or worded as on the phone"
 expect "VOICE before=[Replies are read with speech-dispatcher (espeak), which sounds robotic.] during=[downloading Piper (25 MB)…] after=[Natural voice: Piper, en_US-lessac-medium. Replies are read with it.] calls=state,setup,state" "the voice section does not say what reads, or does not set the natural voice up"
@@ -385,11 +393,22 @@ expect "COPYCODE links=2 first=ssh-keygen -t ed25519 copied=true said=copied 2 l
 expect "QUOTATAG shown=1 label=QUOTA · back T,,QUOTA" "a session out of quota is not set apart in the session list"
 expect "CAGETAG shown=1 words=desktop, GitHub login" "a caged session is not marked in the session list"
 expect 'ACCEPTCAGED /v1/sessions/shrooms/settings {"accept_caged":true} said=session shrooms takes tasks from caged agents' "whether a session takes tasks from caged agents cannot be set"
+nd=$(echo "$out" | sed -n 's/.*NODOUBLE before=\([0-9]*\) after=\([0-9]*\).*/\1 \2/p')
+[ -n "$nd" ] && [ "${nd% *}" = "${nd#* }" ] || { echo "FAIL: a read from where one had already read shows events twice (replies doubled, 2026-10-16): $nd"; exit 1; }
+expect 'STREAMONLY rebuilt=0 grew=true' "pieces of a streaming reply rebuild the whole conversation (85% of a core on the Duet while streaming)"
+expect 'ALLMESH sessions=SPEL,k11,reviewer k11=fd7b::1@home spel=fdb0::1' "a session on one mesh only is missing under all meshes"
+expect 'MESHPICK meshes=home,office home=k11@home,laptop@home all=2 switch=1' "the agents cannot be shown one mesh at a time"
+expect 'HERE first=k11:true second=laptop:false' "the machine Basecamp runs on is not first in the list, or not marked"
+expect 'COREEVENT read=true interval=3000 subscribed=shrooms_core/agentChanged' "the view does not subscribe to the core's agentChanged, read on it, or fall back to a slow safety-net poll"
+expect 'POLL busy=300/true hidden=300/true' "the open session is not polled fast while it works, or stops when the host says the view is hidden (Basecamp 0.3.1 says so while it is on screen: 0.51.1 never listed an agent)"
+expect 'RATE 42.4 tok/s|186 tok/s||' "the model's speed is not shown, or shown when not known"
+expect 'CAGELIMITS /v1/sessions/shrooms/cage/limits {"memory":"16g","cpus":"8"}' "a cage's memory and CPUs cannot be set"
+expect 'MODELSET /v1/sessions/shrooms/settings {"model":"venice/claude-haiku-5-5"} note=model set to haiku from phone.office|model back to its machine'"'"'s default' "a session's model cannot be chosen, or its change is not noted"
 expect 'CAGED open=true offer=true moved=/v1/sessions/shrooms/cage {"cage":{"image":"localhost/shrooms-workbench:desktop","github":true}} out={"cage":null}' "a session is not moved into a cage with its options, or out of it"
 expect "RESTARTED=/v1/sessions/shrooms/restart SAID=restarted session shrooms" "restart does not restart the session"
 expect "OUTSIDE=true,heartbeat" "a turn the harness started is not marked as such"
 expect "FORMCLOSED=true" "opening a session leaves the new-session form in front of it"
-expect 'CAGE offered=true sent={} reset=true label=caged, desk={"image":"localhost/shrooms-workbench:desktop","nix":true} sealed={"image":"localhost/shrooms-workbench:desktop","sealed":true} words=sealed, desktop note=[moved into a cage (desktop, GitHub login) from laptop.office|taken out of its cage]' "a cage is not offered where the machine has podman, not asked for with its image and options, or its moves are not noted"
+expect 'CAGE offered=true sent={} reset=true label=caged, desk={"image":"localhost/shrooms-workbench:desktop","nix":true,"shared":true} sealed={"image":"localhost/shrooms-workbench:desktop","sealed":true} words=sealed, desktop note=[moved into a cage (desktop, GitHub login) from laptop.office|taken out of its cage]' "a cage is not offered where the machine has podman, not asked for with its image and options, or its moves are not noted (a sealed one is never sent the shared folder)"
 expect "HARNESS offered=claude,pi sent=pi auto=false label=[pi][]" "another harness is not offered, or a session of it not asked for"
 expect "STREAMING=[Pushing **now**…] WORKING=true" "the streamed reply is not shown as it grows"
 expect "CONTEXT=67% of 1M MODEL=opus-5 1m" "context and model are not read from the session"
@@ -423,7 +442,8 @@ expect "RENEWED n=1 machines=atlas+laptop share=0.28 alone=true,0,[] glance=0" "
 expect "TASKS note=task proj:m1 stalled — no progress after 5 reminders | 2 tasks | ⚠ a task stalled — no progress after the reminders" "tasks are not shown"
 expect "FORECAST at this pace: runs out 13:40 — before it resets | at this pace: about 80% at the reset — it lasts | at this pace: about 3.0 DIEM left at the refill" "the forecast is not shown"
 expect "MDHTML 111111111111111111" "Markdown is not drawn as the phone draws it"
-expect "HOSTSCROLL=180" "the session list jumps on a refresh"
+expect "NARROW fits=true gives=true" "+ session is pushed out of a narrow list by the mesh names"
+expect "HOSTSCROLL=180 TOP=0" "the session list jumps on a refresh, or back down after the reader scrolled to the top"
 expect "MORE=450|— 700 earlier events not loaded · load 150 more —|— 90 earlier events not loaded · load them —" "loading more is not a step at a time"
 expect "DELETED=/v1/sessions/logos OPEN=none" "deleting did not remove the open session"
 expect "BOARD cards=pi5/jimmy,laptop/shrooms,laptop/notes,proteus/review edges=proteus/review>laptop/notes:input-required,laptop/shrooms>pi5/jimmy:stalled,pi5/jimmy>proteus/review:working drawn=3 list=false flow=true tasks=3" "the board does not show every session, or the links between agents working on each other's tasks"

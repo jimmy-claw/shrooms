@@ -155,6 +155,17 @@ sent files. None ticked is every mesh. With some ticked the link reads
 **Rename.** Tap or click the session's name in the header. Its history, its
 unread count, queued messages and what it is doing go with it.
 
+**Model.** "model" in the header chooses the model the session runs on: type
+it, or pick one its machine's sessions already run on. For Claude Code, `haiku`,
+`sonnet`, `opus` or a full name; for pi, `provider/model`, e.g.
+`venice/claude-haiku-5-5`. The session is stopped, and your next message
+carries on in the same conversation on the new model. It stays chosen across
+restarts, and the link reads "MODEL" while it is set; "DEFAULT" goes back to
+the machine's (for pi, the agent's `--pi-args`). Over the API:
+`POST /v1/sessions/NAME/settings {"model": "…"}`, while the session is idle.
+Typing `/model` in a message works for Claude Code, not for pi, which
+receives it as text.
+
 **Delete.** "delete" in the header, or on the phone a long press on the
 session in the list. This stops the session and removes it from the list.
 The Claude Code conversation itself stays on the machine, and can be
@@ -193,9 +204,11 @@ this phone.
   container of its own. Root inside, and of the machine only the project, the
   files sent to it and the harness's settings. Its options: the image (the
   machine's own, the workbench, or the desktop one with Xvfb, xdotool and
-  ffmpeg), **nix** (the machine's nix store and profile, when it has nix) and
-  **GitHub login** (your `gh` login, read-only), and **sealed**, for code you
-  do not trust: the internet and nothing local, its own login, results in
+  ffmpeg), **nix** (the machine's nix store and profile, when it has nix),
+  **GitHub login** (your `gh` login, read-only), **shared folder** (one folder
+  at `/shared` that the caged sessions on the same meshes share), and
+  **sealed**, for code you do not trust: the internet and nothing local, its
+  own login, results in
   `~/shrooms-outbox`. Sealed is offered only once the machine has a sealed
   token; until then the form says how to make one. The first caged session
   on a machine builds the image, which takes a few minutes. See

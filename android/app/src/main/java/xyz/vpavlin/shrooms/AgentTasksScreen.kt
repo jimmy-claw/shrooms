@@ -47,8 +47,8 @@ suspend fun fetchTasks(hosts: List<AgentHost>): List<Pair<AgentHost, List<AgentT
 }
 
 /** The machines worth asking: one per address, and only those the list has heard from lately. */
-fun taskTargets(hosts: List<AgentHost>, now: Long = System.currentTimeMillis()): List<AgentHost> =
-    hosts.filter { HostCache.reachable(it, now) }.distinctBy { it.address }
+fun taskTargets(hosts: List<AgentHost>): List<AgentHost> =
+    hosts.filter { HostCache.reachable(it) }.distinctBy { it.address }
 
 /**
  * The tasks between agents, grouped by what a person has to do about them,

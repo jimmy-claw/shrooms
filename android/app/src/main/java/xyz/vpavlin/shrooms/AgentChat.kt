@@ -169,6 +169,8 @@ object AgentChat {
                 "setting" -> if (e.data.has("auto_approve")) {
                     out += ChatItem.Note(e.seq, e.time,
                         (if (e.data.optBoolean("auto_approve")) "auto-approve on" else "auto-approve off") + by(e))
+                } else if (e.data.has("model")) {
+                    out += ChatItem.Note(e.seq, e.time, modelNote(e.data.optString("model")) + by(e))
                 }
                 "claude" -> claude(e, answers, lastStop, out)
             }
@@ -306,5 +308,8 @@ object AgentChat {
 
 /** A session moved into a cage or out of one (Basecamp's cagedNote). */
 fun cagedNote(d: org.json.JSONObject): String =
-    if (d.optBoolean("caged")) "moved into a cage (${cageWords(SessionCage(d.optString("image"), d.optBoolean("nix"), d.optBoolean("github")))})"
+    if (d.optBoolean("caged")) "moved into a cage (${cageWords(SessionCage(d.optString("image"), d.optBoolean("nix"), d.optBoolean("github"), shared = d.optBoolean("shared")))})"
     else "taken out of its cage"
+
+/** A model chosen for a session, as the conversation notes it. */
+fun modelNote(model: String): String = if (model.isEmpty()) "model back to its machine's default" else "model set to $model"

@@ -51,6 +51,27 @@ class CageTest {
         assertTrue(o.cage!!.nix)
     }
 
+    // The shared folder (ADR-057): asked for, read from the list (where it is
+    // the folder's volume) and from a note (where it is true), kept in the cache.
+    @Test fun theSharedFolderIsAskedForAndRead() {
+        assertEquals("""{"cage":{"shared":true}}""", cageBody(SessionCage("", shared = true)))
+        assertTrue(SessionCage.parse(JSONObject("""{"image":"x","shared":"shrooms-shared-home-a1b2c3"}"""))!!.shared)
+        assertFalse(SessionCage.parse(JSONObject("""{"image":"x"}"""))!!.shared)
+        assertEquals("moved into a cage (x, shared folder)", cagedNote(JSONObject("""{"caged":true,"image":"x","shared":true}""")))
+        val s = AgentSession("box", "/p", "idle", 0, false, 0, cage = SessionCage("x", shared = true))
+        assertTrue(HostCache.decode(HostCache.encode(listOf(AgentHost("laptop", "office", "fd00::1", listOf(s), lastSeen = 1))))[0].sessions[0].cage!!.shared)
+        val o = parseOffer("""{"harnesses":[],"cage":{"available":true,"image":"a","shared":true,"shared_in":"/shared"}}""").cage!!
+        assertTrue(o.shared && o.sharedIn == "/shared")
+        assertFalse(parseOffer("""{"harnesses":[],"cage":{"available":true,"image":"a"}}""").cage!!.shared)
+    }
+
+    // A cage's own limits, and the machine's, read from the list.
+    @Test fun aCagesLimitsAreRead() {
+        val c = SessionCage.parse(JSONObject("""{"image":"x","memory":"16g","cpus":"8","machine_memory":"4g","machine_cpus":"2"}"""))!!
+        assertEquals(listOf("16g", "8", "4g", "2"), listOf(c.memory, c.cpus, c.machineMemory, c.machineCpus))
+        assertEquals("", SessionCage.parse(JSONObject("""{"image":"x"}"""))!!.memory)
+    }
+
     @Test fun whetherASessionTakesCagedTasksIsRead() {
         val s = """{"sessions":[{"name":"a","accept_caged":true},{"name":"b"}]}"""
         val ss = org.json.JSONObject(s).getJSONArray("sessions")
@@ -62,6 +83,7 @@ class CageTest {
         val b = SessionCage("localhost/shrooms-workbench:desktop", nix = true, github = true, sealed = true).json()
         assertTrue(b.getBoolean("sealed"))
         assertFalse(b.has("nix") || b.has("github"))
+        assertFalse(SessionCage("x", shared = true, sealed = true).json().has("shared"))
         val back = SessionCage.parse(JSONObject("""{"image":"x","sealed":true,"outbox":"/home/u/shrooms-outbox/review"}"""))!!
         assertTrue(back.sealed)
         assertEquals("/home/u/shrooms-outbox/review", back.outbox)

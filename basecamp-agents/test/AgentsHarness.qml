@@ -11,6 +11,7 @@ Item {
 
     property string out: Qt.application.arguments[Qt.application.arguments.length - 1]
     property int eventCalls: 0
+    property bool partialOnly: false
 
     readonly property var hosts: [{
         name: "laptop", mesh: "office", address: "fdb0:9afc:a5ef:388c:8264:7716:36fc:64eb",
@@ -104,6 +105,10 @@ Item {
         id: view
         anchors.fill: parent
         bridge: QtObject {
+            // As Basecamp's logos object: subscribe, and the event signal.
+            signal moduleEventReceived(string moduleName, string eventName, var data)
+            property var subscribed: []
+            function onModuleEvent(module, name) { subscribed.push(module + "/" + name); return true }
             function callModule(module, method, args) {
                 top.calls.push(method)
                 if (method === "agentWatch") {
@@ -211,6 +216,9 @@ Item {
                     error: "", kept: 1759500000000, epoch: 0, events: Number(args[0]) >= 3 ? [] : [ev(50, "message", { text: "old" }), ev(51, "message", { text: "older" }), ev(52, "message", { text: "oldest" })] })
                 if (method === "agentEvents" && top.keptPhase === 2) return JSON.stringify({ next: 7, more: false, connected: true,
                     error: "", kept: 0, epoch: 5, events: Number(args[0]) >= 7 ? [] : top.events.slice(0, 4) })
+                // Only pieces of a reply as it streams.
+                if (method === "agentEvents" && top.partialOnly) return JSON.stringify({ next: Number(args[0]), more: false, connected: true, error: "",
+                    events: [{ seq: 0, kind: "partial", data: { text: " more" } }, { seq: 0, kind: "partial", data: { text: " words" } }] })
                 if (method === "agentEvents") {
                     top.eventCalls++
                     var after = Number(args[0])
@@ -250,7 +258,9 @@ Item {
     Timer {
         interval: 1500; running: true
         onTriggered: {
-            console.error("HOSTS=" + view.agentHosts.length + " SESSIONS=" + view.agentHosts[0].sessions.length)
+            // One machine on two meshes: an entry for each, shown once under "all" with both.
+            console.error("HOSTS=" + view.shownHosts.length + " SESSIONS=" + view.shownHosts[0].sessions.length
+                          + " ENTRIES=" + view.agentHosts.length + " MESHES=" + view.shownHosts[0].meshes.join(","))
             console.error("PROBED=" + top.lastFind)
             view.openSession(view.agentHosts[0], "shrooms")
         }
@@ -292,7 +302,17 @@ Item {
     Timer {
         interval: 3500; running: true
         onTriggered: {
-            console.error("HOSTSCROLL=" + top.hostScrollSeen)
+            console.error("HOSTSCROLL=" + top.hostScrollSeen + " TOP=" + top.hostScrollTop)
+            // The narrowest list: "+ session" still inside it, the meshes cut short.
+            var lw = view.listWidth
+            view.listWidth = 200
+            view.forceLayout ? view.forceLayout() : null
+            Qt.callLater(function() {
+                var link = top.findByName(view, "newSessionLink"), list = top.findByName(view, "hostMeshes")
+                var right = link ? link.mapToItem(link.parent.parent, link.width, 0).x : -1
+                console.error("NARROW fits=" + (link !== null && right <= link.parent.parent.width + 0.5) + " gives=" + (list !== null && list.elide === Text.ElideRight && list.Layout.fillWidth))
+                view.listWidth = lw
+            })
             var kinds = []
             for (var i = 0; i < chatCount(); i++) kinds.push(view.chatModelAt(i).kind)
             console.error("ROWS=" + kinds.join(","))
@@ -321,6 +341,53 @@ Item {
             view.setAcceptCaged(true)
             var accepted = top.lastPostPath + " " + top.lastPost
             console.error("ACCEPTCAGED " + accepted + " said=" + view.said)
+            // Polled fast only while something moves; and still polled when
+            // the host says the view is hidden (Basecamp says so on screen).
+            var pollBusy = view.pollState()
+            view.visible = false
+            var pollHidden = view.pollState()
+            view.visible = true
+            console.error("POLL busy=" + pollBusy + " hidden=" + pollHidden)
+            // One mesh at a time: its machines alone, and back to all.
+            var hostsKept = view.agentHosts
+            view.agentHosts = hostsKept.concat([Object.assign({}, hostsKept[0], { mesh: "home", address: "fd7b::1", name: "k11" })])
+            var meshes = view.meshNames.join(",")
+            view.pickMesh("home")
+            var onHome = view.shownHosts.map(function(h) { return h.name + "@" + h.mesh }).join(",")
+            view.pickMesh("")
+            console.error("MESHPICK meshes=" + meshes + " home=" + onHome + " all=" + view.shownHosts.length + " switch=" + top.countVisible(view, "meshSwitch"))
+            // All: a session there for one mesh only stays under its machine,
+            // reached on that mesh.
+            var one = function(n) { return { name: n, state: "idle", pending: 0, running: true, last_seq: 0 } }
+            var merged = view.oneEach([{ name: "lap", mesh: "home", address: "fd7b::1", lastSeen: 5, sessions: [one("SPEL"), one("k11")] },
+                                       { name: "lap", mesh: "office", address: "fdb0::1", lastSeen: 9, sessions: [one("SPEL"), one("reviewer")] }])[0]
+            var k11 = merged.sessions.filter(function(x) { return x.name === "k11" })[0]
+            console.error("ALLMESH sessions=" + merged.sessions.map(function(x) { return x.name }).join(",")
+                          + " k11=" + view.hostFor(merged, k11).address + "@" + view.hostFor(merged, k11).mesh
+                          + " spel=" + view.hostFor(merged, merged.sessions[0]).address)
+            // This machine first, and marked.
+            var stKept = view.st
+            view.st = Object.assign({}, stKept, { name: "k11" })
+            console.error("HERE first=" + view.shownHosts[0].name + ":" + view.shownHosts[0].here + " second=" + view.shownHosts[1].name + ":" + view.shownHosts[1].here)
+            view.st = stKept
+            view.agentHosts = hostsKept
+            // The core's event: read at once, and the poll only a safety net.
+            var callsBefore = top.eventCalls
+            view.bridge.moduleEventReceived("shrooms_core", "agentChanged", ["events"])
+            view.bridge.moduleEventReceived("shrooms_core", "agentChanged", ["events"])
+            var evInterval = view.pollState().split("/")[0]
+            view.coreEvents = false
+            Qt.callLater(function() {
+                console.error("COREEVENT read=" + (top.eventCalls > callsBefore) + " interval=" + evInterval + " subscribed=" + view.bridge.subscribed.join(","))
+            })
+            // The model's speed, as the header shows it.
+            console.error("RATE " + view.rateLabel(42.37) + "|" + view.rateLabel(186.4) + "|" + view.rateLabel(0) + "|" + view.rateLabel(undefined))
+            // A cage's limits, set where it is.
+            view.setCageLimits(" 16g ", "8")
+            console.error("CAGELIMITS " + top.lastPostPath + " " + top.lastPost)
+            // The model, chosen as the name is renamed: sent as a setting, and noted.
+            view.setModelOpenSession(" venice/claude-haiku-5-5 ")
+            console.error("MODELSET " + top.lastPostPath + " " + top.lastPost + " note=" + view.modelNote({ model: "haiku" }, "phone.office") + "|" + view.modelNote({ model: "" }, ""))
             view.closeDialogs()
             // A turn the harness started itself: labelled by its source.
             var kept = view.agentEventsList
@@ -328,6 +395,20 @@ Item {
             var hb = view.row(view.chatItems()[0])
             console.error("OUTSIDE=" + hb.outside + "," + hb.by)
             view.agentEventsList = kept
+            // Overlapping reads (from where one had already read) add nothing twice.
+            var nEvents = view.agentEventsList.length, nextKept = view.agentNext, streamKept = view.agentStreaming
+            view.agentNext = 0
+            view.pumpAgent()
+            console.error("NODOUBLE before=" + nEvents + " after=" + view.agentEventsList.length)
+            view.agentNext = nextKept
+            view.agentStreaming = streamKept
+            // A stream alone grows the streaming row and leaves the conversation as it is.
+            var before = view.rebuilds, was = view.agentStreaming
+            top.partialOnly = true
+            view.pumpAgent()
+            top.partialOnly = false
+            console.error("STREAMONLY rebuilt=" + (view.rebuilds - before) + " grew=" + (view.agentStreaming === was + " more words"))
+            view.agentStreaming = was
             console.error("STREAMING=[" + view.agentStreaming + "] WORKING=" + view.agentWorking
                           + " CONTEXT=" + view.contextLabel(view.agentInfo.context_used, view.agentInfo.context_window)
                           + " MODEL=" + view.shortModel(view.agentInfo.model))
@@ -480,10 +561,12 @@ Item {
             // greyed once quiet a while; forgotten only after days.
             top.findNone = true
             view.refreshAgents()
-            var stayed = view.agentHosts.map(function(x) { return x.name + ":" + x.sessions.length }).join(",")
+            var stayed = view.meshHosts.map(function(x) { return x.name + ":" + x.sessions.length }).join(",")
             var kept = view.agentHosts[0]
-            console.error("FLAKY stayed=" + stayed + " now=" + view.hostReachable(kept, Date.now())
-                          + " later=" + view.hostReachable(kept, Date.now() + 30000)
+            view.refreshAgents()
+            var twice = view.agentHosts[0]
+            console.error("FLAKY stayed=" + stayed + " now=" + view.hostReachable(kept)
+                          + " later=" + view.hostReachable(twice)
                           + " forgotten=" + view.mergeHosts([{ name: "old", lastSeen: 1, sessions: [] }], [], Date.now()).length)
             top.findNone = false
             view.refreshAgents()
@@ -510,10 +593,10 @@ Item {
             view.nsCage = true
             view.createSession(view.agentHosts[0], "boxed", "~/proj", false)
             var boxed = JSON.parse(top.lastPost)
-            view.cageOpts = { image: "localhost/shrooms-workbench:desktop", nix: true, github: false }
+            view.cageOpts = { image: "localhost/shrooms-workbench:desktop", nix: true, github: false, shared: true }
             view.createSession(view.agentHosts[0], "desk", "~/proj", false)
             var desk = JSON.parse(top.lastPost).cage
-            view.cageOpts = { image: "localhost/shrooms-workbench:desktop", nix: true, github: true, sealed: true }
+            view.cageOpts = { image: "localhost/shrooms-workbench:desktop", nix: true, github: true, shared: true, sealed: true }
             view.createSession(view.agentHosts[0], "sealedrev", "~/proj", false)
             var sealedBody = JSON.parse(top.lastPost).cage
             view.loadHarnesses(view.agentHosts[0])
@@ -594,8 +677,9 @@ Item {
             var byCost = view.usageSections()[0].lines.map(function(l) { return l.name }).join(",")
             console.error("USAGE asked=" + top.usageAsked[0].replace(/since=\d{4}-\d{2}-\d{2}/, "since=D") + " who="
                           + secs[0].lines.map(function(l) { return l.name + ":" + view.usageFormat(l, "output") }).join(",")
-                          + " where=" + secs[1].lines.map(function(l) { return l.name + ":" + l.turns }).join(",")
-                          + " model=" + secs[2].lines.map(function(l) { return l.name }).join(",")
+                          + " agent=" + secs[1].lines.map(function(l) { return l.name + ":" + l.turns }).join(",")
+                          + " where=" + secs[2].lines.map(function(l) { return l.name + ":" + l.turns }).join(",")
+                          + " model=" + secs[3].lines.map(function(l) { return l.name }).join(",")
                           + " bycost=" + byCost + " busy=" + view.usageHours(secs[0].lines[0].busy)
                           + " since7=" + view.usageSince(7, "2026-10-05T12:00:00") + " sinceAll=[" + view.usageSince(0) + "]"
                           + " first=" + waitingFirst + " then=" + view.usageWaiting.length)
@@ -1012,7 +1096,7 @@ Item {
                           + " edges=" + view.boardEdgeList.map(function(e) { return e.from + ">" + e.to + ":" + e.state }).join(",")
                           + " drawn=" + (links ? links.drawn : -1)
                           + " list=" + top.findByName(view, "agentList").visible + " flow=" + top.findByName(view, "boardFlow").visible
-                          + " tasks=" + view.agentHosts[0].tasks.length)
+                          + " tasks=" + view.meshHosts[0].tasks.length)
             top.grabToImage(function(img) {
                 img.saveToFile(top.out)
                 console.error("SAVED " + top.out)
@@ -1053,10 +1137,17 @@ Item {
                 view.agentHosts = many.slice()
                 // Read two passes later, once the list has been rebuilt —
                 // before the view's own poll can replace the hosts.
-                Qt.callLater(function() { Qt.callLater(function() { top.hostScrollSeen = Math.round(view.hostScroll()) }) })
+                Qt.callLater(function() { Qt.callLater(function() {
+                    top.hostScrollSeen = Math.round(view.hostScroll())
+                    // The reader scrolls up to the top: a refresh leaves them there.
+                    view.hostScrollByHand(0)
+                    view.agentHosts = many.slice()
+                    Qt.callLater(function() { Qt.callLater(function() { top.hostScrollTop = Math.round(view.hostScroll()) }) })
+                }) })
             })
         }
     }
     property int hostScrollSeen: -1
+    property int hostScrollTop: -1
     function chatCount() { return view.chatModelCount() }
 }

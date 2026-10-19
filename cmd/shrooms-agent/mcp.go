@@ -14,6 +14,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"time"
 )
 
 const mcpInstructions = "The agents on this shrooms mesh: other machines' coding-agent sessions, " +
@@ -38,7 +40,7 @@ var mcpTools = []map[string]any{
 			"title": map[string]any{"type": "string", "description": "A few words saying what you ask, e.g. \"Review notes on shrooms-board\": " +
 				"lists of tasks show it. Always set it on a new task; not used when answering one."},
 			"task": map[string]any{"type": "string", "description": "Only to answer a task that needs input: MACHINE/SESSION:MESSAGE-ID."},
-			"wait": map[string]any{"type": "boolean", "description": "Wait for the reply (default true)."},
+			"wait": map[string]any{"type": "boolean", "description": "Wait for the reply (default true), for up to 45 s; a task still going after that is returned with its id, to follow with task_status."},
 		}},
 	},
 	{
@@ -91,6 +93,8 @@ type mcpRequest struct {
 // in ends.
 func serveMCP(in io.Reader, out io.Writer, c a2aClient) error {
 	enc := json.NewEncoder(out)
+	var mu sync.Mutex
+	var calls sync.WaitGroup // answered before returning, input closed or not
 	reply := func(id json.RawMessage, result any, code int, msg string) {
 		r := map[string]any{"jsonrpc": "2.0", "id": id}
 		if msg != "" {
@@ -98,7 +102,9 @@ func serveMCP(in io.Reader, out io.Writer, c a2aClient) error {
 		} else {
 			r["result"] = result
 		}
+		mu.Lock()
 		enc.Encode(r)
+		mu.Unlock()
 	}
 	sc := bufio.NewScanner(in)
 	sc.Buffer(make([]byte, 0, 1<<20), 16<<20)
@@ -136,16 +142,38 @@ func serveMCP(in io.Reader, out io.Writer, c a2aClient) error {
 				Arguments mcpArgs `json:"arguments"`
 			}
 			json.Unmarshal(req.Params, &p)
-			text, err := c.call(p.Name, p.Arguments)
-			if err != nil {
-				text = err.Error()
-			}
-			reply(req.ID, map[string]any{"content": []any{map[string]any{"type": "text", "text": text}}, "isError": err != nil}, 0, "")
+			// Each call on its own: a slow one (an ask waiting on a busy
+			// agent) used to hold up every call after it, and a harness that
+			// gave up on it (pi, at 60 s) then found all the tools hung.
+			calls.Add(1)
+			go func(id json.RawMessage) {
+				defer calls.Done()
+				text, err := c.call(p.Name, p.Arguments)
+				if err != nil {
+					text = err.Error()
+				}
+				reply(id, map[string]any{"content": []any{map[string]any{"type": "text", "text": text}}, "isError": err != nil}, 0, "")
+			}(req.ID)
 		default:
 			reply(req.ID, nil, -32601, "no method "+req.Method)
 		}
 	}
+	calls.Wait()
 	return sc.Err()
+}
+
+// mcpWait is how long ask_agent follows a task before answering with where it
+// stands: under the minute a harness waits for a tool call.
+const mcpWait = 45 * time.Second
+
+// done is whether a task's state is one a waiting asker stops for: an end, or
+// a question back.
+func done(state string) bool {
+	switch state {
+	case "completed", "failed", "canceled", "rejected", "input_required":
+		return true
+	}
+	return false
 }
 
 type mcpArgs struct {
@@ -174,17 +202,38 @@ func (c a2aClient) call(tool string, a mcpArgs) (string, error) {
 		}
 		var t cliTask
 		var err error
+		// Sent without blocking, then followed for at most mcpWait: a
+		// harness gives up on a tool call after a minute (pi does, at 60 s),
+		// and an agent busy with other work can take far longer. The task
+		// goes on either way; what comes back says how to follow it.
 		if a.Task != "" {
-			t, err = c.answer(a.Task, a.Text, wait)
+			t, err = c.answer(a.Task, a.Text, false)
 		} else {
-			t, err = c.send(a.To, a.Text, a.Title, wait)
+			t, err = c.send(a.To, a.Text, a.Title, false)
 		}
 		if err != nil {
 			return "", err
 		}
 		name, _, _ := strings.Cut(a.To, "/")
-		t.ID = name + "/" + t.ID
-		return t.String(), nil
+		ref := name + "/" + t.ID
+		if wait {
+			for end := time.Now().Add(mcpWait); time.Now().Before(end); {
+				if done(t.State()) {
+					break
+				}
+				time.Sleep(2 * time.Second)
+				if u, err := c.task(ref, "GetTask"); err == nil {
+					t = u
+				}
+			}
+		}
+		t.ID = ref
+		out := t.String()
+		if wait && !done(t.State()) {
+			out += fmt.Sprintf("\n(still %s after %d s: it goes on. Follow it with task_status, task %s; you are also told when it needs you or ends.)\n",
+				strings.ReplaceAll(t.State(), "_", "-"), int(mcpWait.Seconds()), ref)
+		}
+		return out, nil
 	case "send_file":
 		if a.To == "" || a.Path == "" {
 			return "", fmt.Errorf("send_file needs to and path")

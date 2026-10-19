@@ -20,6 +20,11 @@ candidates, so there are three kinds of metric.
 | `shrooms_delivery_peers`, `shrooms_delivery_messages_total` | `type` | Delivery node peers and messages. |
 | `shrooms_host_receive_bytes_total`, `shrooms_host_transmit_bytes_total` | `interface` | Every interface on the machine except `lo`, from `/proc/net/dev`. This is what a router sees, shrooms or not. |
 | `shrooms_process_resident_bytes` | | The daemon's memory. |
+| `shrooms_host_cpu_seconds_total` | `mode` | All the machine's CPUs' time, by mode, from `/proc/stat`. |
+| `shrooms_host_cpus` | | Its CPUs. |
+| `shrooms_host_load` | `window` (1m, 5m, 15m) | Its load average. |
+| `shrooms_host_memory_bytes` | `kind` (total, available) | Its memory, from `/proc/meminfo`. |
+| `shrooms_host_disk_bytes` | `kind` (size, free) | Its root filesystem. |
 | `shrooms_info` | `name`, `mode`, `version` | Always 1. |
 
 Mesh labels are each device's own ([mesh-labels-are-local.md](mesh-labels-are-local.md)),
@@ -35,6 +40,24 @@ process, so retrying is not an option.
 Prometheus' `http_sd` format. A scraper is told about one node and finds the
 rest. Peers on meshes the scraping node isn't on show up but can't be
 reached. Peers without metrics (phones, older daemons) show as down.
+
+## What an agent exports
+
+Every shrooms-agent serves `/metrics` on its own port (7387), on the same
+addresses as its API. Prometheus finds the agents through the same
+`/targets` as the daemons, on that port (the `shrooms-agents` job).
+
+| Metric | Labels | What it is |
+|---|---|---|
+| `shrooms_agent_tokens_total` | `machine`, `session`, `harness`, `model`, `provider`, `kind` (input, cache_read, cache_write, output) | The tokens a session's model took and wrote, from its usage. |
+| `shrooms_agent_turns_total`, `shrooms_agent_cost_usd_total`, `shrooms_agent_busy_seconds_total` | as above, without `kind` | Turns, what they cost as the harness prices them (0 for a local model), and the time from asking to the answer. |
+| `shrooms_agent_tokens_per_second` | `machine`, `session`, `harness`, `model`, `provider` | How fast the model wrote in the session's last turn. |
+| `shrooms_agent_sessions` | `machine`, `state` | Sessions by state. |
+
+The provider is the part of a model's name before the slash, as pi names
+models (`venice/…`, `k11/…`), and `anthropic` for Claude Code. A session
+limited to some meshes (ADR-049) is counted only for a scraper on one of
+them.
 
 ## A scraper and a dashboard
 

@@ -65,8 +65,9 @@ func tokenIn(path string) bool {
 }
 
 // canSeal: whether a session of this harness, in this directory, can be
-// sealed here — Claude Code, with the machine's token, in a project of its
-// own.
+// sealed here: Claude Code, in a project of its own, with a credential the
+// gateway holds for it (ADR-059): the machine's sealed token, or the
+// owner's own Claude login. Neither goes into the cage.
 func (m *Manager) canSeal(harness, dir string) error {
 	if harness != "claude" {
 		return errors.New("sealed cages run Claude Code only: pi would need the owner's model keys")
@@ -74,8 +75,22 @@ func (m *Manager) canSeal(harness, dir string) error {
 	if err := sealableDir(dir); err != nil {
 		return err
 	}
+	if _, err := m.sealedToken(); err == nil {
+		return nil
+	}
+	if m.Self != "" && claudeLoginHere() {
+		return nil
+	}
 	_, err := m.sealedToken()
 	return err
+}
+
+// claudeLoginHere is whether this machine has a Claude login the gateway
+// can use for a sealed cage.
+func claudeLoginHere() bool {
+	home, _ := os.UserHomeDir()
+	b, err := os.ReadFile(filepath.Join(home, ".claude", ".credentials.json"))
+	return err == nil && strings.Contains(string(b), "accessToken")
 }
 
 // sealableDir refuses a directory a sealed cage must not have: its directory
@@ -155,6 +170,10 @@ func (m *Manager) sealedMounts(s *Session) ([]mount, error) {
 		// or the socket to unlink — connect() works through it (2026-10-13).
 		{path: pd, at: CageProxyDir, ro: true},
 	}
+	// NOT the shared folder, not even read-only. A sealed cage holds code nobody
+	// vouches for (ADR-045: "the internet and nothing local"), and the danger
+	// there is EXFILTRATION, not poisoning - so read-only does not help it. What
+	// a sealed cage may reach is stripped, not narrowed.
 	if bin, err := claudeProgram(m.binOf("claude")); err == nil {
 		ms = append(ms, mount{path: filepath.Dir(bin), ro: true})
 	}
@@ -166,13 +185,9 @@ func (m *Manager) sealedMounts(s *Session) ([]mount, error) {
 			}
 		}
 	}
-	var kept []mount
-	for _, x := range ms {
-		if _, err := os.Stat(x.path); err == nil {
-			kept = append(kept, x)
-		}
-	}
-	return kept, nil
+	// One filter for both cages (cage.go): two copies of a rule that decides
+	// what a cage can reach is two chances to be wrong.
+	return keepMounts(ms), nil
 }
 
 // carryConversation copies one conversation — its transcript and what Claude
@@ -231,21 +246,49 @@ func copyTree(src, dst string) error {
 // sealedEnv is all a sealed cage's harness is given: its token, who it is,
 // where its socket is. Nothing from the agent's environment.
 func (m *Manager) sealedEnv(s *Session) (map[string]string, error) {
+	env := map[string]string{
+		"HOME":                  sealedHome,
+		"CLAUDE_CONFIG_DIR":     sealedHome + "/.claude",
+		"IS_SANDBOX":            "1",
+		"SHROOMS_AGENT_SESSION": s.Name(),
+		"SHROOMS_AGENT_PROXY":   CageProxyDir + "/proxy.sock",
+		"SHROOMS_OUTBOX":        SealedOutboxIn,
+		"PATH":                  cagePath(sealedHome, false),
+		"LANG":                  "C.UTF-8",
+	}
+	// Through the gateway when the harness can be pointed there (ADR-059):
+	// the token stays with the agent, and code nobody vouches for cannot
+	// read it out of the cage's environment.
+	if s.cageGateway {
+		genv, _, _ := m.gatewayFor(s)
+		for k, v := range genv {
+			env[k] = v
+		}
+		return env, nil
+	}
+	// No gateway (an agent without its binary in the cage): the token
+	// itself, as before ADR-059.
 	token, err := m.sealedToken()
 	if err != nil {
 		return nil, err
 	}
-	return map[string]string{
-		"HOME":                    sealedHome,
-		"CLAUDE_CONFIG_DIR":       sealedHome + "/.claude",
-		"CLAUDE_CODE_OAUTH_TOKEN": token,
-		"IS_SANDBOX":              "1",
-		"SHROOMS_AGENT_SESSION":   s.Name(),
-		"SHROOMS_AGENT_PROXY":     CageProxyDir + "/proxy.sock",
-		"SHROOMS_OUTBOX":          SealedOutboxIn,
-		"PATH":                    cagePath(sealedHome, false),
-		"LANG":                    "C.UTF-8",
-	}, nil
+	env["CLAUDE_CODE_OAUTH_TOKEN"] = token
+	return env, nil
+}
+
+// gatewayFor is how a session's harness is pointed at the gateway in its
+// cage: its environment and files; ok when it can be (a harness that
+// plugs in, with something to say for this cage, and an agent binary in
+// the cage to forward with). Claude Code in a caged session runs on the
+// owner's own login, which the gateway does not hold: it says nothing there
+// and keeps its login.
+func (m *Manager) gatewayFor(s *Session) (env, files map[string]string, ok bool) {
+	g, is := s.harness.(Gatewayed)
+	if !is || s.cage == nil || m.Self == "" {
+		return nil, nil, false
+	}
+	env, files = g.GatewayEnv(s.cage.Sealed), g.GatewayFiles(s.cage.Sealed)
+	return env, files, len(env)+len(files) > 0
 }
 
 // cageRules is the nftables ruleset set inside a cage from outside. Every

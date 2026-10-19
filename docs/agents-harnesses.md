@@ -40,9 +40,63 @@ frequent — for a handful of machines it is a once-a-year chore.
 ## 2. Harnesses: Claude Code, pi, and the next one
 
 Decided 2026-10-04: the open ones matter — pi and OpenCode — then Claude Code
-and Codex; the agent is pluggable so anybody can add the one they use. Built
-so far: the plug-in point, Claude Code moved behind it, and **pi**, the worked
-example below. OpenCode and Codex are not built.
+and Codex; the agent is pluggable so anybody can add the one they use. Built:
+the plug-in point, Claude Code moved behind it, **pi**, and **OpenCode**
+(ADR-061). Codex is not built.
+
+**OpenCode** is spoken to over its ACP server (`opencode acp`) — a long-lived
+JSON-RPC server on stdin/stdout, the same shape as Claude Code's and pi's, and
+not `opencode serve` as once expected. `opencode run` is the other one and does
+not fit a session: the message is an argument, the process exits, and its
+`--format json` emits one text event per completed part, so a reply arrives
+whole instead of growing. Three things are worth knowing before starting a
+session on it:
+
+- **It never asks permission**, so auto-approve is not offered for it — its
+  own `permission` config decides what may run. Measured, not assumed: it
+  wrote a file with no prompt both through `run` without `--auto` and over
+  ACP.
+- **The model is the session's to choose**, from the apps' model setting, as
+  for any harness. `-opencode-model` is only this machine's default for
+  sessions that name none, and it is empty out of the box so OpenCode's own
+  config decides. It is deliberately not defaulted to a free model: most of
+  OpenCode's free ones are stealth — unreleased and anonymous, free "for a
+  limited time" — and a default naming one would rot.
+- **It can be caged and sealed** (ADR-062). It keeps every project's
+  conversations in one database, so a caged session gets a database of its
+  own: the owner's is never mounted, which is ADR-060's line, and the
+  consequence is that the cage's conversations are the cage's. Its config file
+  is not mounted either — it is where a provider apiKey lives, in the same
+  file as the settings — so a caged session's config comes from
+  OPENCODE_CONFIG_CONTENT, and the owner's non-secret settings do not reach it.
+
+### What a harness must do (ADR-062)
+
+A harness is offered with every feature a session has, or the missing one is
+refused by name. It is never offered and then fails partway. A new harness is
+not merged without caged and sealed.
+
+| Feature | Required | How a harness provides it |
+|---|---|---|
+| Sessions, streamed turns, interrupt | yes | `Harness`, `Codec` |
+| The mesh's tools and the session's note | yes | `StartOptions.MCP`, `Note` |
+| The model, per session | yes | `StartOptions.Model` |
+| Usage: tokens, cost (0 when free) | yes | the `result` event's `usage` |
+| Caged | yes | `Cageable`, `CageEnv` |
+| Sealed | yes | `Gatewayed`: no key in the cage |
+| Out of quota, and until when | where the provider says so | `Limits` (to come) |
+| Approve before a tool runs | where the harness can ask | `Caps.Approve`; if not, say so here |
+| Takeover of a terminal's conversation | where the harness keeps them | `Transcripts`, `Caps.Takeover` |
+
+For a cage, a harness says:
+- where its home is, which of it is the owner's settings (read-only in the
+  cage's private home) and where one project's conversations live
+  (read-write; docs/agents/cages.md);
+- the program to run in the cage;
+- what the owner has decided about the project, to carry in;
+- the variables it needs, and how it is pointed at the gateway.
+
+Every caged harness has a real-cage test (podman), not only the fake.
 
 ### How it fits together
 
@@ -78,6 +132,13 @@ apps ──HTTP/SSE──▶ shrooms-agent ── Session ── proc ──stdi
   offer the choice in "+ session" when there is more than Claude Code, name
   the harness on its sessions, and hide auto-approve where `caps.approve` is
   false.
+
+One codec writes while decoding. ACP's session does not exist until
+`initialize` is answered with `session/new`, and every turn needs the id that
+comes back — so a codec that speaks it must answer its process *while* reading
+from it. That is the opt-in `Answering` interface: the codec queues what it
+must send, and the read loop writes it before the messages from the same line.
+Claude Code and pi do not implement it, and their codecs carry nothing for it.
 
 ### The event shape a codec must produce
 
@@ -123,6 +184,21 @@ account, jimmy-crib say, can serve sessions to the whole mesh.
      (`PI_CODING_AGENT_DIR`, `PI_CODING_AGENT_SESSION_DIR` respected); its
      message entries are read as history. A pi session is a tree, and lines
      of an abandoned branch are read too.
+   - `Cageable` (ADR-062), or the harness is refused caging: `CageMounts` is
+     its `~/.pi/agent` as a private copy, the owner's settings over it
+     read-only, and `sessions/<this project>` read-write; `CageProgram` is the
+     bare name `pi`, because the image installs it and nothing of the host's is
+     mounted for it — the host's absolute path is not in the cage, and
+     returning it is what broke every caged pi session; `CageTrust` carries the
+     owner's `trust.json` entry for this project and no other. A harness whose conversations are ONE database for
+     every project (as OpenCode's are) must give the cage a database of its
+     own instead — mounting the owner's would put every other project's
+     conversation in the cage, and copying one is what ADR-060 rejected.
+   - `Gatewayed` for a sealed cage (ADR-059): the environment that points it
+     at the agent's gateway, so no key is ever in the cage. If the override has
+     to go in a config file, check which one the harness actually reads — for
+     OpenCode, `opencode.jsonc` wins over `opencode.json`, so a gateway file
+     named the latter would be silently ignored.
 3. **The codec** — `piCodec`, the whole translation:
    - start: `get_state`; its answer becomes the `init` message (session id,
      `provider/model`, and the context window, kept for the turn's `result`);
@@ -171,15 +247,10 @@ Things pi does differently, known:
   line; the agent adds only `--pi-args`.
 - Cost is pi's own figure (0 for a local model).
 
-### Next: OpenCode and Codex (not built)
+### Next: Codex (not built)
 
-Starting points, not yet checked against the programs:
+A starting point, not yet checked against the program:
 
 - **Codex** has a JSON-RPC app server over stdio (`codex app-server`) with
   approvals, which fits a Codec as pi's RPC mode does; `codex exec --json`
   is the simpler one-shot form, one process per turn, resuming by id.
-- **OpenCode** is built around a local HTTP server (`opencode serve`, with
-  server-sent events). The agent's processes are stdio only today; a harness
-  that is a server needs a second kind of process — start the server, then
-  speak HTTP to it — behind the same Codec idea. That is the one change to
-  the plug-in point these two are likely to ask for.

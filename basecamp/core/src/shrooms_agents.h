@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <map>
+#include <functional>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -85,6 +86,13 @@ bool request(const std::string& address, const std::string& method, const std::s
 class Hub {
 public:
     ~Hub();
+
+    /**
+     * Called when something the view shows changed: the followed session's
+     * events, from the follower's thread. The module turns it into an event
+     * the view listens for, so the view need not poll fast to see a reply.
+     */
+    std::function<void(const std::string&)> onChange;
 
     /**
      * Probes the given peers for agents in the background. `peers` is

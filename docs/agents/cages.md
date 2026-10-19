@@ -12,6 +12,37 @@ your user and nothing more, and of your home directory it sees only what it
 needs: its project, and the settings of the harness that runs it. What it
 installs stays in the container until the session is deleted.
 
+## Not caged, caged, sealed
+
+Three choices, one sentence each, and kept true:
+
+- **Not caged:** your agent, with your machine. It can do what you can.
+- **Caged:** your agent, kept in its folder. It sees its project and its own
+  conversations, and nothing else of yours: no credentials, no other
+  conversations, nothing else of your home. The network stays open, and its
+  memory and CPUs are limited. This is against a careless agent, not a
+  hostile one.
+- **Sealed:** for code or content you do not trust. The internet and nothing
+  local, results only through its outbox (below).
+
+What makes "caged" true:
+- **A private harness home.** A caged session's `~/.claude` (or
+  `~/.pi/agent`) is a directory of the cage's own. Your settings, skills and
+  plugins are let into it read-only. Its own conversations are let in
+  read-write, from the real folder for its project: `~/.claude/projects/<its
+  folder>`, or pi's `sessions/<its folder>`. Nothing else is let in: not other
+  sessions' conversations, not `history.jsonl` (every prompt typed), not
+  running sessions' keys, backups of your config, or anything someone keeps
+  there later. It is built from what is let in, so what lands there later is
+  out by default.
+- **No login and no keys.** The cage reaches its model through the agent,
+  which adds the credential on the way out (ADR-059).
+
+Its conversation is still the real file in your `~/.claude`, so `claude
+--resume` in a terminal, the apps' history and taking the session out of the
+cage all work as before. Sessions in the same working folder share it: they
+see each other's conversations, as they would outside a cage.
+
 Why it is built this way is in
 [ADR-037](../adr/037-agents-in-cages.md); the research, and what comes after
 (micro-VMs, Akash, agents starting agents), is in
@@ -65,7 +96,7 @@ A caged session **can still**:
   ends in `_TOKEN` or `_API_KEY` is passed in (below), except GitHub's
   (`GH_*`, `GITHUB_*`), which reach only a cage given the GitHub login.
 
-Two options widen it further, and neither is on by default:
+Three options widen it further, and none is on by default:
 
 - **GitHub login** mounts `~/.config/gh` read-only. The session can then push,
   open pull requests and do anything else your `gh` login can, on every
@@ -76,6 +107,10 @@ Two options widen it further, and neither is on by default:
   daemon, so the cage writes `/nix` itself, as you would. A session can then
   change what is in the store and in your profile, which the rest of the
   machine runs.
+- **shared folder** mounts a folder at `/shared`, read-write, that every
+  other caged session given it sees too, on the same machine and the same
+  meshes (ADR-057). A session can then leave a clone or a dataset there for
+  the others, and anything it writes there the others may read or run.
 
 So a cage is the right tool against an agent that does something careless
 with your machine: `rm -rf` in the wrong place, a global install that breaks
@@ -104,7 +139,7 @@ sealed cage is an ordinary cage, and also:
 - **its own login**: Claude Code runs on the machine's *sealed token*, not
   on your `~/.claude`. The cage has none of your settings, none of your
   other conversations, none of the keys in the agent's environment. Claude
-  Code only; GitHub and nix are not offered.
+  Code only; GitHub, nix and the shared folder are not offered.
 - **asks nothing**: it can finish the tasks it is given, and cannot ask
   another agent for anything or send it a file.
 - **no user namespaces**: a seccomp profile (podman's default, with
@@ -223,7 +258,8 @@ built, or failed to build last time. Under it:
 
 - the image: the machine's, the workbench, or the desktop;
 - **nix**, shown only where the machine has `/nix/store`;
-- **GitHub login**.
+- **GitHub login**;
+- **shared folder**.
 
 Turn on auto-approve as you would for any session. The same choice is offered
 when you take over a conversation started in a terminal.
@@ -243,7 +279,8 @@ curl -X POST "http://[MESH-ADDRESS]:7387/v1/sessions" \
 
 `GET /v1/harnesses` answers with a `cage` object as well: whether cages are
 `available`, the machine's `image`, the `images` offered, `nix`, `ready`,
-`building`, and the `error` of the last failed build.
+`building`, the `error` of the last failed build, and `shared`, `shared_in`
+and `shared_root` for the shared folder (below).
 
 ## Moving a session in and out
 
@@ -266,8 +303,24 @@ curl -X POST "http://[MESH-ADDRESS]:7387/v1/sessions/webapp/cage" \
   harness finds its transcript where it left it.
 - **The old container is deleted**, and everything that was installed in it.
   Changing the options gives the session a fresh container, too: the image,
-  nix and GitHub are fixed when a container is made.
+  nix, GitHub and the shared folder are fixed when a container is made.
 - A note in the conversation records the move and who made it.
+
+## A cage's memory and CPUs
+
+A cage gets the machine's limits: 4 GB of memory and 2 CPUs unless the
+agent is started with others. A session can have its own. In the cage
+dialog, under RESOURCES, set its memory (`16g`, `512m`) and CPUs (`8`, up
+to the machine's), or leave them empty for the machine's. Over the API:
+
+```
+curl -X POST "http://[MESH-ADDRESS]:7387/v1/sessions/review/cage/limits" \
+  -d '{"memory": "16g", "cpus": "8"}'
+```
+
+They are set on the cage as it is (`podman update`), running or not. It is
+not made again, so what was installed in it stays: a nix, a toolchain, a
+build. A caged agent cannot change its own limits.
 
 ## What the agent inside sees
 
@@ -276,8 +329,11 @@ curl -X POST "http://[MESH-ADDRESS]:7387/v1/sessions/webapp/cage" \
 - the project, read-write;
 - the files sent to sessions (`uploads/` in the agent's state directory),
   read-only;
-- for Claude Code, `~/.claude` read-write and the directory of the machine's
-  `claude` program read-only; for pi, `~/.pi/agent` read-write;
+- for Claude Code, a private `~/.claude` of the cage's own, with your
+  settings, skills and plugins in it read-only and its own project's
+  conversations read-write, and the directory of the machine's `claude`
+  program read-only; for pi, the same with `~/.pi/agent` and its own
+  `sessions/` folder (above, "Not caged, caged, sealed");
 - `shrooms-agent` itself, for the shrooms MCP tools, and the cage's socket to
   its own agent at `/run/shrooms-agent/proxy.sock`, which they go through.
   **Not** the shrooms daemon's control socket: your user's tier on it can
@@ -285,7 +341,23 @@ curl -X POST "http://[MESH-ADDRESS]:7387/v1/sessions/webapp/cage" \
   daemon. It was mounted until 2026-10-09, and cages made with it are made
   again;
 - with nix: `/nix`, `~/.local/state/nix` and `~/.config/nix`; with GitHub:
-  `~/.config/gh`.
+  `~/.config/gh`;
+- with the shared folder: a podman volume at `/shared`, with
+  `SHROOMS_SHARED=/shared` in its environment.
+
+**The shared folder** (ADR-057) is one per set of meshes: `shrooms-shared`
+for sessions on every mesh, `shrooms-shared-LABELS-HASH` for a session
+limited to some. So a session limited to the home mesh shares nothing with an
+office one. Changing a session's meshes stops it, and its next start makes
+its cage again with the other folder. On the machine it is podman's volume
+directory (`shared_root` in `GET /v1/harnesses`, usually
+`~/.local/share/containers/storage/volumes`), then `VOLUME/_data`; the list
+gives each session's volume as `cage.shared`, and the cage dialog shows the
+path with OPEN. Treat what is in it as written by an agent: a link there can
+point anywhere on your machine when you follow it outside a cage. The agent
+makes the volume itself and refuses one of that name defined any other way
+(a bind to a directory of yours, say), and `podman volume prune` deletes it
+once no container uses it.
 
 Nothing else of your home directory is there. Files the agent writes into the
 project belong to your user outside, even though it wrote them as root.
@@ -297,19 +369,21 @@ home directory, goes to `~/.claude/.claude.json` instead
 
 **Environment.** The cage gets its own `PATH` (the image's, with your nix
 profile in front when it has nix), `SHROOMS_AGENT_SESSION`, `IS_SANDBOX=1`,
-and from the agent's own environment:
+the gateway's base URL and a dummy key (ADR-059), and of the agent's own
+environment only what is named:
 
-- anything starting `ANTHROPIC_`, `PI_`, `OLLAMA_`, `OPENAI_`, `VENICE_`,
-  `OPENROUTER_`, `GEMINI_` or `GOOGLE_API`;
-- anything ending `_API_KEY`, `_TOKEN` or `_BASE_URL` — but GitHub's
-  (`GH_*`, `GITHUB_*`) only with the GitHub login;
-- `CLAUDE_CODE_OAUTH_TOKEN`, `CLAUDE_CODE_USE_BEDROCK`,
-  `CLAUDE_CODE_USE_VERTEX`;
-- the proxy variables, `TZ` and `LANG`.
+- `TZ`, `LANG`, `LANGUAGE` and `LC_*`;
+- the proxy variables (`HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`, `ALL_PROXY`,
+  in either case);
+- the settings its harness asks for: for Claude Code, its model choices
+  (`ANTHROPIC_MODEL` and the like), output and thinking limits, and its
+  telemetry switches.
 
-Nothing else passes: not your `PATH`, `DISPLAY`, `SSH_AUTH_SOCK`, `USER` or
-the other `CLAUDE_CODE_` variables of a Claude Code session the agent itself
-might run under. The variables are written to a file only you can read
+Nothing else passes, whatever its name: no key or token (its model is
+reached through the agent, which holds them), not your `PATH`, `DISPLAY`,
+`SSH_AUTH_SOCK` or `USER`, and nothing added to the agent's environment
+later. A GitHub login reaches a cage only as the `gh` login mounted
+read-only. The variables are written to a file only you can read
 (`cages/<container>.env` in the agent's state directory,
 `~/.local/share/shrooms-agent` by default) rather than on podman's command
 line, so keys do not show up in the process list.

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io/fs"
 	"log/slog"
+	"net/http"
 	"net/netip"
 	"os"
 	"path/filepath"
@@ -67,6 +68,12 @@ type Info struct {
 	Preview string `json:"preview,omitempty"`
 	// Model is the one the conversation runs on, as its harness names it.
 	Model string `json:"model,omitempty"`
+	// ModelSetting is the model chosen for it (SetModel), "" for the
+	// harness's default on its machine.
+	ModelSetting string `json:"model_setting,omitempty"`
+	// TokensPerSecond is how fast its model wrote in its last turn: output
+	// tokens over the time spent generating (rate.go); 0 when not known.
+	TokensPerSecond float64 `json:"tokens_per_second,omitempty"`
 	// Harness runs it ("claude", "pi"), and what that harness can do.
 	Harness string `json:"harness"`
 	Caps    Caps   `json:"caps"`
@@ -133,6 +140,14 @@ type Session struct {
 	keepRunning bool
 	// cage: the session runs in a container of its own (cage.go); nil not.
 	cage *Cage
+	// cageGateway: its cage reaches its model through the gateway this
+	// start (ADR-059); set by prepareCage, read by cageEnv.
+	cageGateway bool
+	// The model's speed: time spent generating this turn (from its stream's
+	// pieces), and the last turn's output tokens per second (rate.go).
+	genTime   time.Duration
+	lastPiece time.Time
+	tokRate   float64
 	// acceptCaged: whether it takes tasks from caged agents; nil for the
 	// default, which is yes for a caged session and no for one outside
 	// (ADR-044).
@@ -140,6 +155,7 @@ type Session struct {
 	acceptFiles []string  // who it takes files from (drop.go)
 	fileAsks    []FileAsk // senders refused lately
 	meshes      []string  // the meshes it is there for; none is all (meshes.go)
+	modelSet    string    // the model chosen for it; "" for its harness's default
 	turns       uint64
 	// ids are the device-made ids of messages and voice notes already taken,
 	// so a device that sends again — it did not hear the answer, the
@@ -215,6 +231,11 @@ type Manager struct {
 	proxies  cageProxies
 	Machines func() ([]Machine, error)
 	agentAt  func(netip.Addr) string // tests: where an agent is
+	// One renewal of the owner's Claude login at a time (claudeLogin).
+	loginMu sync.Mutex
+	// Tests: the gateway's upstreams elsewhere, and its client (gateway.go).
+	upstreamBase func(name string) string
+	gatewayHTTP  *http.Client
 	// Meshes are this machine's meshes, by label and address (meshes.go).
 	Meshes func() []MeshInfo
 	// Socket is this agent's own unix socket (local.go): how LocalAddr, this
@@ -251,6 +272,7 @@ type record struct {
 	AcceptCaged *bool    `json:"accept_caged,omitempty"`
 	AcceptFiles []string `json:"accept_files_from,omitempty"`
 	Meshes      []string `json:"meshes,omitempty"`
+	ModelSet    string   `json:"model_setting,omitempty"`
 }
 
 // NewManager loads the sessions kept in stateDir.
@@ -292,6 +314,7 @@ func NewManager(ctx context.Context, log *slog.Logger, stateDir, claudeBin strin
 			s.acceptCaged = r.AcceptCaged
 			s.acceptFiles = r.AcceptFiles
 			s.meshes = r.Meshes
+			s.modelSet = r.ModelSet
 			s.loadEvents()
 			m.sessions[r.Name] = s
 		}
@@ -407,7 +430,7 @@ func (m *Manager) save() error {
 	for _, s := range m.sessions {
 		s.mu.Lock()
 		r := record{Name: s.Name(), Dir: s.dir, ConvID: s.convID, AutoApprove: s.autoApprove, Starred: s.starred,
-			KeepRunning: s.keepRunning, Cage: s.cage, AcceptCaged: s.acceptCaged, AcceptFiles: s.acceptFiles, Meshes: s.meshes}
+			KeepRunning: s.keepRunning, Cage: s.cage, AcceptCaged: s.acceptCaged, AcceptFiles: s.acceptFiles, Meshes: s.meshes, ModelSet: s.modelSet}
 		if s.harness.Name() != "claude" {
 			r.Harness = s.harness.Name()
 		}
@@ -474,6 +497,11 @@ func (m *Manager) CreateCaged(name, dir, harness string, cage *Cage) (Info, erro
 		return Info{}, fmt.Errorf("there is already a session called %q", name)
 	}
 	if cage != nil {
+		// Before the podman check: whether a harness can be caged at all does
+		// not depend on this machine having podman.
+		if err := cageableHarness(h); err != nil {
+			return Info{}, err
+		}
 		if m.Cages == nil {
 			return Info{}, errors.New("this machine has no podman to cage sessions with")
 		}
@@ -633,9 +661,13 @@ func (s *Session) Info() Info {
 		Harness: s.harness.Name(), Caps: s.harness.Caps(), Starred: s.starred, Turns: s.turns,
 		KeepRunning: s.keepRunning, AcceptCaged: s.acceptsCaged(),
 		AcceptFilesFrom: append([]string(nil), s.acceptFiles...), FileRequests: append([]FileAsk(nil), s.fileAsks...),
-		Meshes: append([]string(nil), s.meshes...)}
+		Meshes: append([]string(nil), s.meshes...), ModelSetting: s.modelSet, TokensPerSecond: s.tokRate}
 	if s.cage != nil {
-		in.Cage = &CageInfo{Image: s.cage.Image, Nix: s.cage.Nix, GitHub: s.cage.GitHub, Sealed: s.cage.Sealed, Outbox: s.cage.Outbox}
+		in.Cage = &CageInfo{Image: s.cage.Image, Nix: s.cage.Nix, GitHub: s.cage.GitHub, Shared: s.sharedFor(), Sealed: s.cage.Sealed, Outbox: s.cage.Outbox,
+			Memory: s.cage.Memory, CPUs: s.cage.CPUs}
+		if s.m.Cages != nil {
+			in.Cage.MachineMemory, in.Cage.MachineCPUs = s.m.Cages.Memory, s.m.Cages.CPUs
+		}
 		if in.Cage.Image == "" && s.m.Cages != nil {
 			in.Cage.Image = s.m.Cages.Image
 		}
@@ -853,7 +885,8 @@ func (s *Session) ensureRunning() error {
 	s.m.mu.Unlock()
 	host, _ := os.Hostname()
 	o := StartOptions{Resume: s.convID, AutoApprove: s.autoApprove && s.harness.Caps().Approve, Session: s.Name(),
-		MCP: s.m.Self, MCPArgs: s.m.mcpArgs(), Note: AgentNote(host, s.Name())}
+		MCP: s.m.Self, MCPArgs: s.m.mcpArgs(), Note: AgentNote(host, s.Name()), Model: s.modelSet,
+		Dir: s.dir}
 	var cage *cageRun
 	if s.cage != nil {
 		var err error
@@ -1180,8 +1213,12 @@ func (s *Session) read(p *proc) {
 		json.Unmarshal(raw, &head)
 
 		if head.Type == "stream_event" {
+			s.timeDelta(raw)
 			s.partial(raw)
 			continue
+		}
+		if head.Type == "result" {
+			s.turnRate(raw)
 		}
 		if head.Type == outsideTurn {
 			// A turn the harness started itself: an extension's heartbeat, a
@@ -1339,6 +1376,34 @@ func (s *Session) acceptsCaged() bool {
 		return *s.acceptCaged
 	}
 	return s.cage != nil
+}
+
+// SetModel chooses the model the session runs on; "" goes back to its
+// harness's default on this machine. Kept with the session and given to the
+// harness at every start, so it outlives restarts: a model switched inside a
+// pi session lasted only until the agent next started it with the machine's
+// --model (proteus, 2026-10-15). A running process is stopped, and the next
+// message starts it on the new model, in the same conversation. Not while it
+// works: its turn would be cut off.
+func (s *Session) SetModel(model, by string) error {
+	model = strings.TrimSpace(model)
+	if strings.ContainsAny(model, " \t\n") || strings.HasPrefix(model, "-") {
+		return fmt.Errorf("%q is not a model name", model)
+	}
+	if in := s.Info(); in.State != Idle || in.Pending > 0 {
+		return fmt.Errorf("session %s is %s: change its model once it is idle", s.Name(), in.State)
+	}
+	s.mu.Lock()
+	changed := s.modelSet != model
+	s.modelSet = model
+	s.record("setting", by, map[string]string{"model": model})
+	s.mu.Unlock()
+	if changed {
+		s.stop()
+	}
+	s.m.mu.Lock()
+	defer s.m.mu.Unlock()
+	return s.m.save()
 }
 
 // AcceptsCaged is acceptsCaged, for a caller without the lock.

@@ -30,6 +30,10 @@ func TestMain(m *testing.M) {
 		fakePi()
 		return
 	}
+	if os.Getenv("FAKE_OPENCODE") == "1" {
+		fakeOpenCode()
+		return
+	}
 	if os.Getenv("FAKE_CLAUDE") == "1" {
 		fakeClaude()
 		return

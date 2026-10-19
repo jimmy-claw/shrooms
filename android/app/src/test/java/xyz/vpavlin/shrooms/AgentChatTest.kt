@@ -109,8 +109,13 @@ class AgentChatTest {
         assertEquals(listOf("atlas", "vps"), merged.map { it.name })
         assertEquals("found this round: seen now", now, merged[1].lastSeen)
         assertEquals("missed it: as last seen", listOf("a"), merged[0].sessions.map { it.name })
-        assertTrue("five seconds quiet is still reachable", HostCache.reachable(merged[0], now))
-        assertFalse("half a minute quiet is not", HostCache.reachable(merged[0], now + 30_000))
+        // Offline by rounds missed, not by time: one missed round is a flaky
+        // moment, two in a row is offline, and an answer brings it back.
+        assertTrue("one round missed is still reachable", HostCache.reachable(merged[0]))
+        val twice = HostCache.merge(merged, found, now + 10_000)
+        assertFalse("two in a row is not", HostCache.reachable(twice[0]))
+        assertTrue("an answer brings it back", HostCache.reachable(HostCache.merge(twice, prev.take(1), now + 20_000)[0]))
+        assertTrue("however long ago it last answered", HostCache.reachable(prev[0].copy(lastSeen = 0)))
         // Kept across a restart of the app, as it was.
         assertEquals(merged, HostCache.decode(HostCache.encode(merged)))
         assertEquals(emptyList<AgentHost>(), HostCache.decode("not json"))
@@ -355,5 +360,89 @@ class VoiceItemsTest {
         assertEquals(listOf("You"), AgentChat.items(retried).map { it::class.simpleName })
         // A typed message is not marked.
         assertFalse((AgentChat.items(listOf(ev(1, "message", """{"text":"hi","id":"m1"}"""))).single() as ChatItem.You).voice)
+    }
+}
+
+class ModelNoteTest {
+    // A model chosen for a session, or set back, is noted in its conversation.
+    @Test fun aModelChangeIsNoted() {
+        val set = AgentEvent(5, "setting", "phone.office", JSONObject("""{"model":"venice/claude-haiku-5-5"}"""))
+        val back = AgentEvent(6, "setting", "", JSONObject("""{"model":""}"""))
+        val notes = AgentChat.items(listOf(set, back)).map { (it as ChatItem.Note).text }
+        assertEquals(listOf("model set to venice/claude-haiku-5-5 from phone.office", "model back to its machine's default"), notes)
+    }
+}
+
+class MeshPickTest {
+    private fun host(name: String, mesh: String, seen: Long = 1) = AgentHost(name, mesh, "fd00::$name", emptyList(), lastSeen = seen)
+
+    // One mesh at a time, or all; a machine on two meshes is in each.
+    @Test fun aMeshShowsItsMachinesOnly() {
+        val hs = listOf(host("laptop", "home"), host("laptop", "office"), host("k11", "home"), host("pi5", "office"))
+        assertEquals(listOf("laptop", "k11"), onMesh(hs, "home").map { it.name })
+        // All: each machine once, with all its meshes, as it last answered.
+        val all = onMesh(listOf(host("laptop", "home", 5), host("laptop", "office", 9), host("k11", "home")), "")
+        assertEquals(listOf("laptop:office:home,office", "k11:home:home"), all.map { it.name + ":" + it.mesh + ":" + it.meshes.joinToString(",") })
+    }
+
+    // All: a session there for one mesh only is listed under its machine
+    // however the machine is shown, and reached on that mesh.
+    @Test fun allKeepsAMeshOnlySession() {
+        fun s(n: String) = AgentSession(n, "/", "idle", 0, true, 0)
+        val home = AgentHost("laptop", "home", "fd7b::1", listOf(s("SPEL"), s("k11")), lastSeen = 5)
+        val office = AgentHost("laptop", "office", "fdb0::1", listOf(s("SPEL"), s("reviewer")), lastSeen = 9)
+        val h = onMesh(listOf(home, office), "").single()
+        assertEquals(listOf("SPEL", "k11", "reviewer"), h.sessions.map { it.name })
+        val k11 = h.sessions.first { it.name == "k11" }
+        assertEquals("fd7b::1@home", h.of(k11).let { it.address + "@" + it.mesh })
+        assertEquals("fdb0::1@office", h.of(h.sessions.first()).let { it.address + "@" + it.mesh })
+    }
+
+    // The phone's names win over a machine found before under another's
+    // name for the mesh, and a copy kept under that name is renamed.
+    @Test fun thePhonesNamesWin() {
+        val handed = listOf(AgentHosts.Host("laptop", "office", "fdb0:9afc:a5ef::1"))
+        val seen = listOf(AgentHosts.Host("pi5", "default", "fdb0:9afc:a5ef::5"), AgentHosts.Host("k11", "home", "fd7b:15fb:5ec1::2"))
+        assertEquals(mapOf("fdb0:9afc:a5ef" to "office", "fd7b:15fb:5ec1" to "home"), meshNames(emptyList(), handed, seen))
+        val kept = listOf(AgentHost("pi5", "default", "fdb0:9afc:a5ef::5", emptyList(), lastSeen = 1),
+            AgentHost("pi5", "office", "fdb0:9afc:a5ef::5", emptyList(), lastSeen = 9))
+        val got = HostCache.renamed(meshNames(emptyList(), handed, seen), kept)
+        assertEquals(listOf("pi5@office:9"), got.map { it.name + "@" + it.mesh + ":" + it.lastSeen })
+    }
+
+    // An agent's peers come with its machine on each of its meshes.
+    @Test fun peersCarryTheMachineItself() {
+        val got = parsePeerList("""{"peers":[{"name":"k11","mesh":"home","overlay":"fd7b::2"}],
+            "self":[{"name":"laptop","mesh":"home","overlay":"fd7b::1"},{"name":"laptop","mesh":"office","overlay":"fdb0::1"}]}""")
+        assertEquals(listOf("k11@home", "laptop@home", "laptop@office"), got.map { it.first + "@" + it.second })
+        assertEquals(1, parsePeerList("""{"peers":[{"name":"k11","mesh":"home","overlay":"fd7b::2"}]}""").size)
+    }
+
+    // A mesh is its address prefix, named as this phone names it: pi5 learnt
+    // from atlas (whose name for the office mesh is "default") is on office.
+    @Test fun aMeshIsItsPrefix() {
+        assertEquals("fdb0:9afc:a5ef", meshPrefix("fdb0:9afc:a5ef:2dd7:df:64f1:8368:580b"))
+        assertEquals("", meshPrefix("192.168.1.2"))
+        val own = mapOf("fdb0:9afc:a5ef" to "office", "fd7b:15fb:5ec1" to "home")
+        val got = meshesByPrefix(own, listOf(AgentHost("pi5", "default", "fdb0:9afc:a5ef:2dd7::1", emptyList()),
+            AgentHost("k11", "home", "fd7b:15fb:5ec1:fc97::1", emptyList()), AgentHost("x", "elsewhere", "fd00:1:2:3::4", emptyList())))
+        assertEquals(listOf("pi5@office", "k11@home", "x@elsewhere"), got.map { it.name + "@" + it.mesh })
+        // And a machine handed over on two meshes is looked for on both.
+        val cands = agentCandidates(listOf(AgentHosts.Host("laptop", "office", "fdb0::1"), AgentHosts.Host("laptop", "home", "fd7b::1")), emptyList())
+        assertEquals(2, cands.size)
+    }
+
+    // A machine answering on one mesh does not drop it from the other.
+    @Test fun aMachineOnTwoMeshesIsKeptOnBoth() {
+        val merged = HostCache.merge(listOf(host("laptop", "home", 1), host("laptop", "office", 1)), listOf(host("laptop", "office")), 2)
+        assertEquals(listOf("laptop@home", "laptop@office"), merged.map { it.name + "@" + it.mesh })
+    }
+}
+
+class RateLabelTest {
+    @Test fun theModelsSpeedReads() {
+        assertEquals("42.4 tok/s", rateLabel(42.37))
+        assertEquals("186 tok/s", rateLabel(186.4))
+        assertEquals("", rateLabel(0.0))
     }
 }

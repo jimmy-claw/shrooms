@@ -12,3 +12,17 @@ scrape_configs:
     # A phone, or a node with metrics off, is listed but never answers:
     # quickly, so it does not hold up the round.
     scrape_timeout: 10s
+
+  # The coding agents (shrooms-agent): what their models did, by machine,
+  # session, provider and model. Found through the same /targets as the
+  # daemons, on the agent's port; a machine without an agent is down here.
+  - job_name: shrooms-agents
+    http_sd_configs:
+      - url: SHROOMS_TARGETS
+        refresh_interval: 60s
+    scrape_timeout: 10s
+    relabel_configs:
+      - source_labels: [__address__]
+        regex: (.*):[0-9]+
+        target_label: __address__
+        replacement: ${1}:7387

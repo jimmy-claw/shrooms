@@ -34,7 +34,24 @@ func (Pi) Bin() string   { return "pi" }
 func (Pi) Caps() Caps { return Caps{} }
 
 func (p Pi) Args(o StartOptions) []string {
-	args := append([]string{"--mode", "rpc"}, p.Extra...)
+	args := []string{"--mode", "rpc"}
+	if o.Model == "" {
+		args = append(args, p.Extra...)
+	} else {
+		// The session's own model in place of the machine's: its --model, and
+		// a --provider that would restrict the lookup to the machine's
+		// provider. The rest of the machine's arguments stay.
+		for i := 0; i < len(p.Extra); i++ {
+			switch a := p.Extra[i]; {
+			case a == "--model" || a == "--provider":
+				i++
+			case strings.HasPrefix(a, "--model=") || strings.HasPrefix(a, "--provider="):
+			default:
+				args = append(args, a)
+			}
+		}
+		args = append(args, "--model", o.Model)
+	}
 	if o.Resume != "" {
 		// By its file where there is one: given an id, pi looks only among
 		// the sessions of the directory it runs in, and says there is none
@@ -59,6 +76,42 @@ func (p Pi) Args(o StartOptions) []string {
 		args = append(args, "--append-system-prompt", o.Note)
 	}
 	return args
+}
+
+// CageMounts: pi's own agent directory, a private one of the cage's with the
+// owner's settings read-only over it and this project's sessions read-write.
+func (Pi) CageMounts(f CageFacts) []mount {
+	dir := piAgentDir()
+	ms := []mount{{path: f.PrivateHome, at: dir}}
+	ms = append(ms, readOnlyIn(dir, piHostCode)...)
+	ms = append(ms, ownConversations(filepath.Join(dir, "sessions", piSessionsName(f.Dir))))
+	return ms
+}
+
+// CageProgram: the cage's own pi, by name. The image installs it
+// (workbench.Containerfile: npm install -g @earendil-works/pi-coding-agent),
+// so the name is found on the cage's PATH. The host's absolute path must NOT
+// be used: nothing of the host's is mounted for pi, so that path does not
+// exist in the cage — which is what returning f.Bin did, and it broke every
+// caged pi session at exec. Claude Code and OpenCode resolve their host binary
+// because their CageMounts mount its directory; pi mounts nothing for it.
+func (Pi) CageProgram(CageFacts) (string, error) { return "pi", nil }
+
+// CageTrust carries pi's trust in THIS project into the private home: its
+// .pi config, MCP servers and extensions load only in a trusted project.
+func (Pi) CageTrust(f CageFacts) error {
+	var trust map[string]json.RawMessage
+	b, err := os.ReadFile(filepath.Join(piAgentDir(), "trust.json"))
+	if err != nil || json.Unmarshal(b, &trust) != nil {
+		return nil
+	}
+	dir := filepath.Clean(f.Dir)
+	v, ok := trust[dir]
+	if !ok {
+		return nil
+	}
+	out, _ := json.Marshal(map[string]json.RawMessage{dir: v})
+	return os.WriteFile(filepath.Join(f.PrivateHome, "trust.json"), out, 0o600)
 }
 
 // EnsureMCP puts the shrooms MCP server — command, run as "command mcp" —
@@ -116,7 +169,7 @@ func (Pi) EnsureMCP(command string, extra ...string) error {
 	return os.Rename(tmp, path)
 }
 
-func (Pi) Codec() Codec { return &piCodec{ui: map[string]piDialog{}} }
+func (Pi) Codec(StartOptions) Codec { return &piCodec{ui: map[string]piDialog{}} }
 
 // piStateID is the id of the get_state sent at start; its answer carries the
 // conversation id and the model.
@@ -330,6 +383,13 @@ func (c *piCodec) Decode(line json.RawMessage) []json.RawMessage {
 			return []json.RawMessage{out(map[string]any{"type": "stream_event", "event": map[string]any{
 				"type": "content_block_delta", "delta": map[string]any{"type": "text_delta", "text": e.Delta.Delta}}})}
 		}
+		// Its thinking and tool calls as they stream too, in Claude Code's
+		// names: not shown (only text is, session.partial), but timed, so the
+		// model's speed counts the time it spent on them (rate.go).
+		if kind := map[string]string{"thinking_delta": "thinking_delta", "toolcall_delta": "input_json_delta"}[e.Delta.Type]; kind != "" {
+			return []json.RawMessage{out(map[string]any{"type": "stream_event", "event": map[string]any{
+				"type": "content_block_delta", "delta": map[string]any{"type": kind}}})}
+		}
 	case "message_end":
 		switch e.Message.Role {
 		case "assistant":
@@ -361,6 +421,16 @@ func (c *piCodec) Decode(line json.RawMessage) []json.RawMessage {
 			}
 			if m.StopReason == "error" && m.ErrorMessage != "" {
 				content = append(content, map[string]any{"type": "text", "text": "error: " + m.ErrorMessage})
+			}
+			// Out of output before a word of answer or a tool call: a model
+			// stuck thinking ("Hmm. Hmm." to 131072 tokens, deepseek on a long
+			// conversation, 2026-10-15) ended as a success with nothing to
+			// show, twice, and the person saw a session that never answered.
+			if m.StopReason == "length" && !answers(content) {
+				c.failed = true
+				content = append(content, map[string]any{"type": "text", "text": fmt.Sprintf(
+					"error: the model used all its output (%d tokens) before it answered, so nothing was said. "+
+						"Send it again; if it happens again, start a fresh conversation or switch to another model.", m.Usage.Output)})
 			}
 			if len(content) == 0 {
 				return nil
@@ -425,6 +495,17 @@ func (c *piCodec) Decode(line json.RawMessage) []json.RawMessage {
 		}
 	}
 	return nil
+}
+
+// answers is whether an assistant message says or does anything: text, or a
+// tool call. Thinking alone is neither.
+func answers(content []any) bool {
+	for _, x := range content {
+		if b, ok := x.(map[string]any); ok && (b["type"] == "text" || b["type"] == "tool_use") {
+			return true
+		}
+	}
+	return false
 }
 
 // dialog is an extension asking the person something, shown as a question
@@ -515,4 +596,34 @@ func (Pi) ParseTranscriptLine(line []byte) (Said, bool) {
 		return Said{Time: e.Timestamp, Role: e.Message.Role, Text: t}, true
 	}
 	return Said{}, false
+}
+
+// GatewayEnv: pi takes its endpoints from models.json, not the environment.
+func (Pi) GatewayEnv(bool) map[string]string { return nil }
+
+// GatewayFiles points pi at the gateway (ADR-059): its models.json as the
+// owner keeps it, with the cloud providers' baseUrl the gateway's and their
+// key a dummy. A provider given only these keeps its built-in models; the
+// owner's own (a local server on the mesh) stay as they are.
+func (Pi) GatewayFiles(bool) map[string]string {
+	path := filepath.Join(piAgentDir(), "models.json")
+	cfg := map[string]any{}
+	if b, err := os.ReadFile(path); err == nil {
+		json.Unmarshal(b, &cfg)
+	}
+	providers, _ := cfg["providers"].(map[string]any)
+	if providers == nil {
+		providers = map[string]any{}
+	}
+	for _, name := range []string{"anthropic", "openai", "openrouter", "venice"} {
+		p, _ := providers[name].(map[string]any)
+		if p == nil {
+			p = map[string]any{}
+		}
+		p["baseUrl"], p["apiKey"] = GatewayBase(name), GatewayKey
+		providers[name] = p
+	}
+	cfg["providers"] = providers
+	b, _ := json.MarshalIndent(cfg, "", "  ")
+	return map[string]string{path: string(b)}
 }

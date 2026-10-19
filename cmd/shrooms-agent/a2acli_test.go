@@ -74,3 +74,23 @@ func TestTheCommandLineRepliesAndTakesEitherTaskForm(t *testing.T) {
 		t.Errorf("update of a task this session did not get: %v", err)
 	}
 }
+
+// An id without its SESSION: is refused for its shape before anything is
+// asked, as get and ack refuse it, not reported as a task given to someone
+// else (pi5/jimmy, 2026-10-15).
+func TestUpdateSaysAShortIdIsShort(t *testing.T) {
+	asked := false
+	c := a2aClient{
+		peers: func() ([]machine, error) { asked = true; return nil, nil },
+		sock:  "/nonexistent",
+	}
+	for _, id := range []string{"cli-20261015T092619-d09000f60350fe2b", "laptop/cli-20261015T092619-d09000f60350fe2b"} {
+		_, err := c.update(id, "done", "x")
+		if err == nil || !strings.Contains(err.Error(), "a task is MACHINE/SESSION:MESSAGE-ID") || strings.Contains(err.Error(), "given to this session") {
+			t.Errorf("update %s: %v", id, err)
+		}
+	}
+	if asked {
+		t.Error("a short id was sent to the agent before its shape was checked")
+	}
+}

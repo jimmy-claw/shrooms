@@ -606,7 +606,7 @@ func (h *handler) taskCancel(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *handler) taskUpdate(w http.ResponseWriter, r *http.Request) {
-	if h.caller(r) != "" {
+	if h.remote(r) {
 		fail(w, http.StatusForbidden, fmt.Errorf("only this machine's sessions update their tasks"))
 		return
 	}

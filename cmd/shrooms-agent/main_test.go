@@ -70,9 +70,26 @@ func TestCallersAreNamedByTheirAddress(t *testing.T) {
 func TestPeersAreListedForDiscovery(t *testing.T) {
 	var p peerNames
 	p.update(parse(t))
-	got := p.list()
+	got, _ := p.list()
 	if len(got) != 3 || got[0].Name != "nothing" || got[0].Mesh != "home" || got[1].Overlay != "fdb0:9afc:a5ef:f167:7ad7:68b7:aca0:b9fa" {
 		t.Errorf("peers: %+v", got)
+	}
+}
+
+// And this machine on each of its meshes, so a phone that found it on one
+// looks for it on the others.
+func TestSelfIsListedPerMesh(t *testing.T) {
+	var st status
+	json.Unmarshal([]byte(`{"name":"laptop","meshes":[{"label":"home","overlay":"fd7b::1"},{"label":"office","overlay":"fdb0::1"},{"label":"x"}]}`), &st)
+	var p peerNames
+	p.update(st)
+	_, self := p.list()
+	var got []string
+	for _, s := range self {
+		got = append(got, s.Name+"@"+s.Mesh+"="+s.Overlay)
+	}
+	if strings.Join(got, " ") != "laptop@home=fd7b::1 laptop@office=fdb0::1" {
+		t.Errorf("self: %v", got)
 	}
 }
 

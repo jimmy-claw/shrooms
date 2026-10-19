@@ -20,6 +20,8 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
@@ -98,31 +100,47 @@ data class AgentHost(
     val sessions: List<AgentSession>,
     /** When it last answered, epoch millis; 0 for "just now" (found this round). */
     val lastSeen: Long = 0,
-)
+    /** Shown once under "all": every mesh it answers on (onMesh). */
+    val meshes: List<String> = emptyList(),
+    /** Rounds of finding in a row it did not answer (HostCache). */
+    val missed: Int = 0,
+) {
+    /** The machine as [s] is reached: on the mesh it is there for, under "all". */
+    fun of(s: AgentSession): AgentHost = if (s.at.isEmpty()) this else copy(address = s.at, mesh = s.atMesh)
+}
 
 /**
  * The list kept between rounds of finding, so a machine that misses a round —
  * a moment of a flaky network — stays where it is with its sessions as last
  * seen, rather than vanishing and coming back and moving everything under the
- * reader. Shown as unreachable once it has missed [STALE_MS]; forgotten after
- * [FORGET_MS].
+ * reader. Shown as offline once it has missed [MISSED] rounds in a row;
+ * forgotten after [FORGET_MS].
+ *
+ * By rounds, not by time: by time, every machine went grey while a session
+ * was open (no rounds then) and between rounds slower than the limit, most
+ * of the time (2026-10-16).
  */
 object HostCache {
-    const val STALE_MS = 25_000L
+    const val MISSED = 2
     const val FORGET_MS = 7L * 24 * 3600 * 1000
 
-    fun reachable(h: AgentHost, now: Long): Boolean = now - h.lastSeen < STALE_MS
+    fun reachable(h: AgentHost): Boolean = h.missed < MISSED
 
-    /** This round's [found] hosts, and the [previous] ones that did not answer, by name. */
+    /** This round's [found] hosts, and the [previous] ones that did not answer, by name and mesh. */
     fun merge(previous: List<AgentHost>, found: List<AgentHost>, now: Long): List<AgentHost> {
-        val fresh = found.map { it.copy(lastSeen = now) }
-        val names = fresh.map { it.name }.toSet()
-        val kept = previous.filter { it.name !in names && now - it.lastSeen < FORGET_MS }
-        return (fresh + kept).sortedBy { it.name }
+        val fresh = found.map { it.copy(lastSeen = now, missed = 0) }
+        val names = fresh.map { it.name + "@" + it.mesh }.toSet()
+        val kept = previous.filter { it.name + "@" + it.mesh !in names && now - it.lastSeen < FORGET_MS }
+            .map { it.copy(missed = it.missed + 1) }
+        return (fresh + kept).sortedWith(compareBy({ it.name }, { it.mesh }))
     }
 
+    /** [hosts] with each mesh named as [own] names it, a machine once on each: the freshest copy. */
+    fun renamed(own: Map<String, String>, hosts: List<AgentHost>): List<AgentHost> =
+        meshesByPrefix(own, hosts).sortedByDescending { it.lastSeen }.distinctBy { it.name + "@" + it.mesh }
+
     fun encode(hosts: List<AgentHost>): String = org.json.JSONArray(hosts.map { h ->
-        JSONObject().put("name", h.name).put("mesh", h.mesh).put("address", h.address).put("seen", h.lastSeen)
+        JSONObject().put("name", h.name).put("mesh", h.mesh).put("address", h.address).put("seen", h.lastSeen).put("missed", h.missed)
             .put("sessions", org.json.JSONArray(h.sessions.map { s ->
                 JSONObject().put("name", s.name).put("dir", s.dir).put("state", s.state).put("pending", s.pending)
                     .put("running", s.running).put("last_seq", s.lastSeq).put("last_time", s.lastTime)
@@ -154,10 +172,30 @@ object HostCache {
                             ?: s.optString("cage").takeIf { s.has("cage") }?.let { SessionCage(it) },
                     )
                 },
-                lastSeen = h.optLong("seen"))
+                lastSeen = h.optLong("seen"), missed = h.optInt("missed"))
         }.filter { it.name.isNotEmpty() && AgentClient.isMeshAddress(it.address) }
     }.getOrDefault(emptyList())
 }
+
+/**
+ * The machines of one mesh, or of all ("" ): each mesh is a world of its own
+ * (a home mesh beside an office one), and together their machines crowd one
+ * list. As Basecamp's switch.
+ */
+fun onMesh(hosts: List<AgentHost>, mesh: String): List<AgentHost> =
+    if (mesh.isNotEmpty()) hosts.filter { it.mesh == mesh }
+    else hosts.groupBy { it.name }.map { (_, hs) ->
+        // Once each, as it last answered (a mesh that stopped answering keeps
+        // an old copy), with every mesh it answers on, and the sessions there
+        // only for another of them, reached there: a session for the home
+        // mesh alone was missing when the office copy was shown (k11, 2026-10-16).
+        val main = hs.maxBy { it.lastSeen }
+        val more = hs.filter { it !== main }.sortedByDescending { it.lastSeen }.flatMap { o ->
+            o.sessions.map { it.copy(at = o.address, atMesh = o.mesh) }
+        }.filter { s -> main.sessions.none { it.name == s.name } }.distinctBy { it.name }
+        main.copy(meshes = hs.map { it.mesh }.filter { it.isNotEmpty() }.distinct().sorted(),
+            sessions = if (more.isEmpty()) main.sessions else (main.sessions + more).sortedBy { it.name })
+    }
 
 /**
  * The list as shown: starred sessions first, from every machine, by name;
@@ -190,12 +228,52 @@ data class OpenSession(val address: String, val host: String, val mesh: String, 
  * with the laptop gone, nothing reached them and every one greyed (2026-10-04).
  */
 fun agentCandidates(handed: List<AgentHosts.Host>, seen: List<AgentHost>): List<AgentHosts.Host> =
-    (handed + seen.map { AgentHosts.Host(it.name, it.mesh, it.address) }).distinctBy { it.name }
+    // Per machine and mesh: kept once by name, a machine on two meshes was
+    // looked for on one of them only (the laptop, on office and not home).
+    (handed + seen.map { AgentHosts.Host(it.name, it.mesh, it.address) }).distinctBy { it.name + "@" + it.mesh }
+
+/**
+ * A mesh by its addresses, not its name: a mesh's name is each device's own
+ * (atlas calls the office mesh "default"), but its prefix, the first 48 bits
+ * of every address in it, is the same everywhere.
+ */
+fun meshPrefix(address: String): String {
+    val a = address.substringBefore('%').lowercase()
+    if (!a.contains(':')) return ""
+    val parts = a.split(':')
+    return if (parts.size >= 3 && parts[0].isNotEmpty()) parts.take(3).joinToString(":") else ""
+}
+
+/**
+ * This phone's names for its meshes, by prefix: its own peers', then the
+ * machines the shrooms app handed over, both in this phone's names. Machines
+ * found before only fill in a mesh neither names: they were often named by
+ * another machine (atlas calls the office mesh "default"), and taken first
+ * that name was kept and fed back every round, so pi5 stayed "default" on a
+ * phone with no such mesh (2026-10-16).
+ */
+fun meshNames(peers: List<Peer>, handed: List<AgentHosts.Host>, seen: List<AgentHosts.Host>): Map<String, String> {
+    val own = mutableMapOf<String, String>()
+    val named = peers.map { it.overlay to it.mesh } + handed.map { it.address to it.mesh } + seen.map { it.address to it.mesh }
+    for ((addr, mesh) in named) {
+        val p = meshPrefix(addr)
+        if (p.isNotEmpty() && mesh.isNotEmpty()) own.putIfAbsent(p, mesh)
+    }
+    return own
+}
+
+/** Each host's mesh named as this phone names it, by its address's prefix. */
+fun meshesByPrefix(own: Map<String, String>, hosts: List<AgentHost>): List<AgentHost> =
+    hosts.map { h -> own[meshPrefix(h.address)]?.let { if (it != h.mesh) h.copy(mesh = it) else h } ?: h }
 
 suspend fun discoverAgents(peers: List<Peer>, byName: List<String> = emptyList(),
-                           known: List<AgentHosts.Host> = emptyList()): List<AgentHost> =
+                           known: List<AgentHosts.Host> = emptyList(),
+                           handed: List<AgentHosts.Host> = known): List<AgentHost> =
     withContext(Dispatchers.IO) {
-        val fromPeers = peers.filter { it.online }.groupBy { it.name }.map { (name, ps) ->
+        // One per machine AND mesh: a machine on two meshes is two places, and
+        // each may show other sessions (ADR-049); the mesh switch shows one.
+        val fromPeers = peers.filter { it.online }.groupBy { it.name to it.mesh }.map { (key, ps) ->
+            val name = key.first
             async {
                 ps.firstNotNullOfOrNull { p ->
                     listOf(p.overlay, p.overlayV4).filter { it.isNotEmpty() }.firstNotNullOfOrNull { a ->
@@ -205,7 +283,7 @@ suspend fun discoverAgents(peers: List<Peer>, byName: List<String> = emptyList()
             }
         }
         // The peers the shrooms app handed over, when this is Shrooms Agents.
-        val handed = known.filter { k -> peers.none { it.name == k.name } }.map { k ->
+        val asked = known.filter { k -> peers.none { it.name == k.name } }.map { k ->
             async { runCatching { AgentHost(k.name, k.mesh, k.address, AgentClient(k.address).sessions(3000)) }.getOrNull() }
         }
         val named = byName.filter { n -> peers.none { it.name == n.substringBefore('.') } }.map { n ->
@@ -218,17 +296,26 @@ suspend fun discoverAgents(peers: List<Peer>, byName: List<String> = emptyList()
                 }
             }
         }
-        val found = (fromPeers + handed + named).awaitAll().filterNotNull().distinctBy { it.name }
+        // This phone's own names for its meshes, by prefix: from its peers, and
+        // the machines the shrooms app handed over (both in this phone's names).
+        val own = meshNames(peers, handed, known)
+        val found = meshesByPrefix(own, (fromPeers + asked + named).awaitAll().filterNotNull()).distinctBy { it.name + "@" + it.mesh }
         // Then the mesh as each agent's machine sees it: a phone that knows one
         // agent finds the rest without being told (/v1/peers). One round, not
         // a crawl — every machine sees the same mesh.
-        val known = found.map { it.name }.toSet() + peers.map { it.name }
-        val via = found.flatMap { h -> runCatching { AgentClient(h.address).peers() }.getOrDefault(emptyList()) }
-            .filter { it.first !in known }.distinctBy { it.first }
+        // Known by machine AND mesh: by name alone, the laptop found on the
+        // office mesh was never looked for on home (k11, 2026-10-16).
+        val known = (found.map { it.name to meshPrefix(it.address) } + peers.map { it.name to meshPrefix(it.overlay) }).toSet()
+        // Every agent asked at once: one after another, a round took longer
+        // than the list waited before calling a machine offline.
+        val via = found.map { h -> async { runCatching { AgentClient(h.address).peers() }.getOrDefault(emptyList()) } }.awaitAll().flatten()
+            .filter { (it.first to meshPrefix(it.third)) !in known }.distinctBy { it.first + "@" + meshPrefix(it.third) }
             .map { (name, mesh, addr) ->
                 async { runCatching { AgentHost(name, mesh, addr, AgentClient(addr).sessions(3000)) }.getOrNull() }
             }
-        (found + via.awaitAll().filterNotNull()).sortedBy { it.name }
+        // Another agent's peers come with that machine's names for the
+        // meshes; named here as this phone names them.
+        (found + meshesByPrefix(own, via.awaitAll().filterNotNull())).distinctBy { it.name + "@" + it.mesh }.sortedBy { it.name }
     }
 
 /**
@@ -247,27 +334,15 @@ fun meshAddressesOf(name: String): List<String> =
 // --- the look ---------------------------------------------------------------
 
 /**
- * The same spores the mesh screen draws, faint, drifting behind everything:
- * the agents are part of the same app, not a utility bolted onto it.
+ * A lit dot: something is happening. Still, as in Basecamp: beside the word
+ * it says enough, and anything that moves keeps the screen drawing; an
+ * infinite animation asks for every frame for as long as it runs (Basecamp
+ * on the Duet tablet, 2026-10-15). The spores that drifted behind the agents
+ * are gone for the same reason.
  */
 @Composable
-private fun SporeBackdrop(alpha: Float = 0.16f) {
-    val motes = remember { sporeField(26) }
-    val t by rememberInfiniteTransition(label = "agents-spores").animateFloat(
-        initialValue = 0f, targetValue = 2f * PI.toFloat(),
-        animationSpec = infiniteRepeatable(tween(60_000, easing = LinearEasing), RepeatMode.Restart),
-        label = "drift",
-    )
-    Canvas(Modifier.fillMaxSize()) { drawSpores(motes, t, alpha) }
-}
-
-/** A spore that breathes: something is happening. */
-@Composable
 private fun Pulse(colour: Color, size: Int = 8) {
-    val a by rememberInfiniteTransition(label = "pulse").animateFloat(
-        0.25f, 1f, infiniteRepeatable(tween(900), RepeatMode.Reverse), label = "a",
-    )
-    Box(Modifier.size(size.dp).background(colour.copy(alpha = a), CircleShape))
+    Box(Modifier.size(size.dp).background(colour, CircleShape))
 }
 
 private fun meshColour(mesh: String, meshes: List<String>): Color =
@@ -312,18 +387,25 @@ private fun shortImage(img: String): String = when (img) {
 
 /** A cage in a few words (Basecamp's cageWords): "desktop, nix, GitHub login". */
 fun cageWords(c: SessionCage): String =
-    listOf(if (c.sealed) "sealed" else "", shortImage(c.image), if (c.nix) "nix" else "", if (c.github) "GitHub login" else "").filter { it.isNotEmpty() }.joinToString(", ")
+    listOf(if (c.sealed) "sealed" else "", shortImage(c.image), if (c.nix) "nix" else "", if (c.github) "GitHub login" else "", if (c.shared) "shared folder" else "").filter { it.isNotEmpty() }.joinToString(", ")
 
 /** What "in a cage" means, said beside it (Basecamp's cageNote). */
 fun cageNote(c: CageOffer): String {
-    val what = "root inside, and of this machine only the project, the files sent to it and the harness's settings; " +
-        "what it installs stays until the session is deleted"
+    // Caged, in one sentence (docs/agents/cages.md), as Basecamp says it.
+    val what = "your agent, kept in its folder: its project and its own conversations, none of your credentials, other conversations or the rest of your home; the network stays open and its memory and CPUs are limited. For code you do not trust, seal it"
     return when {
         c.error.isNotEmpty() -> "$what. The last build of the image failed: ${c.error}"
         c.building -> "$what. The image is being built (a few minutes)."
         !c.ready -> "$what. The image is built with the first one (a few minutes)."
         else -> "$what."
     }
+}
+
+/** How fast its model wrote in its last turn, as the header shows it ("" when not known). */
+fun rateLabel(r: Double): String = when {
+    !(r > 0) -> ""
+    r >= 100 -> "${Math.round(r)} tok/s"
+    else -> "${Math.round(r * 10) / 10.0} tok/s"
 }
 
 fun shortModel(m: String): String =
@@ -358,6 +440,8 @@ fun AgentsScreen(peers: List<Peer>, onClose: () -> Unit, initial: OpenSession? =
     // Machines added by name, kept across launches.
     val prefs = remember { ctx.getSharedPreferences("agents", android.content.Context.MODE_PRIVATE) }
     var named by remember { mutableStateOf(prefs.getStringSet("named", emptySet())!!.sorted()) }
+    // Which mesh's agents are shown: "" for all. Kept across launches.
+    var meshPick by remember { mutableStateOf(prefs.getString("mesh", "") ?: "") }
     var addingMachine by remember { mutableStateOf(false) }
     var voiceOpen by remember { mutableStateOf(false) }
     var usageOpen by remember { mutableStateOf(false) }
@@ -386,8 +470,12 @@ fun AgentsScreen(peers: List<Peer>, onClose: () -> Unit, initial: OpenSession? =
             // for machines rather than after it, which takes a while; not
             // while the tasks screen is open, which asks for itself.
             val tasks = if (tasksOpen) null else async { fetchTasks(taskTargets(hosts.orEmpty())) }
-            val found = discoverAgents(peers, named, agentCandidates(AgentHosts.peers(ctx), hosts.orEmpty()))
-            val merged = HostCache.merge(hosts.orEmpty(), found, System.currentTimeMillis())
+            val handed = AgentHosts.peers(ctx)
+            val cands = agentCandidates(handed, hosts.orEmpty())
+            val found = discoverAgents(peers, named, cands, handed)
+            // The ones kept from before named as now, too: a copy kept under
+            // another machine's name for a mesh would otherwise stay a week.
+            val merged = HostCache.merge(HostCache.renamed(meshNames(peers, handed, cands), hosts.orEmpty()), found, System.currentTimeMillis())
             hosts = merged
             cachePrefs.edit().putString("cache", HostCache.encode(merged)).apply()
             // The watcher keeps asking a machine that missed a round, too.
@@ -399,7 +487,6 @@ fun AgentsScreen(peers: List<Peer>, onClose: () -> Unit, initial: OpenSession? =
     }
 
     Box(Modifier.fillMaxSize().background(Palette.Void)) {
-        SporeBackdrop()
         if (usageOpen) {
             BackHandler { usageOpen = false }
             UsageScreen(hosts.orEmpty()) { usageOpen = false }
@@ -415,7 +502,7 @@ fun AgentsScreen(peers: List<Peer>, onClose: () -> Unit, initial: OpenSession? =
         }
         if (tasksOpen) {
             BackHandler { tasksOpen = false }
-            TasksScreen(hosts.orEmpty(), taskRows, onRows = { keepTasks(it) }, onOpen = { r ->
+            TasksScreen(onMesh(hosts.orEmpty(), meshPick), taskRows, onRows = { keepTasks(it) }, onOpen = { r ->
                 tasksOpen = false
                 fromTasks = true
                 // A queued task has not arrived yet: its session opens at the end.
@@ -425,7 +512,7 @@ fun AgentsScreen(peers: List<Peer>, onClose: () -> Unit, initial: OpenSession? =
         }
         BackHandler { if (creatingOn != null) creatingOn = null else onClose() }
         deleting?.let { (h, sess) ->
-            DeleteSessionDialog(h.name, h.address, sess, onDismiss = { deleting = null },
+            DeleteSessionDialog(h.name, h.of(sess).address, sess, onDismiss = { deleting = null },
                 onDeleted = { deleting = null; refresh++ })
         }
 
@@ -496,7 +583,26 @@ fun AgentsScreen(peers: List<Peer>, onClose: () -> Unit, initial: OpenSession? =
             }
 
             val meshes = hs.orEmpty().map { it.mesh }.distinct().sorted()
-            val (starred, rest) = starredFirst(hs.orEmpty())
+            // The meshes, when there is more than one: all, or one of them.
+            if (meshes.size > 1 || meshPick.isNotEmpty()) {
+                @OptIn(ExperimentalLayoutApi::class)
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier.padding(top = 6.dp, bottom = 4.dp)) {
+                    (listOf("") + meshes).forEach { m ->
+                        val on = meshPick == m
+                        val tint = if (m.isEmpty()) Palette.Bone else meshColour(m, meshes)
+                        Text(if (m.isEmpty()) "all" else m, style = MaterialTheme.typography.labelSmall,
+                            color = if (on) Palette.Void else tint,
+                            modifier = Modifier.background(if (on) tint else Color.Transparent, RoundedCornerShape(10.dp))
+                                .border(1.dp, tint, RoundedCornerShape(10.dp))
+                                .clickable { meshPick = m; prefs.edit().putString("mesh", m).apply() }
+                                .padding(horizontal = 10.dp, vertical = 6.dp))
+                    }
+                }
+            }
+            val shown = onMesh(hs.orEmpty(), meshPick)
+            if (hs != null && hs.isNotEmpty() && shown.isEmpty()) Label("No agents on $meshPick yet.")
+            val (starred, rest) = starredFirst(shown)
             // Read on each round's recomposition: what has gone quiet greys.
             val now = System.currentTimeMillis()
             // Replies not yet seen here, redrawn as sessions are read.
@@ -505,7 +611,7 @@ fun AgentsScreen(peers: List<Peer>, onClose: () -> Unit, initial: OpenSession? =
             fun star(h: AgentHost, sess: AgentSession) {
                 hosts = withStar(hosts.orEmpty(), h.name, sess.name, !sess.starred)
                 scope.launch {
-                    withContext(Dispatchers.IO) { runCatching { AgentClient(h.address).setStarred(sess.name, !sess.starred) } }
+                    withContext(Dispatchers.IO) { runCatching { AgentClient(h.of(sess).address).setStarred(sess.name, !sess.starred) } }
                         .onFailure { hosts = withStar(hosts.orEmpty(), h.name, sess.name, sess.starred) }
                 }
             }
@@ -515,37 +621,37 @@ fun AgentsScreen(peers: List<Peer>, onClose: () -> Unit, initial: OpenSession? =
                         Text("🍄  STARRED", style = MaterialTheme.typography.labelSmall, color = Palette.Phosphor,
                             modifier = Modifier.padding(top = 14.dp))
                     }
-                    itemsIndexed(starred, key = { _, p -> "s-" + p.first.name + "/" + p.second.name }) { _, (h, sess) ->
-                        SessionRow(sess, where = h.name, reachable = HostCache.reachable(h, now), unread = unread(h, sess), onStar = { star(h, sess) }, onLongPress = { deleting = h to sess }) {
-                            open = OpenSession(h.address, h.name, h.mesh, sess.name)
+                    itemsIndexed(starred, key = { _, p -> "s-" + p.first.name + "@" + p.first.mesh + "/" + p.second.name }) { _, (h, sess) ->
+                        SessionRow(sess, where = h.name, reachable = HostCache.reachable(h), unread = unread(h, sess), onStar = { star(h, sess) }, onLongPress = { deleting = h to sess }) {
+                            open = h.of(sess).let { OpenSession(it.address, h.name, it.mesh, sess.name) }
                         }
                     }
                 }
                 for (h in rest) {
-                    val up = HostCache.reachable(h, now)
-                    item(key = "h-" + h.name) {
-                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 14.dp).alpha(if (up) 1f else 0.45f)) {
+                    val up = HostCache.reachable(h)
+                    item(key = "h-" + h.name + "@" + h.mesh) {
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 14.dp)) {
                             Box(Modifier.size(10.dp).border(2.dp, meshColour(h.mesh, meshes), CircleShape))
                             Spacer(Modifier.width(10.dp))
                             Text(h.name, style = MaterialTheme.typography.titleMedium, color = Palette.Bone)
                             Spacer(Modifier.width(8.dp))
-                            Text(h.mesh, style = MaterialTheme.typography.labelSmall, color = meshColour(h.mesh, meshes))
+                            Text(h.meshes.ifEmpty { listOf(h.mesh) }.joinToString(" · "), style = MaterialTheme.typography.labelSmall, color = meshColour(h.mesh, meshes))
                             if (!up) {
                                 Spacer(Modifier.width(8.dp))
-                                Text("unreachable · seen ${whenSaid(h.lastSeen)}", style = MaterialTheme.typography.labelSmall,
-                                    color = Palette.Ash, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text("offline · seen ${whenSaid(h.lastSeen)}", style = MaterialTheme.typography.labelSmall,
+                                    color = Palette.Amber, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             }
                             Spacer(Modifier.weight(1f))
                             if (up) Link("+ session") { creatingOn = h }
                         }
                     }
                     if (h.sessions.isEmpty()) {
-                        val all = hs.orEmpty().firstOrNull { it.name == h.name }?.sessions.orEmpty()
-                        item(key = "e-" + h.name) { Label(if (all.isEmpty()) "no sessions yet" else "all starred") }
+                        val all = hs.orEmpty().firstOrNull { it.name == h.name && it.mesh == h.mesh }?.sessions.orEmpty()
+                        item(key = "e-" + h.name + "@" + h.mesh) { Label(if (all.isEmpty()) "no sessions yet" else "all starred") }
                     }
-                    itemsIndexed(h.sessions, key = { _, s -> h.name + "/" + s.name }) { _, s ->
+                    itemsIndexed(h.sessions, key = { _, s -> h.name + "@" + h.mesh + "/" + s.name }) { _, s ->
                         SessionRow(s, reachable = up, unread = unread(h, s), onStar = { star(h, s) }, onLongPress = { deleting = h to s }) {
-                            open = OpenSession(h.address, h.name, h.mesh, s.name)
+                            open = h.of(s).let { OpenSession(it.address, h.name, it.mesh, s.name) }
                         }
                     }
                 }
@@ -559,7 +665,7 @@ fun AgentsScreen(peers: List<Peer>, onClose: () -> Unit, initial: OpenSession? =
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 private fun SessionRow(s: AgentSession, where: String = "", reachable: Boolean = true, unread: Int = 0, onStar: () -> Unit, onLongPress: () -> Unit, onOpen: () -> Unit) {
     val (badge, colour) = when {
-        !reachable -> "unreachable" to Palette.Ash
+        !reachable -> "offline" to Palette.Amber
         else -> when (s.state) {
         "waiting" -> "NEEDS YOU" to Palette.Amber
         "working" -> "WORKING" to Palette.Phosphor
@@ -574,8 +680,10 @@ private fun SessionRow(s: AgentSession, where: String = "", reachable: Boolean =
             .clip(RoundedCornerShape(12.dp))
             .background(Palette.Panel.copy(alpha = 0.85f), RoundedCornerShape(12.dp))
             .border(1.dp, if (reachable && s.state == "waiting") Palette.Amber else Palette.Line, RoundedCornerShape(12.dp))
-            // Dimmed while it cannot work for want of quota, too.
-            .alpha(if (!reachable) 0.5f else if (s.limited != null) 0.6f else 1f),
+            // Readable whether or not its machine answers: "offline" says that
+            // (dimmed, it was most of the time, and hard to read). Dimmed only
+            // while it cannot work for want of quota.
+            .alpha(if (s.limited != null) 0.6f else 1f),
     ) {
     Column(
         Modifier.weight(1f)
@@ -642,7 +750,7 @@ private fun SessionRow(s: AgentSession, where: String = "", reachable: Boolean =
     }
 }
 
-/** What a cage is given: its image, nix, the GitHub login — as the machine offers them. "" is the machine's image. */
+/** What a cage is given: its image, nix, the GitHub login, the shared folder — as the machine offers them. "" is the machine's image. */
 @Composable
 private fun CageOptions(offer: CageOffer, opts: SessionCage, modifier: Modifier = Modifier, onChange: (SessionCage) -> Unit) {
     Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -666,6 +774,10 @@ private fun CageOptions(offer: CageOffer, opts: SessionCage, modifier: Modifier 
                 onChange(opts.copy(nix = !opts.nix))
             }
             Tick("GitHub login — your gh login, read-only", opts.github) { onChange(opts.copy(github = !opts.github)) }
+            // The shared folder (ADR-057): never for a sealed cage, which gets nothing local.
+            if (offer.shared) Tick("shared folder — ${offer.sharedIn}, read-write, the same folder as the other caged sessions on that machine that have it and are on the same meshes", opts.shared) {
+                onChange(opts.copy(shared = !opts.shared))
+            }
         }
     }
 }
@@ -857,6 +969,9 @@ private fun SessionScreen(o: OpenSession, onBack: () -> Unit, onRenamed: (String
     var cageOffer by remember { mutableStateOf<CageOffer?>(null) }
     var cageOpts by remember { mutableStateOf(SessionCage("")) }
     var renaming by remember { mutableStateOf<String?>(null) }
+    // The model dialog: what is typed, and the models its machine's sessions run on, to pick from.
+    var modelDraft by remember { mutableStateOf<String?>(null) }
+    var modelsSeen by remember { mutableStateOf<List<String>>(emptyList()) }
     // How many of the last events are loaded: 0 is everything, once asked for;
     // more, to reach a search result further back.
     var tail by remember(o) { mutableStateOf(SESSION_TAIL) }
@@ -1234,6 +1349,55 @@ private fun SessionScreen(o: OpenSession, onBack: () -> Unit, onRenamed: (String
             },
         )
     }
+    modelDraft?.let { draft ->
+        fun choose(model: String) {
+            modelDraft = null
+            scope.launch {
+                withContext(Dispatchers.IO) { runCatching { client.setModel(o.session, model) } }
+                    .onSuccess { info = info?.copy(modelSetting = model, running = false) }
+                    .onFailure { actionError = it.message ?: "could not change the model" }
+            }
+        }
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { modelDraft = null },
+            containerColor = Palette.Panel,
+            title = { Text("Model for ${o.session}", color = Palette.Bone) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Now: ${info?.model?.ifEmpty { "not known yet" } ?: "not known yet"}" +
+                        if (info?.modelSetting.isNullOrEmpty()) ", its machine's default" else ", chosen",
+                        style = MaterialTheme.typography.bodySmall, color = Palette.Ash)
+                    Field("model", draft) { modelDraft = it }
+                    if (modelsSeen.isNotEmpty()) Text("On ${o.host}:", style = MaterialTheme.typography.labelSmall, color = Palette.Ash)
+                    @OptIn(ExperimentalLayoutApi::class)
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        modelsSeen.forEach { m ->
+                            Text(m, style = MaterialTheme.typography.labelSmall, color = Palette.Sky,
+                                modifier = Modifier.border(1.dp, Palette.Line, RoundedCornerShape(10.dp))
+                                    .clickable { modelDraft = m }.padding(horizontal = 10.dp, vertical = 6.dp))
+                        }
+                    }
+                    Text(if ((info?.harness ?: "claude") == "pi") "As pi names it: provider/model, e.g. venice/claude-haiku-5-5."
+                        else "As Claude Code takes it: haiku, sonnet, opus, or a full model name.",
+                        style = MaterialTheme.typography.bodySmall, color = Palette.Ash)
+                    Text("It is stopped, and your next message carries on in the same conversation on the new model.",
+                        style = MaterialTheme.typography.bodySmall, color = Palette.Ash)
+                }
+            },
+            confirmButton = {
+                Text("SET", style = MaterialTheme.typography.labelSmall, color = Palette.Phosphor,
+                    modifier = Modifier.clickable { choose(draft.trim()) }.padding(12.dp))
+            },
+            dismissButton = {
+                Row {
+                    if (!info?.modelSetting.isNullOrEmpty()) Text("DEFAULT", style = MaterialTheme.typography.labelSmall, color = Palette.Ash,
+                        modifier = Modifier.clickable { choose("") }.padding(12.dp))
+                    Text("CANCEL", style = MaterialTheme.typography.labelSmall, color = Palette.Ash,
+                        modifier = Modifier.clickable { modelDraft = null }.padding(12.dp))
+                }
+            },
+        )
+    }
     if (cageAsk) {
         val caged = info?.cage != null
         fun move(to: SessionCage?) {
@@ -1256,6 +1420,26 @@ private fun SessionScreen(o: OpenSession, onBack: () -> Unit, onRenamed: (String
                         if (caged) "; a cage changed or left is deleted, with what was installed in it." else ".",
                         style = MaterialTheme.typography.bodySmall, color = Palette.Ash)
                     if (offer != null) CageOptions(offer, cageOpts) { cageOpts = it }
+                    // Its cage's memory and CPUs, set on the cage as it is: nothing reinstalled.
+                    info?.cage?.let { c ->
+                        var mem by remember(c) { mutableStateOf(c.memory) }
+                        var cpu by remember(c) { mutableStateOf(c.cpus) }
+                        Text("RESOURCES — set on its cage as it is, nothing reinstalled. Empty is the machine's (" +
+                            c.machineMemory.ifEmpty { "no limit" } + ", " + c.machineCpus.ifEmpty { "all" } + " CPUs).",
+                            style = MaterialTheme.typography.bodySmall, color = Palette.Ash)
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Box(Modifier.weight(1f)) { Field("memory, e.g. 16g", mem) { mem = it } }
+                            Box(Modifier.weight(1f)) { Field("CPUs", cpu) { cpu = it } }
+                            Text("SET", style = MaterialTheme.typography.labelSmall, color = Palette.Phosphor,
+                                modifier = Modifier.clickable {
+                                    scope.launch {
+                                        withContext(Dispatchers.IO) { runCatching { client.setCageLimits(o.session, mem.trim(), cpu.trim()) } }
+                                            .onSuccess { got -> if (got != null) info = info?.copy(cage = got); actionError = "" }
+                                            .onFailure { actionError = it.message ?: "could not set them" }
+                                    }
+                                }.padding(8.dp))
+                        }
+                    }
                     if (working) Text("It is working: move it once it is idle.", style = MaterialTheme.typography.bodySmall, color = Palette.Amber)
                 }
             },
@@ -1332,16 +1516,22 @@ private fun SessionScreen(o: OpenSession, onBack: () -> Unit, onRenamed: (String
             }
             val facts = listOf(o.host, o.mesh, harnessLabel(i?.harness ?: "claude"),
                 i?.cage?.let { "in a cage (${cageWords(it)})" + if (it.outbox.isNotEmpty()) ", results in ${it.outbox}" else "" } ?: "", shortModel(i?.model ?: ""),
+                rateLabel(i?.tokensPerSecond ?: 0.0),
                 contextLabel(i?.contextUsed ?: 0, i?.contextWindow ?: 0)).filter { it.isNotEmpty() }
+            // All of it, wrapped: on one line the model was cut off at the
+            // phone's edge ("ven…"), with no way to read the rest.
             Text(facts.joinToString("  ·  "), style = MaterialTheme.typography.labelSmall, color = Palette.Ash,
-                maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(start = 30.dp))
+                modifier = Modifier.padding(start = 30.dp, end = 8.dp))
             if (i != null && i.contextWindow > 0) {
                 val f = (i.contextUsed.toFloat() / i.contextWindow).coerceIn(0f, 1f)
                 Box(Modifier.padding(start = 30.dp, top = 6.dp, end = 8.dp).fillMaxWidth().height(2.dp).background(Palette.Line)) {
                     Box(Modifier.fillMaxWidth(f).height(2.dp).background(contextColour(i.contextUsed, i.contextWindow)))
                 }
             }
-            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(start = 22.dp)) {
+            // Wrapped onto as many lines as it takes: in one row the controls
+            // past the phone's edge (cage, restart, delete) could not be reached.
+            @OptIn(ExperimentalLayoutApi::class)
+            FlowRow(verticalArrangement = Arrangement.Center, modifier = Modifier.padding(start = 22.dp, end = 8.dp)) {
                 val auto = i?.autoApprove == true
                 // A harness that never asks has nothing to approve.
                 if (i?.approves != false) Link(if (auto) "AUTO-APPROVE" else "asks first", if (auto) Palette.Phosphor else Palette.Ash) {
@@ -1351,7 +1541,6 @@ private fun SessionScreen(o: OpenSession, onBack: () -> Unit, onRenamed: (String
                             .onFailure { actionError = it.message ?: "could not change it" }
                     }
                 }
-                Spacer(Modifier.weight(1f))
                 Link(if (autoPlay) "AUTO-PLAY" else "auto-play", if (autoPlay) Palette.Phosphor else Palette.Ash) {
                     val last = maxOf(info?.lastSeq ?: 0, events.lastOrNull()?.seq ?: 0)
                     Speech.setAutoPlay(ctx, o.host, o.session, !autoPlay, last)
@@ -1378,6 +1567,19 @@ private fun SessionScreen(o: OpenSession, onBack: () -> Unit, onRenamed: (String
                     cageOffer = null
                     cageAsk = true
                     scope.launch { cageOffer = withContext(Dispatchers.IO) { client.offer().cage } }
+                }
+                // The model it runs on (lit when one was chosen for it), as the name is renamed.
+                val chosen = info?.modelSetting.orEmpty()
+                Link(if (chosen.isEmpty()) "model" else "MODEL", if (chosen.isEmpty()) Palette.Ash else Palette.Sky) {
+                    modelDraft = chosen.ifEmpty { info?.model.orEmpty() }
+                    modelsSeen = emptyList()
+                    scope.launch {
+                        modelsSeen = withContext(Dispatchers.IO) {
+                            runCatching { client.sessions() }.getOrDefault(emptyList())
+                                .filter { it.harness == (info?.harness ?: "claude") }
+                                .flatMap { listOf(it.model, it.modelSetting) }.filter { it.isNotEmpty() && it != "<synthetic>" }.distinct().sorted()
+                        }
+                    }
                 }
                 Link("restart", Palette.Ash) { askRestart = true }
                 Link("delete", Palette.Ash) { askDelete = true }

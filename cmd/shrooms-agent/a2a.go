@@ -327,13 +327,19 @@ func (c a2aClient) task(ref, method string) (cliTask, error) {
 // update is a worker's word on a task given to its session on this machine:
 // done, blocked (and what it needs) or failed.
 func (c a2aClient) update(id, state, summary string) (cliTask, error) {
-	ms, err := c.peers()
-	if err != nil || len(ms) == 0 {
-		return cliTask{}, fmt.Errorf("this machine's agent: %v", err)
-	}
 	// Its own machine's task: a MACHINE/ in front is this machine.
 	if _, rest, ok := strings.Cut(id, "/"); ok {
 		id = rest
+	}
+	// The shape first, as get and ack check it: without its SESSION: an id
+	// is not found, and the 404 below then reads as "not your task" when the
+	// id is only short (pi5/jimmy, 2026-10-15).
+	if !strings.Contains(id, ":") {
+		return cliTask{}, fmt.Errorf("%q: a task is MACHINE/SESSION:MESSAGE-ID (or SESSION:MESSAGE-ID), as send printed it", id)
+	}
+	ms, err := c.peers()
+	if err != nil || len(ms) == 0 {
+		return cliTask{}, fmt.Errorf("this machine's agent: %v", err)
 	}
 	body, _ := json.Marshal(map[string]string{"state": state, "summary": summary, "session": os.Getenv("SHROOMS_AGENT_SESSION")})
 	resp, err := c.http(30*time.Second).Post(c.base(ms[0].Addr)+"/v1/tasks/"+url.PathEscape(id),
