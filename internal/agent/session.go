@@ -239,6 +239,10 @@ type Manager struct {
 	agentAt  func(netip.Addr) string // tests: where an agent is
 	// One renewal of the owner's Claude login at a time (claudeLogin).
 	loginMu sync.Mutex
+	// Schedules are the sessions' calendars (schedule.go, ADR-064); nil
+	// when this machine runs none. checkRunner: tests, where checks run.
+	Schedules   *Schedules
+	checkRunner func(ctx context.Context, s *Session, checks string) (string, error)
 	// Tests: the gateway's upstreams elsewhere, and its client (gateway.go).
 	upstreamBase func(name string) string
 	gatewayHTTP  *http.Client
