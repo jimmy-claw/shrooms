@@ -63,6 +63,13 @@ and `scripts/test-packages.sh pure` the rest.
 - Comments say why, not what; the history of a mistake that shaped the code
   belongs in the comment next to it.
 - Stage files by name. `git add -A` has committed a 32 MB store before.
+- Before asking for a merge or a release, run the change once where it will
+  run: a real cage, a real device or emulator, the real program. Say where it
+  ran. Passing tests are not that: caged pi and caged OpenCode's free models
+  were both broken with every test green (ADR-062).
+- Publish after the merge, not beside the review request.
+- Rebase on current master just before asking, and read the docs you touch
+  against what changed since.
 - Phones run their delivery node as Edge (`state.ModeEdge`, set in
   `mobile/support.go`; ADR-035); desktops default to Core.
 
