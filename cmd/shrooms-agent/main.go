@@ -77,6 +77,8 @@ func run() error {
 		"the model an OpenCode session on this machine uses unless the session names one; empty leaves OpenCode's own config to decide")
 	agentSock := flag.String("agent-socket", agent.SocketPath(), "this agent's own unix socket, for this machine's user only (ADR-056)")
 	mcp := flag.Bool("mcp", true, "give every session the mesh's agents as MCP tools (shrooms-agent mcp) and tell it how to use them")
+	schedules := flag.String("schedules", filepath.Join(home, ".config", "shrooms-agent", "schedules.json"),
+		"the sessions' schedules: this machine's Scala session and which calendar is whose (ADR-064); none if missing")
 	flag.Parse()
 
 	level := slog.LevelInfo
@@ -110,6 +112,13 @@ func run() error {
 	m, err := agent.NewManager(ctx, log, *stateDir, *claude)
 	if err != nil {
 		return err
+	}
+	if sc, err := agent.LoadSchedules(*schedules, os.Environ()); err != nil {
+		log.Error("schedules off", "err", err)
+	} else if sc != nil {
+		m.Schedules = sc
+		log.Info("schedules", "sessions", len(sc.Sessions))
+		go m.RunSchedules(ctx)
 	}
 	if *mcp {
 		if self, err := os.Executable(); err == nil {

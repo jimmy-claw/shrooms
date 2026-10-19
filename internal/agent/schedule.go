@@ -70,7 +70,8 @@ type CalState struct {
 	Owner      string            `json:"owner"`
 	Open       bool              `json:"open"`
 	Collab     bool              `json:"collab"`
-	MetaAuthor string            `json:"meta_author"` // who last changed its name, fields or flags
+	MetaAuthor string            `json:"meta_author"` // who last changed its name, fields or flags; "" unknown
+	Meta       string            `json:"meta"`        // its name, flags and fields, to see that they changed
 	Roles      map[string]string `json:"roles"`       // address → editor or viewer; the owner is not here
 	Invites    []string          `json:"invites"`     // the roles of invites not yet claimed
 	Events     []CalEvent        `json:"events"`
@@ -252,7 +253,7 @@ func (sc *Schedules) runnable(st CalState, self string) error {
 func changesBy(owner string, before, after CalState) []string {
 	var out []string
 	if after.MetaAuthor != owner && (before.Name != after.Name || before.Open != after.Open || before.Collab != after.Collab ||
-		before.MetaAuthor != after.MetaAuthor) {
+		before.Meta != after.Meta || before.MetaAuthor != after.MetaAuthor) {
 		out = append(out, "the calendar's name, fields or who may join it changed")
 	}
 	if !sameRoles(before, after) {
@@ -557,4 +558,72 @@ func (m *Manager) runChecks(s *Session, checks string, timeout time.Duration) (s
 	cmd.Dir = s.dir
 	out, err := cmd.CombinedOutput()
 	return string(out), err
+}
+
+// ScheduleConfig is this machine's schedules file (ADR-064): where its Scala
+// session is, the owner it trusts, and which calendar is whose. Kept by the
+// owner; written when a session is given a schedule.
+type ScheduleConfig struct {
+	Logosctl       string                     `json:"logosctl"`  // the program; "logosctl" on the PATH
+	ScalaDir       string                     `json:"scala_dir"` // its isolated session: home/ and cfg/ under it
+	Owner          string                     `json:"owner"`     // the owner's main Scala address
+	TZ             string                     `json:"tz"`
+	Sessions       map[string]SessionCalendar `json:"sessions"`
+	MaxWakesPerDay int                        `json:"max_wakes_per_day"`
+	MaxCostPerDay  float64                    `json:"max_cost_per_day"`
+	QuietFrom      int                        `json:"quiet_from"`
+	QuietTo        int                        `json:"quiet_to"`
+}
+
+// LoadSchedules reads the schedules file; nil, nil when there is none.
+func LoadSchedules(path string, env []string) (*Schedules, error) {
+	b, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var c ScheduleConfig
+	if err := json.Unmarshal(b, &c); err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
+	}
+	if c.Owner == "" || c.ScalaDir == "" {
+		return nil, fmt.Errorf("%s: owner and scala_dir are needed", path)
+	}
+	bin := c.Logosctl
+	if bin == "" {
+		bin = "logosctl"
+	}
+	var keep []string
+	for _, kv := range env {
+		k, _, _ := strings.Cut(kv, "=")
+		switch k {
+		case "HOME", "LOGOSCTL_CONFIG_DIR", "QT_QPA_PLATFORM":
+		default:
+			keep = append(keep, kv)
+		}
+	}
+	keep = append(keep, "HOME="+filepath.Join(c.ScalaDir, "home"), "LOGOSCTL_CONFIG_DIR="+filepath.Join(c.ScalaDir, "cfg"),
+		"QT_QPA_PLATFORM=offscreen")
+	return &Schedules{Cal: &ScalaCtl{Bin: bin, Env: keep}, Owner: c.Owner, TZ: c.TZ, Sessions: c.Sessions,
+		MaxWakesPerDay: c.MaxWakesPerDay, MaxCostPerDay: c.MaxCostPerDay, QuietFrom: c.QuietFrom, QuietTo: c.QuietTo}, nil
+}
+
+// RunSchedules ticks every minute until ctx ends.
+func (m *Manager) RunSchedules(ctx context.Context) {
+	if m.Schedules == nil {
+		return
+	}
+	t := time.NewTicker(time.Minute)
+	defer t.Stop()
+	m.ScheduleTick(time.Now())
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case now := <-t.C:
+			m.ScheduleTick(now)
+		}
+	}
 }
