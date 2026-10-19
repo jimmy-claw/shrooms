@@ -78,12 +78,28 @@ func newA2AClient(sock string) a2aClient {
 	c := a2aClient{sock: sock, base: func(a netip.Addr) string {
 		return "http://" + net.JoinHostPort(a.String(), fmt.Sprint(agent.Port))
 	}}
-	// This machine without a mesh is agent.LocalAddr, reached through the
-	// agent's own socket; every other address over the mesh (ADR-056).
+	// This machine, as agent.LocalAddr or by its own mesh addresses, is
+	// reached through the agent's own socket; every other address over the
+	// mesh (ADR-056). Over its own mesh address it would be a caller like any
+	// other device: the agent no longer takes that for its owner (audit
+	// F-24, 2026-10-19).
 	local := agent.SocketPath()
+	self := func(a netip.Addr) bool {
+		if a == agent.LocalAddr {
+			return true
+		}
+		if st, err := fetchStatus(sock); err == nil {
+			for _, m := range st.Meshes {
+				if o, err := netip.ParseAddr(m.Overlay); err == nil && o == a {
+					return true
+				}
+			}
+		}
+		return false
+	}
 	c.dial = func(ctx context.Context, network, addr string) (net.Conn, error) {
 		if host, _, err := net.SplitHostPort(addr); err == nil {
-			if a, err := netip.ParseAddr(host); err == nil && a == agent.LocalAddr {
+			if a, err := netip.ParseAddr(host); err == nil && self(a) && agent.SocketUp(local) {
 				return (&net.Dialer{}).DialContext(ctx, "unix", local)
 			}
 		}

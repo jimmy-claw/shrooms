@@ -104,7 +104,9 @@ func TestACallerIsHereOrOnAMesh(t *testing.T) {
 		return ""
 	}}
 	for addr, want := range map[string]string{
-		"127.0.0.1:1": "here", "[fd00::1]:1": "here", "[fd00::7]:1": "office", "[fd00::9]:1": "nobody",
+		// This machine's own mesh address is not here: any local user can
+		// connect from it (audit F-24); here is the socket.
+		"127.0.0.1:1": "here", "[fd00::1]:1": "nobody", "[fd00::7]:1": "office", "[fd00::9]:1": "nobody",
 	} {
 		mesh, local := h.from(&http.Request{RemoteAddr: addr})
 		got := map[bool]string{true: "here"}[local]

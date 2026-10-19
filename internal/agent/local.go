@@ -152,11 +152,24 @@ func (m *Manager) MCPArgs() []string { return m.mcpArgs() }
 // socket for LocalAddr, over the mesh for any other.
 func (m *Manager) client(addr netip.Addr, timeout time.Duration) *http.Client {
 	c := &http.Client{Timeout: timeout}
-	if addr == LocalAddr && m.Socket != "" && m.agentAt == nil {
+	// This machine, by LocalAddr or by any of its mesh addresses, through the
+	// socket: over the mesh address it would be a caller like any other
+	// device, since a request from it is no longer taken as local (F-24).
+	if (addr == LocalAddr || m.isSelf(addr)) && m.Socket != "" && m.agentAt == nil {
 		sock := m.Socket
 		c.Transport = &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 			return (&net.Dialer{}).DialContext(ctx, "unix", sock)
 		}}
 	}
 	return c
+}
+
+// isSelf is whether addr is one of this machine's mesh addresses.
+func (m *Manager) isSelf(addr netip.Addr) bool {
+	for _, mi := range m.meshes() {
+		if mi.Addr == addr {
+			return true
+		}
+	}
+	return false
 }

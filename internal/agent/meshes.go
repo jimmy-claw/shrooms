@@ -51,14 +51,15 @@ func (h *handler) from(r *http.Request) (mesh string, local bool) {
 			return mesh, false
 		}
 	}
+	// Loopback: the agent listens only on its mesh addresses and its socket
+	// (cmd/shrooms-agent), so nothing reaches it from loopback but a test.
 	if a.IsLoopback() {
 		return "", true
 	}
-	for _, mi := range h.m.meshes() {
-		if mi.Addr == a {
-			return "", true
-		}
-	}
+	// Not this machine's own mesh address: any local user can connect from
+	// it, and was taken for the owner (audit F-24, 2026-10-19). This
+	// machine's user is the one who can open the socket; the agent's own
+	// clients, and its cages' proxy, reach it there.
 	return "", false
 }
 

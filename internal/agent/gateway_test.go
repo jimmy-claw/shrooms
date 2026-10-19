@@ -290,3 +290,65 @@ func TestTheGatewayFindsAKeyInPisModels(t *testing.T) {
 		t.Error("a variable nobody set was sent as the key")
 	}
 }
+
+// Only a model's endpoints, exactly, and the request is built from the path
+// checked: a decoded %3F or %23 once passed the check and went upstream as a
+// query, to any endpoint (audit F-19, 2026-10-19).
+func TestTheGatewayForwardsExactlyAModelsEndpoints(t *testing.T) {
+	for p, want := range map[string]string{
+		"v1/messages":                "v1/messages",
+		"messages":                   "messages",
+		"v1/chat/completions":        "v1/chat/completions",
+		"v1/messages/count_tokens":   "v1/messages/count_tokens",
+		"admin?x=/messages":          "",
+		"admin#/messages":            "",
+		"anything/messages":          "",
+		"v1/files/../messages":       "",
+		"v1//messages":               "",
+		"v1/messages%2F..%2Fbilling": "",
+		"v1/billing":                 "",
+	} {
+		if got := gatewayPath(http.MethodPost, p); got != want {
+			t.Errorf("POST %s: %q, want %q", p, got, want)
+		}
+	}
+	if gatewayPath(http.MethodGet, "admin?x=/models") != "" || gatewayPath(http.MethodGet, "v1/models") != "v1/models" {
+		t.Error("GET models")
+	}
+	if gatewayPath(http.MethodGet, "v1/messages") != "" {
+		t.Error("GET messages")
+	}
+}
+
+// A sealed cage reaches its own model's provider only: not every key the
+// agent holds (audit F-19).
+func TestASealedCageReachesOnlyItsOwnProvider(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "sk-openai")
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, "{}") }))
+	defer up.Close()
+	state := t.TempDir()
+	m := newTestManager(t, state)
+	os.WriteFile(filepath.Join(state, SealedTokenFile), []byte("sk-ant-oat-real\n"), 0o600)
+	m.upstreamBase = func(string) string { return up.URL }
+	s := &Session{cage: &Cage{Sealed: true}} // Claude Code: Anthropic only
+	mux := http.NewServeMux()
+	mux.HandleFunc("/llm/{upstream}/{path...}", m.gateway(s))
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+	for path, want := range map[string]int{
+		"/llm/anthropic/v1/messages":               http.StatusOK,
+		"/llm/openai/v1/chat/completions":          http.StatusForbidden,
+		"/llm/anthropic/v1/messages?beta=true":     http.StatusOK,
+		"/llm/anthropic/v1/messages?beta=true&x=y": http.StatusForbidden,
+		"/llm/anthropic/admin%3Fx=/v1/messages":    http.StatusForbidden,
+	} {
+		resp, err := http.Post(srv.URL+path, "application/json", strings.NewReader(`{}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != want {
+			t.Errorf("%s: %d, want %d", path, resp.StatusCode, want)
+		}
+	}
+}

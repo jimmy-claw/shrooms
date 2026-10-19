@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path"
@@ -56,15 +57,32 @@ type upstream struct {
 // billing, no files) is reachable through it.
 var gatewayPaths = []string{"messages", "messages/count_tokens", "chat/completions", "completions", "responses", "models"}
 
-func gatewayPathAllowed(method, p string) bool {
-	p = strings.Trim(path.Clean("/"+p), "/")
+// gatewayPath is the path to forward, or "" when it is not one of a model's:
+// one of gatewayPaths, after an optional version ("v1/messages"), exactly.
+// The request to the upstream is built from what this returns, never from
+// what the cage sent: a "?" or "#" decoded from %3F/%23 once passed the check
+// and went out as a query, to any endpoint (audit F-19, 2026-10-19).
+func gatewayPath(method, p string) string {
+	if strings.ContainsAny(p, "?#%\\") || strings.Contains(p, "..") {
+		return ""
+	}
+	clean := strings.Trim(path.Clean("/"+p), "/")
+	if clean != strings.Trim(p, "/") {
+		return ""
+	}
+	rest := clean
+	if v, after, ok := strings.Cut(clean, "/"); ok && len(v) >= 2 && v[0] == 'v' && strings.Trim(v[1:], "0123456789") == "" {
+		rest = after
+	}
 	for _, a := range gatewayPaths {
-		if p == a || strings.HasSuffix(p, "/"+a) {
-			return method == http.MethodPost || (a == "models" && method == http.MethodGet)
+		if rest == a && (method == http.MethodPost || (a == "models" && method == http.MethodGet)) {
+			return clean
 		}
 	}
-	return false
+	return ""
 }
+
+func gatewayPathAllowed(method, p string) bool { return gatewayPath(method, p) != "" }
 
 // bearer is an upstream that takes its key as a bearer token: from the
 // agent's environment, or where the owner keeps it for pi (piProviderKey).
@@ -235,13 +253,35 @@ func (m *Manager) gateway(s *Session) http.HandlerFunc {
 			fail(w, http.StatusNotFound, fmt.Errorf("no model upstream %q here; there are %s", name, strings.Join(names, ", ")))
 			return
 		}
-		if !gatewayPathAllowed(r.Method, rest) {
+		// A sealed cage reaches its own model's provider and no other: every
+		// key the agent holds was reachable from code nobody vouches for
+		// (audit F-19).
+		if sealed {
+			if p := m.sealedProvider(s); p == "" || p != name {
+				fail(w, http.StatusForbidden, fmt.Errorf("a sealed cage reaches only its own model's provider (%s), not %q", orNone(p), name))
+				return
+			}
+		}
+		clean := gatewayPath(r.Method, rest)
+		if clean == "" {
 			fail(w, http.StatusForbidden, fmt.Errorf("the gateway forwards only a model's endpoints, not %s /%s", r.Method, rest))
 			return
 		}
-		target := strings.TrimRight(u.base, "/") + "/" + strings.TrimLeft(rest, "/")
+		target := strings.TrimRight(u.base, "/") + "/" + clean
+		// Of a query, only what a harness sends a model's endpoint: Claude
+		// Code's ?beta=true. Anything else is where a cage could reach further.
 		if r.URL.RawQuery != "" {
-			target += "?" + r.URL.RawQuery
+			q, err := url.ParseQuery(r.URL.RawQuery)
+			for k := range q {
+				if k != "beta" {
+					err = fmt.Errorf("%q", k)
+				}
+			}
+			if err != nil {
+				fail(w, http.StatusForbidden, fmt.Errorf("the gateway forwards no query but beta: %v", err))
+				return
+			}
+			target += "?" + q.Encode()
 		}
 		out, err := http.NewRequestWithContext(r.Context(), r.Method, target, io.LimitReader(r.Body, 64<<20))
 		if err != nil {
@@ -348,4 +388,50 @@ func (m *Manager) claudeLogin() (string, error) {
 		return "", errors.New("this machine's Claude login has run out and was not renewed: run claude on it once, or claude /login")
 	}
 	return token, err
+}
+
+// sealedProvider is the one upstream a sealed session's model is served by:
+// Anthropic for Claude Code, the provider its model names otherwise ("venice"
+// for "venice/…"), or for pi without one, the machine's --provider; "" when
+// it cannot be told.
+func (m *Manager) sealedProvider(s *Session) string {
+	s.mu.Lock()
+	model, harness := s.modelSet, "claude"
+	if model == "" {
+		model = s.model
+	}
+	if s.harness != nil {
+		harness = s.harness.Name()
+	}
+	s.mu.Unlock()
+	switch harness {
+	case "claude":
+		return "anthropic"
+	case "opencode":
+		if p, _, ok := strings.Cut(model, "/"); ok && p != "" {
+			return p
+		}
+		return "opencode"
+	}
+	if p, _, ok := strings.Cut(model, "/"); ok && p != "" {
+		return p
+	}
+	if h, ok := s.harness.(Pi); ok {
+		for i := 0; i+1 < len(h.Extra); i++ {
+			if h.Extra[i] == "--provider" {
+				return h.Extra[i+1]
+			}
+			if v, ok := strings.CutPrefix(h.Extra[i], "--provider="); ok {
+				return v
+			}
+		}
+	}
+	return ""
+}
+
+func orNone(s string) string {
+	if s == "" {
+		return "none known"
+	}
+	return s
 }
