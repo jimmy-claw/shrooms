@@ -573,7 +573,9 @@ Item {
             var twice = view.agentHosts[0]
             console.error("FLAKY stayed=" + stayed + " now=" + view.hostReachable(kept)
                           + " later=" + view.hostReachable(twice)
-                          + " forgotten=" + view.mergeHosts([{ name: "old", lastSeen: 1, sessions: [] }], [], Date.now()).length)
+                          + " forgotten=" + view.mergeHosts([{ name: "old", lastSeen: 1, sessions: [] }], [], Date.now()).length
+                          + " renamed=" + view.mergeHosts([{ name: "vpavlin-tuxedo", mesh: "", address: "local", lastSeen: Date.now(), sessions: [] }],
+                                                          [{ name: "laptop", mesh: "", address: "local", sessions: [] }], Date.now()).map(function(h) { return h.name }).join(","))
             top.findNone = false
             view.refreshAgents()
 

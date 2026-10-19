@@ -587,9 +587,15 @@ Item {
             names[h.name + "@" + h.mesh] = true
             out.push(h)
         }
+        // One machine answers on the local socket: a fresh answer there
+        // replaces one kept under another name, which a machine renamed
+        // leaves behind (the laptop as its hostname, offline beside its mesh
+        // name for a week, 2026-10-19).
+        var localNow = found.some(function(f) { return f.address === "local" })
         for (i = 0; i < (prev || []).length; i++) {
             var p = prev[i]
             if (names[p.name + "@" + p.mesh] || !(now - (p.lastSeen || 0) < forgetMs)) continue
+            if (localNow && p.address === "local") continue
             out.push(Object.assign({}, p, { missed: (p.missed || 0) + 1 }))
         }
         out.sort(function(a, b) { return a.name < b.name ? -1 : a.name > b.name ? 1 : 0 })
