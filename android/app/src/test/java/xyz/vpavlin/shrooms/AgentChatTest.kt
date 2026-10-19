@@ -457,5 +457,9 @@ class RolesTest {
         assertEquals(listOf("publishes to the LAN repos"), parseDuties(" publishes to the LAN repos \n\n"))
         val d = JSONObject("""{"skills":[{"name":"Basecamp apps"},{"name":"Android"}],"responsibilities":["publishes to the LAN repos"]}""")
         assertEquals("good at: Basecamp apps, Android; responsible for: publishes to the LAN repos", rolesNote(d))
+        // An old agent answers without them: not kept.
+        assertEquals(false, rolesKept(2, 1, JSONObject("""{"name":"shrooms"}""")))
+        assertEquals(true, rolesKept(2, 1, d))
+        assertEquals(true, rolesKept(0, 0, JSONObject("{}")))
     }
 }

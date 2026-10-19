@@ -1922,11 +1922,23 @@ Item {
     function setRolesOpenSession(skillsTxt, dutiesTxt) {
         if (!agentOpen) return false
         var body = { skills: parseSkills(skillsTxt), responsibilities: parseDuties(dutiesTxt) }
-        if (agentCall("agentPost", [agentOpen.address, "/v1/sessions/" + agentOpen.session + "/settings", JSON.stringify(body)]) === null) return false
+        var r = agentCall("agentPost", [agentOpen.address, "/v1/sessions/" + agentOpen.session + "/settings", JSON.stringify(body)])
+        if (r === null) return false
+        // An agent from before ADR-063 takes the settings and drops what it
+        // does not know: nothing comes back (laptop, 2026-10-19).
+        if (!rolesKept(body, r)) {
+            root.said = agentOpen.name + "'s agent is too old to keep skills: update it, then set them again"
+            root.saidBad = true
+            return false
+        }
         root.said = "what " + agentOpen.session + " is for is on its card now"
         root.saidBad = false
         refreshAgents()
         return true
+    }
+    function rolesKept(sent, got) {
+        return !!got && (!(sent.skills || []).length || (got.skills || []).length > 0)
+            && (!(sent.responsibilities || []).length || (got.responsibilities || []).length > 0)
     }
     function rolesNote(d, by) {
         var n = (d.skills || []).length

@@ -392,7 +392,8 @@ Item {
             view.setRolesOpenSession("Basecamp apps: QML views #Basecamp #qml\n\nAndroid\n", " publishes to the LAN repos \n\n")
             var rb = JSON.parse(top.lastPost)
             console.error("ROLES " + top.lastPostPath + " " + JSON.stringify(rb) + " back=" + JSON.stringify(view.skillsText(rb.skills))
-                          + " note=" + view.rolesNote(rb, "phone.office"))
+                          + " note=" + view.rolesNote(rb, "phone.office")
+                          + " old=" + view.rolesKept(rb, { name: "shrooms" }) + "/" + view.rolesKept(rb, rb) + "/" + view.rolesKept({ skills: [], responsibilities: [] }, {}))
             view.closeDialogs()
             // A turn the harness started itself: labelled by its source.
             var kept = view.agentEventsList

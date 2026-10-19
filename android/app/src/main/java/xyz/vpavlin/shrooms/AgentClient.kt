@@ -93,6 +93,11 @@ fun parseSkills(text: String): List<Skill> = text.lines().mapNotNull { raw ->
     if (name.isEmpty()) null else Skill(name, if (c > 0) line.substring(c + 1).trim() else "", tags)
 }
 
+/** Whether the agent kept what was sent: one from before skills answers without them. */
+fun rolesKept(skills: Int, duties: Int, got: JSONObject): Boolean =
+    (skills == 0 || (got.optJSONArray("skills")?.length() ?: 0) > 0) &&
+        (duties == 0 || (got.optJSONArray("responsibilities")?.length() ?: 0) > 0)
+
 fun parseDuties(text: String): List<String> = text.lines().map { it.trim() }.filter { it.isNotEmpty() }
 
 /** A sender a session refused files from, and what it tried to send. */
@@ -329,8 +334,12 @@ class AgentClient(private val address: String) {
     fun setRoles(session: String, skills: List<Skill>, responsibilities: List<String>) {
         val sk = org.json.JSONArray(skills.map { JSONObject().put("name", it.name).put("description", it.description)
             .put("tags", org.json.JSONArray(it.tags)) })
-        request("POST", "/v1/sessions/${enc(session)}/settings",
-            JSONObject().put("skills", sk).put("responsibilities", org.json.JSONArray(responsibilities)).toString())
+        val got = JSONObject(request("POST", "/v1/sessions/${enc(session)}/settings",
+            JSONObject().put("skills", sk).put("responsibilities", org.json.JSONArray(responsibilities)).toString()))
+        // An agent from before ADR-063 takes the settings and drops what it
+        // does not know: nothing comes back (laptop, 2026-10-19).
+        if (!rolesKept(skills.size, responsibilities.size, got))
+            throw IllegalStateException("this machine's agent is too old to keep skills: update it, then set them again")
     }
 
     /** A caged session's memory and CPUs, "" for the machine's: set on its cage where it is. */
