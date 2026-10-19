@@ -97,7 +97,7 @@ func (m *Manager) startCageProxy(s *Session, container string) error {
 		return err
 	}
 	m.proxies.ls[container] = l
-	srv := &http.Server{Handler: m.cageProxy(s), ReadHeaderTimeout: 10 * time.Second}
+	srv := &http.Server{Handler: m.cageProxy(s), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute, MaxHeaderBytes: 64 << 10}
 	go srv.Serve(l)
 	return nil
 }

@@ -25,7 +25,7 @@ func llmForwardMain(args []string) int {
 		return 2
 	}
 	h := llmForwarder(*sock)
-	srv := &http.Server{Addr: *listen, Handler: h, ReadHeaderTimeout: 30 * time.Second}
+	srv := &http.Server{Addr: *listen, Handler: h, ReadHeaderTimeout: 30 * time.Second, IdleTimeout: 2 * time.Minute, MaxHeaderBytes: 64 << 10}
 	if err := srv.ListenAndServe(); err != nil {
 		fmt.Fprintln(os.Stderr, "llm-forward:", err)
 		return 1

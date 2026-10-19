@@ -123,7 +123,8 @@ func (m *metricsServer) listen() {
 		}
 		m.ls[a] = l
 		m.log.Info("metrics up", "address", a)
-		go (&http.Server{Handler: m.handler(), ReadHeaderTimeout: 10 * time.Second}).Serve(l)
+		go (&http.Server{Handler: m.handler(), ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second,
+			WriteTimeout: 30 * time.Second, IdleTimeout: 2 * time.Minute, MaxHeaderBytes: 64 << 10}).Serve(l)
 	}
 }
 

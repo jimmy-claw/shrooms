@@ -236,7 +236,11 @@ func run() error {
 		peers, self := names.list()
 		json.NewEncoder(w).Encode(map[string]any{"peers": peers, "self": self})
 	})
-	srv := &http.Server{Handler: mux, ReadHeaderTimeout: 10 * time.Second, ConnContext: agent.MarkLocal}
+	// No Read or WriteTimeout: a session's events stream for as long as
+	// someone watches, and a blocking send waits up to 10 minutes. An idle
+	// connection and a header, though, are bounded (audit F-01).
+	srv := &http.Server{Handler: mux, ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute,
+		MaxHeaderBytes: 64 << 10, ConnContext: agent.MarkLocal}
 	var wg sync.WaitGroup
 	serve := func(ln net.Listener, what string) {
 		wg.Add(1)
