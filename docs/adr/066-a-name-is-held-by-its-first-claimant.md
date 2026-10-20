@@ -50,8 +50,11 @@ roster shows, so a claimed name would have been signed at the next renewal.
   holds would send both devices' traffic to whichever spoke last, and could
   take the first one's traffic down without holding the private key. Such an
   announce is refused, and so is one carrying this device's own key; the
-  first holder keeps the key until it is forgotten or revoked, and a
-  remembered copy cannot bring a duplicate back. This holds with or without
+  first holder keeps the key until it is forgotten or revoked. The same holds
+  for the roster remembered across a restart, which a version without this
+  check may have written with a duplicate in it: of the remembered entries
+  sharing a key, only the one that claimed it first comes back, and none
+  carrying this device's own key (the auditor's lab, 2026-10-20). This holds with or without
   an admin: an admin who signs a credential with another device's key is
   refused by every node all the same.
 

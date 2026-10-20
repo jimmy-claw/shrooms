@@ -132,6 +132,22 @@ func (m *Mesh) loadRememberedPeers(now time.Time) {
 	if len(stored) == 0 {
 		return
 	}
+	// One device per tunnel key (audit F-03): the remembered entry that has
+	// claimed a key longest keeps it, whatever order the file has them in,
+	// and none keeps this device's own. A roster written by a version that
+	// let a duplicate in held it, and the first restored used to win, which
+	// could be the thief's (the auditor, 2026-10-20).
+	keeps := map[string]string{} // WGPub -> DevicePub of the earliest claim
+	since := map[string]int64{}
+	for _, sp := range stored {
+		s := sp.Since
+		if s == 0 {
+			s = sp.Seen
+		}
+		if d, ok := keeps[sp.WGPub]; !ok || s < since[sp.WGPub] || s == since[sp.WGPub] && sp.DevicePub < d {
+			keeps[sp.WGPub], since[sp.WGPub] = sp.DevicePub, s
+		}
+	}
 	restored := 0
 	for _, sp := range stored {
 		dev, err := base64.StdEncoding.DecodeString(sp.DevicePub)
@@ -140,6 +156,11 @@ func (m *Mesh) loadRememberedPeers(now time.Time) {
 		}
 		wgRaw, err := base64.StdEncoding.DecodeString(sp.WGPub)
 		if err != nil || len(wgRaw) != 32 {
+			continue
+		}
+		if string(wgRaw) == string(m.st.Identity.WGPub[:]) || keeps[sp.WGPub] != sp.DevicePub {
+			m.log.Info("not remembering a peer with another device's tunnel key",
+				"peer", hex.EncodeToString(dev)[:16])
 			continue
 		}
 		var credRaw []byte
