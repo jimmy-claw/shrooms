@@ -35,3 +35,6 @@ e69496a4aeb51ebe61d0775ae9fefc76eee640f12317aa5174da67e5d4ec8fd6  android/arm64-
 3681d42a5ca834a8a0e187139cf282b642122870c14737a65bf5aa297d017cd8  android/liblogosdelivery.h
 
 f370aabc9e58c7b597983a95df9106d8c8ce4a98d241a2bf78e380957a5ed84f  deps-v1/liblogosdelivery-linux-arm64.tar.gz
+
+32a093e97ed99432c8cad0b0466d4c7309817a6738490710db7aaa7eb5aef34e  deps-v2/liblogosdelivery-linux-amd64.tar.gz
+0d47c3b1ef1098f80c4911679ab7955531874fac8451df1e3ad7e018a8af4a3e  deps-v2/liblogosdelivery-linux-arm64.tar.gz
