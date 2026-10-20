@@ -124,3 +124,21 @@ func TestOneAddressIsKeptPerDevice(t *testing.T) {
 		t.Fatalf("one device filled the list: %v", got)
 	}
 }
+
+// An invite offers this node's own address before any it heard, and a
+// revoked device's address goes (auditor, 2026-10-20).
+func TestOwnAddressIsKnownAndARevokedDevicesGoes(t *testing.T) {
+	st := newState(t)
+	now := time.Now()
+	st.NoteOwnBootPeer("/ip4/5.6.7.8/tcp/1/p2p/mine", now)
+	st.NoteBootPeerFrom("/ip4/1.2.3.4/tcp/1/p2p/theirs", "bad", now.Add(time.Second))
+	if got := st.OwnBootPeer(now.Add(time.Minute)); got != "/ip4/5.6.7.8/tcp/1/p2p/mine" {
+		t.Errorf("own address = %q", got)
+	}
+	if err := st.ForgetBootPeersFrom("bad"); err != nil {
+		t.Fatal(err)
+	}
+	if got := st.BootPeers(now.Add(time.Minute)); len(got) != 1 || got[0] != "/ip4/5.6.7.8/tcp/1/p2p/mine" {
+		t.Errorf("after revoking: %v", got)
+	}
+}

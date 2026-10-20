@@ -37,9 +37,10 @@ const BootPeerTTL = 30 * 24 * time.Hour
 type bootPeer struct {
 	Addr string    `json:"addr"`
 	Seen time.Time `json:"seen"`
-	// From is the device that published it, "" for this one: one address
-	// kept per device, so one member cannot fill the list with its own nodes
-	// (audit F-22, 2026-10-19).
+	// From is the device that published it, OwnBoot for this one, "" for an
+	// entry written before this was kept: one address kept per device, so
+	// one member cannot fill the list with its own nodes (audit F-22,
+	// 2026-10-19).
 	From string `json:"from,omitempty"`
 }
 
@@ -127,6 +128,59 @@ func (s *State) NoteBootPeerFrom(addr, from string, now time.Time) error {
 		f.Peers = f.Peers[:MaxBootPeers]
 	}
 	return s.writeBootPeers(f)
+}
+
+// OwnBoot is From for this node's own address.
+const OwnBoot = "self"
+
+// NoteOwnBootPeer records this node's own bootstrap address.
+func (s *State) NoteOwnBootPeer(addr string, now time.Time) error {
+	return s.NoteBootPeerFrom(addr, OwnBoot, now)
+}
+
+// OwnBootPeer is this node's own bootstrap address, if it has one that is not
+// stale: what an invite it mints offers first, being the one address it is
+// sure of. The freshest learned one is whichever member announces most often
+// (auditor, 2026-10-20).
+func (s *State) OwnBootPeer(now time.Time) string {
+	for _, p := range s.readBootPeers() {
+		if p.From == OwnBoot && now.Sub(p.Seen) < BootPeerTTL {
+			return p.Addr
+		}
+	}
+	return ""
+}
+
+// ForgetBootPeersFrom drops what a device published: it was revoked, and a
+// revoked device's node is no place to start from, nor to send a joiner.
+func (s *State) ForgetBootPeersFrom(from string) error {
+	if from == "" {
+		return nil
+	}
+	f := bootPeerFile{Peers: s.readBootPeers()}
+	kept := f.Peers[:0]
+	for _, p := range f.Peers {
+		if p.From != from {
+			kept = append(kept, p)
+		}
+	}
+	if len(kept) == len(f.Peers) {
+		return nil
+	}
+	f.Peers = kept
+	return s.writeBootPeers(f)
+}
+
+func (s *State) readBootPeers() []bootPeer {
+	raw, err := os.ReadFile(s.bootPeerPath())
+	if err != nil {
+		return nil
+	}
+	var f bootPeerFile
+	if json.Unmarshal(raw, &f) != nil {
+		return nil
+	}
+	return f.Peers
 }
 
 func (s *State) writeBootPeers(f bootPeerFile) error {

@@ -1321,6 +1321,12 @@ func (m *Mesh) applyRevocation(raw []byte, now time.Time) (bool, error) {
 		"device", hex.EncodeToString(r.DevicePub)[:16], "serial", r.Serial)
 	// Drop it now rather than waiting for its announce to lapse.
 	m.roster.Forget(r.DevicePub)
+	// And whatever bootstrap address it published: it would otherwise stay
+	// for a month, and could be the one an invite offers (auditor,
+	// 2026-10-20).
+	if err := m.st.ForgetBootPeersFrom(PeerInfo{DevicePub: r.DevicePub}.ID()); err != nil {
+		m.log.Debug("could not drop a revoked device's bootstrap address", "err", err)
+	}
 	m.requestResync()
 	// Pass it on. New to us means possibly new to a peer, and a node that
 	// was offline when the admin published learns it from whoever is up.
@@ -1634,7 +1640,7 @@ func (m *Mesh) announceWith(now time.Time, fresh bool) error {
 	// announces go out every 45 seconds and this is a file write.
 	if boot != "" && boot != m.lastBoot {
 		m.lastBoot = boot
-		if err := m.st.NoteBootPeer(boot, now); err != nil {
+		if err := m.st.NoteOwnBootPeer(boot, now); err != nil {
 			m.log.Debug("could not record our own bootstrap address", "err", err)
 		}
 	}

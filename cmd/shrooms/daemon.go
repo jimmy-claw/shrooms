@@ -117,8 +117,10 @@ func cmdDaemon(args []string) error {
 	// announce, but could offer a node that answers selectively. Order is the
 	// cheap defence.
 	//
-	// The preset still supplies its own when this is empty, so a node that has
-	// never met anybody behaves exactly as before.
+	// The library adds these to the preset's own fleet, never in place of it:
+	// with one learned address it dials seven, the learned one and the
+	// preset's six (this laptop's log, 2026-10-19, "Dialing multiple peers
+	// numOfPeers=7"). So a learned address cannot cut a node off the fleet.
 	entry := append([]string(nil), cfg.EntryNodes...)
 	if learned := st.BootPeers(time.Now()); len(learned) > 0 {
 		entry = append(entry, learned...)
@@ -1862,10 +1864,7 @@ func serveControl(ctx context.Context, log *slog.Logger, path string, instances 
 		if rt == nil || rt.st == nil {
 			return ""
 		}
-		if peers := rt.st.BootPeers(time.Now()); len(peers) > 0 {
-			return peers[0]
-		}
-		return ""
+		return inviteBoot(rt.st, cfg)
 	})
 
 	// The way a revocation reaches the bus. The admin key signs offline — that

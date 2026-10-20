@@ -1,6 +1,7 @@
 package mesh
 
 import (
+	"math/big"
 	"net/netip"
 	"strconv"
 	"strings"
@@ -121,45 +122,79 @@ func routable(a netip.Addr) bool {
 }
 
 // ValidBootAddr is whether a bootstrap address a peer published may be kept:
-// /ip4/<public address> or /dns4/<name>, then /tcp/<port>/p2p/<peer id>, and
-// nothing else. A member could otherwise point every restart at a loopback,
-// private or malformed address (audit F-22, 2026-10-19).
+// /ip4/<public address>/tcp/<port>/p2p/<peer id>, exactly the form bootAddr
+// publishes, and nothing else. A member could otherwise point every restart
+// at a loopback, private, reserved or malformed address (audit F-22,
+// 2026-10-19), and an entry the library cannot parse might cost the whole
+// list.
+//
+// No /dns4: no node of ours publishes one, and a name is checked only once
+// resolved: "127.0.0.1.nip.io" is loopback with a public-looking name
+// (auditor, 2026-10-20).
 func ValidBootAddr(a string) bool {
 	parts := strings.Split(a, "/")
-	if len(parts) != 7 || parts[0] != "" || parts[3] != "tcp" || parts[5] != "p2p" {
+	if len(parts) != 7 || parts[0] != "" || parts[1] != "ip4" || parts[3] != "tcp" || parts[5] != "p2p" {
 		return false
 	}
-	switch parts[1] {
-	case "ip4":
-		ip, err := netip.ParseAddr(parts[2])
-		if err != nil || !routable(ip) {
-			return false
-		}
-	case "dns4":
-		h := parts[2]
-		if h == "" || len(h) > 253 || strings.EqualFold(h, "localhost") || strings.HasSuffix(strings.ToLower(h), ".localhost") {
-			return false
-		}
-		for _, r := range h {
-			if !(r == '.' || r == '-' || r >= '0' && r <= '9' || r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z') {
-				return false
-			}
-		}
-	default:
+	ip, err := netip.ParseAddr(parts[2])
+	if err != nil || !ip.Is4() || !routable(ip) || reserved4(ip) {
 		return false
 	}
-	port, err := strconv.Atoi(parts[4])
-	if err != nil || port < 1 || port > 65535 {
+	if p := parts[4]; p == "" || p[0] == '0' {
 		return false
 	}
-	id := parts[6]
+	if port, err := strconv.ParseUint(parts[4], 10, 16); err != nil || port == 0 {
+		return false
+	}
+	return validPeerID(parts[6])
+}
+
+// reserved4 is the IPv4 space routable leaves in that is still not anybody's
+// public address: shared, documentation, benchmarking, protocol, relay,
+// future use and broadcast.
+func reserved4(a netip.Addr) bool {
+	for _, p := range reservedV4 {
+		if p.Contains(a) {
+			return true
+		}
+	}
+	return false
+}
+
+var reservedV4 = func() []netip.Prefix {
+	var out []netip.Prefix
+	for _, s := range []string{"0.0.0.0/8", "100.64.0.0/10", "192.0.0.0/24", "192.0.2.0/24",
+		"192.88.99.0/24", "198.18.0.0/15", "198.51.100.0/24", "203.0.113.0/24", "240.0.0.0/4"} {
+		out = append(out, netip.MustParsePrefix(s))
+	}
+	return out
+}()
+
+// validPeerID is a libp2p peer id: base58btc of a multihash, identity
+// (0x00) or sha2-256 (0x12), whose stated length is what follows.
+func validPeerID(id string) bool {
 	if len(id) < 32 || len(id) > 64 {
 		return false
 	}
+	n := new(big.Int)
 	for _, r := range id {
-		if !(r >= '0' && r <= '9' || r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z') {
+		d := strings.IndexRune(base58, r)
+		if d < 0 {
 			return false
 		}
+		n.Mul(n, big.NewInt(58)).Add(n, big.NewInt(int64(d)))
 	}
-	return true
+	b := n.Bytes()
+	for _, r := range id {
+		if r != '1' {
+			break
+		}
+		b = append([]byte{0}, b...) // a leading '1' is a leading zero byte
+	}
+	if len(b) < 2 || b[0] != 0x00 && b[0] != 0x12 {
+		return false
+	}
+	return int(b[1]) == len(b)-2 && (b[0] != 0x12 || b[1] == 32)
 }
+
+const base58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"

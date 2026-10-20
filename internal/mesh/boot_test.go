@@ -1,6 +1,7 @@
 package mesh
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -84,12 +85,14 @@ func TestBootstrapAddressesAreIPv4(t *testing.T) {
 }
 
 // What a peer publishes is kept only if it is a public, well-formed address
-// (audit F-22): no loopback, private or odd forms for every restart to dial.
+// (audit F-22): no loopback, private, reserved or odd forms for every restart
+// to dial, and no names, which say nothing until resolved.
 func TestOnlyWellFormedPublicBootAddressesAreKept(t *testing.T) {
 	id := "16Uiu2HAmQ9X2xDfPG3uL77V9piYDhjq14JhKCtcmNYsTMKNqrKCj"
 	for _, a := range []string{
-		"/ip4/203.0.113.7/tcp/60000/p2p/" + id,
-		"/dns4/node-01.do-ams3.logos.test.status.im/tcp/30303/p2p/" + id,
+		"/ip4/128.140.55.128/tcp/30304/p2p/16Uiu2HAmNQQC8L8T55KoLiCRD75bSDehn2evQ1vEEG8sqSkbk2uh",
+		"/ip4/8.8.8.8/tcp/60000/p2p/" + id,
+		"/ip4/8.8.8.8/tcp/60000/p2p/12D3KooWD3eckifWpRn9wQpMG9R9hX3sD158z7EqHWmweQAJU5SA",
 	} {
 		if !ValidBootAddr(a) {
 			t.Errorf("refused %s", a)
@@ -98,13 +101,23 @@ func TestOnlyWellFormedPublicBootAddressesAreKept(t *testing.T) {
 	for _, a := range []string{
 		"/ip4/127.0.0.1/tcp/60000/p2p/" + id,
 		"/ip4/192.168.1.2/tcp/60000/p2p/" + id,
-		"/ip4/203.0.113.7/tcp/0/p2p/" + id,
-		"/ip4/203.0.113.7/udp/60000/p2p/" + id,
-		"/dns4/localhost/tcp/60000/p2p/" + id,
-		"/dns4/a_b.example/tcp/60000/p2p/" + id,
+		"/ip4/255.255.255.255/tcp/60000/p2p/" + id,
+		"/ip4/100.64.0.1/tcp/60000/p2p/" + id,
+		"/ip4/198.18.0.1/tcp/60000/p2p/" + id,
+		"/ip4/192.0.2.1/tcp/60000/p2p/" + id,
+		"/ip4/203.0.113.7/tcp/60000/p2p/" + id,
+		"/ip4/240.0.0.1/tcp/60000/p2p/" + id,
+		"/ip4/8.8.8.8/tcp/0/p2p/" + id,
+		"/ip4/8.8.8.8/tcp/+123/p2p/" + id,
+		"/ip4/8.8.8.8/tcp/0123/p2p/" + id,
+		"/ip4/8.8.8.8/tcp/65536/p2p/" + id,
+		"/ip4/8.8.8.8/udp/60000/p2p/" + id,
+		"/dns4/node-01.do-ams3.logos.test.status.im/tcp/30303/p2p/" + id,
+		"/dns4/127.0.0.1.nip.io/tcp/60000/p2p/" + id,
 		"/ip6/2001:db8::1/tcp/60000/p2p/" + id,
-		"/ip4/203.0.113.7/tcp/60000/p2p/short",
-		"/ip4/203.0.113.7/tcp/60000/p2p/" + id + "/p2p-circuit",
+		"/ip4/8.8.8.8/tcp/60000/p2p/" + strings.Repeat("a", 40),
+		"/ip4/8.8.8.8/tcp/60000/p2p/" + id[:len(id)-1],
+		"/ip4/8.8.8.8/tcp/60000/p2p/" + id + "/p2p-circuit",
 	} {
 		if ValidBootAddr(a) {
 			t.Errorf("kept %s", a)

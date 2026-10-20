@@ -152,13 +152,18 @@ what the feature claimed and did not yet do.
 **Invite size.** A multiaddr with a peer ID is about 90 characters. Two or three
 fit comfortably in a QR that still scans on a phone; a dozen would not.
 
-**What a member may put in the list** (amended 2026-10-20, audit F-22). A
-learned address is kept only if it is well formed and public: `/ip4/<routable
-address>` or `/dns4/<name>`, then `/tcp/<port>/p2p/<peer id>`. Each publishing
-device keeps one entry, its latest, so one member cannot fill the six places
-with its own nodes. The learned list never replaces the preset's fleet: the
-library adds entry nodes to the preset's own (a node with one learned address
-dials seven).
+**What a member may put in the list** (amended 2026-10-20, audit F-22 and
+the auditor's follow-up). A learned address is kept only in the form a node of
+ours publishes: `/ip4/<public address>/tcp/<port>/p2p/<peer id>`, the address
+outside private, loopback and reserved space, the peer id a real multihash.
+No `/dns4`: a name says nothing until resolved (`127.0.0.1.nip.io`). Each
+publishing device keeps one entry, its latest, so one member cannot fill the
+six places with its own nodes, and a revoked device's goes when it is
+revoked. An invite offers the inviter's own address first, then a configured
+one, and a learned one only without either: the freshest learned is whichever
+member announces most often. The learned list never replaces the preset's
+fleet: the library adds entry nodes to the preset's own (a node with one
+learned address dials seven, laptop log 2026-10-19).
 
 ## Consequences
 
