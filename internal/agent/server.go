@@ -93,20 +93,30 @@ func Handler(log *slog.Logger, m *Manager, who Who) http.Handler {
 	mux.HandleFunc("POST /v1/tasks/{id}/answer", h.taskAnswer)
 	mux.HandleFunc("POST /v1/tasks/{id}/nudge", h.taskNudge)
 	mux.HandleFunc("POST /v1/tasks/{id}/cancel", h.taskCancel)
-	// A request from this machine's own mesh address is refused: any local
-	// user can make one, so it says nothing about who asks. This machine's
-	// user reaches the agent through its socket, as its own tools, its cages'
-	// proxy and Foray do (audit F-24, 2026-10-19).
+	// Only two kinds of caller are served: this machine's user, through the
+	// socket, and a device the mesh names. A request from this machine's own
+	// mesh address is refused: any local user can make one, so it says
+	// nothing about who asks; this machine's user reaches the agent through
+	// its socket, as its own tools, its cages' proxy and Foray do (audit F-24,
+	// 2026-10-19). So is one from an address no mesh names. It was served
+	// every session not kept to a mesh, the default, and a local process can
+	// make one: it binds loopback, or the machine's LAN or underlay address,
+	// and dials the agent's mesh address from there (auditor, 2026-10-19 and
+	// 2026-10-20). Refusing local addresses one at a time missed each next one.
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !overSocket(r) {
-			if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
-				// Loopback too, unless the mesh names it (only a test's does):
-				// a local process can bind ::1 or 127.0.0.1 and reach the
-				// agent's mesh address from it (auditor, 2026-10-19).
-				if a, err := netip.ParseAddr(host); err == nil && (m.isSelf(a.Unmap()) || a.Unmap().IsLoopback() && (who == nil || who(a.Unmap()) == "")) {
-					fail(w, http.StatusForbidden, errors.New("a request from this machine's own mesh address: on this machine, use the agent's socket ("+SocketPath()+")"))
-					return
-				}
+			host, _, err := net.SplitHostPort(r.RemoteAddr)
+			a, perr := netip.ParseAddr(host)
+			switch {
+			case err != nil || perr != nil:
+				fail(w, http.StatusForbidden, errors.New("a caller with no address"))
+				return
+			case m.isSelf(a.Unmap()) || a.Unmap().IsLoopback() && (who == nil || who(a.Unmap()) == ""):
+				fail(w, http.StatusForbidden, errors.New("a request from this machine: on this machine, use the agent's socket ("+SocketPath()+")"))
+				return
+			case who == nil || who(a.Unmap()) == "":
+				fail(w, http.StatusForbidden, errors.New("a caller that is not a device on this machine's meshes"))
+				return
 			}
 		}
 		mux.ServeHTTP(w, r)

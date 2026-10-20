@@ -129,9 +129,18 @@ func TestACallerIsHereOrOnAMesh(t *testing.T) {
 func TestTheAgentRefusesItsOwnMeshAddress(t *testing.T) {
 	m := newTestManager(t, t.TempDir())
 	m.Meshes = func() []MeshInfo { return []MeshInfo{{"office", netip.MustParseAddr("fd00::1")}} }
-	h := Handler(slog.New(slog.DiscardHandler), m, nil)
+	who := func(a netip.Addr) string {
+		if a == netip.MustParseAddr("fd00::7") {
+			return "phone.office"
+		}
+		return ""
+	}
+	h := Handler(slog.New(slog.DiscardHandler), m, who)
+	// The last two: an address no mesh names, as a local process gets by
+	// binding the machine's underlay or LAN address (auditor, 2026-10-20).
 	for from, want := range map[string]int{"[fd00::1]:4444": http.StatusForbidden, "[fd00::7]:4444": http.StatusOK,
-		"[::1]:4444": http.StatusForbidden, "[::ffff:127.0.0.1]:4444": http.StatusForbidden, "127.0.0.1:4444": http.StatusForbidden} {
+		"[::1]:4444": http.StatusForbidden, "[::ffff:127.0.0.1]:4444": http.StatusForbidden, "127.0.0.1:4444": http.StatusForbidden,
+		"[fd5e:ca9e:1::2]:4444": http.StatusForbidden, "192.168.1.20:4444": http.StatusForbidden} {
 		rec := httptest.NewRecorder()
 		req := httptest.NewRequest("GET", "/v1/sessions", nil)
 		req.RemoteAddr = from
