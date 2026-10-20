@@ -2107,8 +2107,8 @@ func (m *Mesh) handle(ev waku.Event) {
 	// address in our bootstrap list. That is the whole of the trust here: a
 	// member could still point us at a node that feeds selectively, which is
 	// why the configured addresses are never displaced by learned ones.
-	if a.Boot != "" {
-		if err := m.st.NoteBootPeer(a.Boot, now); err != nil {
+	if a.Boot != "" && ValidBootAddr(a.Boot) {
+		if err := m.st.NoteBootPeerFrom(a.Boot, peer.ID(), now); err != nil {
 			m.log.Debug("could not record a peer's bootstrap address", "err", err)
 		}
 	}

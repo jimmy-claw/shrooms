@@ -119,3 +119,47 @@ func routable(a netip.Addr) bool {
 	return a.IsValid() && a.Is4() && !a.IsPrivate() && !a.IsLoopback() &&
 		!a.IsLinkLocalUnicast() && !a.IsUnspecified() && !a.IsMulticast()
 }
+
+// ValidBootAddr is whether a bootstrap address a peer published may be kept:
+// /ip4/<public address> or /dns4/<name>, then /tcp/<port>/p2p/<peer id>, and
+// nothing else. A member could otherwise point every restart at a loopback,
+// private or malformed address (audit F-22, 2026-10-19).
+func ValidBootAddr(a string) bool {
+	parts := strings.Split(a, "/")
+	if len(parts) != 7 || parts[0] != "" || parts[3] != "tcp" || parts[5] != "p2p" {
+		return false
+	}
+	switch parts[1] {
+	case "ip4":
+		ip, err := netip.ParseAddr(parts[2])
+		if err != nil || !routable(ip) {
+			return false
+		}
+	case "dns4":
+		h := parts[2]
+		if h == "" || len(h) > 253 || strings.EqualFold(h, "localhost") || strings.HasSuffix(strings.ToLower(h), ".localhost") {
+			return false
+		}
+		for _, r := range h {
+			if !(r == '.' || r == '-' || r >= '0' && r <= '9' || r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z') {
+				return false
+			}
+		}
+	default:
+		return false
+	}
+	port, err := strconv.Atoi(parts[4])
+	if err != nil || port < 1 || port > 65535 {
+		return false
+	}
+	id := parts[6]
+	if len(id) < 32 || len(id) > 64 {
+		return false
+	}
+	for _, r := range id {
+		if !(r >= '0' && r <= '9' || r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z') {
+			return false
+		}
+	}
+	return true
+}

@@ -104,3 +104,23 @@ func TestACorruptFileIsNotFatal(t *testing.T) {
 		t.Errorf("could not recover from a corrupt file: %v", got)
 	}
 }
+
+// One address per publishing device (audit F-22): a member that keeps
+// announcing new nodes replaces its own entry and cannot push out the others'.
+func TestOneAddressIsKeptPerDevice(t *testing.T) {
+	st := newState(t)
+	now := time.Now()
+	if err := st.NoteBootPeerFrom("/ip4/5.6.7.8/tcp/1/p2p/honest", "good", now); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < MaxBootPeers+2; i++ {
+		addr := "/ip4/1.2.3.4/tcp/1/p2p/flood" + string(rune('a'+i))
+		if err := st.NoteBootPeerFrom(addr, "bad", now.Add(time.Duration(i+1)*time.Second)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got := st.BootPeers(now.Add(time.Minute))
+	if len(got) != 2 || got[1] != "/ip4/5.6.7.8/tcp/1/p2p/honest" {
+		t.Fatalf("one device filled the list: %v", got)
+	}
+}

@@ -82,3 +82,32 @@ func TestBootstrapAddressesAreIPv4(t *testing.T) {
 		}
 	}
 }
+
+// What a peer publishes is kept only if it is a public, well-formed address
+// (audit F-22): no loopback, private or odd forms for every restart to dial.
+func TestOnlyWellFormedPublicBootAddressesAreKept(t *testing.T) {
+	id := "16Uiu2HAmQ9X2xDfPG3uL77V9piYDhjq14JhKCtcmNYsTMKNqrKCj"
+	for _, a := range []string{
+		"/ip4/203.0.113.7/tcp/60000/p2p/" + id,
+		"/dns4/node-01.do-ams3.logos.test.status.im/tcp/30303/p2p/" + id,
+	} {
+		if !ValidBootAddr(a) {
+			t.Errorf("refused %s", a)
+		}
+	}
+	for _, a := range []string{
+		"/ip4/127.0.0.1/tcp/60000/p2p/" + id,
+		"/ip4/192.168.1.2/tcp/60000/p2p/" + id,
+		"/ip4/203.0.113.7/tcp/0/p2p/" + id,
+		"/ip4/203.0.113.7/udp/60000/p2p/" + id,
+		"/dns4/localhost/tcp/60000/p2p/" + id,
+		"/dns4/a_b.example/tcp/60000/p2p/" + id,
+		"/ip6/2001:db8::1/tcp/60000/p2p/" + id,
+		"/ip4/203.0.113.7/tcp/60000/p2p/short",
+		"/ip4/203.0.113.7/tcp/60000/p2p/" + id + "/p2p-circuit",
+	} {
+		if ValidBootAddr(a) {
+			t.Errorf("kept %s", a)
+		}
+	}
+}

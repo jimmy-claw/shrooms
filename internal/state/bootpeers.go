@@ -37,6 +37,10 @@ const BootPeerTTL = 30 * 24 * time.Hour
 type bootPeer struct {
 	Addr string    `json:"addr"`
 	Seen time.Time `json:"seen"`
+	// From is the device that published it, "" for this one: one address
+	// kept per device, so one member cannot fill the list with its own nodes
+	// (audit F-22, 2026-10-19).
+	From string `json:"from,omitempty"`
 }
 
 type bootPeerFile struct {
@@ -80,6 +84,12 @@ func (s *State) BootPeers(now time.Time) []string {
 // simply forgets, and a node that cannot read it starts from the configured
 // addresses, which is where every node started before this existed.
 func (s *State) NoteBootPeer(addr string, now time.Time) error {
+	return s.NoteBootPeerFrom(addr, "", now)
+}
+
+// NoteBootPeerFrom is NoteBootPeer for an address the device from published:
+// it replaces that device's earlier one.
+func (s *State) NoteBootPeerFrom(addr, from string, now time.Time) error {
 	if addr == "" {
 		return nil
 	}
@@ -92,10 +102,22 @@ func (s *State) NoteBootPeer(addr string, now time.Time) error {
 			// Refreshing the timestamp is the point: an address we keep seeing
 			// is one that keeps being true.
 			f.Peers[i].Seen = now
+			if f.Peers[i].From == "" {
+				f.Peers[i].From = from
+			}
 			return s.writeBootPeers(f)
 		}
 	}
-	f.Peers = append(f.Peers, bootPeer{Addr: addr, Seen: now})
+	if from != "" {
+		kept := f.Peers[:0]
+		for _, p := range f.Peers {
+			if p.From != from {
+				kept = append(kept, p)
+			}
+		}
+		f.Peers = kept
+	}
+	f.Peers = append(f.Peers, bootPeer{Addr: addr, Seen: now, From: from})
 
 	// Oldest out first when the list is full. A node republishes every 45
 	// seconds, so anything that has not been refreshed is the least likely to

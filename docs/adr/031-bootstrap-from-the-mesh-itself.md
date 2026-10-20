@@ -152,6 +152,14 @@ what the feature claimed and did not yet do.
 **Invite size.** A multiaddr with a peer ID is about 90 characters. Two or three
 fit comfortably in a QR that still scans on a phone; a dozen would not.
 
+**What a member may put in the list** (amended 2026-10-20, audit F-22). A
+learned address is kept only if it is well formed and public: `/ip4/<routable
+address>` or `/dns4/<name>`, then `/tcp/<port>/p2p/<peer id>`. Each publishing
+device keeps one entry, its latest, so one member cannot fill the six places
+with its own nodes. The learned list never replaces the preset's fleet: the
+library adds entry nodes to the preset's own (a node with one learned address
+dials seven).
+
 ## Consequences
 
 - A restart stops being the moment a node can lose its network.
