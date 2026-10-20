@@ -790,6 +790,9 @@ type peerStatus struct {
 	Seq       uint64   `json:"seq"`
 	LastSeen  string   `json:"last_seen"`
 	Online    bool     `json:"online"`
+	// Contested: another device holds the name this one claims, so it answers
+	// to DNSName, its name with the last group of its address (audit F-18).
+	Contested bool `json:"contested,omitempty"`
 
 	// Services are the names this peer says it publishes (ADR-023), empty
 	// unless that peer has been told to announce them. A claim about what it
@@ -1670,6 +1673,7 @@ func serveControl(ctx context.Context, log *slog.Logger, path string, instances 
 			// many meshes this device is on.
 			meshLabel := in.label
 			svc, bnd := m.Services(now), m.Bound(now)
+			holds := mesh.Holders(m.Roster().Peers())
 			for _, p := range m.Roster().Current(now) {
 				ps := peerStatus{
 					Services:  svc[p.ID()],
@@ -1686,6 +1690,10 @@ func serveControl(ctx context.Context, log *slog.Logger, path string, instances 
 					Relay:     p.Relay,
 					// Qualified: the only form the resolver answers.
 					DNSName: mesh.QualifiedDNSName(p.Name, meshLabel, cfg.HostsSuffix),
+				}
+				if !holds[p.ID()] {
+					ps.Contested = true
+					ps.DNSName = mesh.QualifiedDNSName(mesh.ContestedName(p), meshLabel, cfg.HostsSuffix)
 				}
 				if best, ok := m.BestPath(p.ID(), now); ok {
 					ps.RTTMs = best.RTT.Milliseconds()

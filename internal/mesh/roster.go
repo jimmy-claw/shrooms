@@ -44,6 +44,11 @@ type PeerInfo struct {
 	Seq       uint64
 	LastSeen  time.Time
 
+	// Since is when this key began claiming the name it has now. The earliest
+	// claimant holds a name (Holders), so it is kept across announces and
+	// restarts, and starts again on a rename.
+	Since time.Time
+
 	// Relay reports that this peer will forward for others.
 	Relay bool
 }
@@ -106,6 +111,10 @@ func (r *Roster) Apply(a *control.Announce, now time.Time) (PeerInfo, bool) {
 	}
 
 	prev, existed := r.peers[id]
+	p.Since = now
+	if existed && prev.Name == p.Name && !prev.Since.IsZero() {
+		p.Since = prev.Since
+	}
 	r.peers[id] = p
 
 	// A heartbeat that changes nothing must not trigger a data-plane update:
@@ -154,6 +163,9 @@ func (r *Roster) Restore(p PeerInfo) bool {
 		return false
 	}
 	p.Overlay = identity.OverlayAddr(r.nk, p.DevicePub)
+	if p.Since.IsZero() {
+		p.Since = p.LastSeen
+	}
 	r.peers[id] = p
 	return true
 }
@@ -181,20 +193,22 @@ func (r *Roster) Peers() []PeerInfo {
 // A device that changes identity — re-enrolled, re-installed, or given a
 // per-mesh identity by ADR-015 — announces under a key nothing has seen
 // before, and the entry for its old key stays until ForgetAfter drops it hours
-// later. Both are the same machine. The old one has no tunnel and never will,
-// so it sits in the roster as a peer that is permanently offline, and on a
-// device that has been re-added a few times the list is mostly ghosts.
+// later. The old one has no tunnel and never will, so on a device that has
+// been re-added a few times the list is mostly ghosts.
 //
-// So an entry is hidden when another entry claims the same name, was heard
-// from more recently, and this one has gone quiet. All three conditions
-// matter: two live machines that genuinely share a name are both still shown,
-// which is the case where hiding one would be a lie.
+// So an entry is hidden when it has gone quiet, another entry claims the same
+// name and was heard from more recently, and it does not hold the name. The
+// last is new (audit F-18, 2026-10-20): a ghost now holds its name until it
+// is forgotten or revoked, so it is shown, and so is the device that will
+// take the name after it. Hiding the holder hid a sleeping laptop behind a
+// member that claimed its name, which then had the hosts file to itself.
 //
 // Peers stays as it is — everything that reasons about membership, replay or
 // revocation must see every key that announced, and only the display wants
 // this.
 func (r *Roster) Current(now time.Time) []PeerInfo {
 	all := r.Peers()
+	holds := Holders(all)
 	freshest := map[string]time.Time{}
 	for _, p := range all {
 		if t, ok := freshest[sanitiseName(p.Name)]; !ok || p.LastSeen.After(t) {
@@ -203,10 +217,38 @@ func (r *Roster) Current(now time.Time) []PeerInfo {
 	}
 	out := all[:0:0]
 	for _, p := range all {
-		if !p.Online(now) && freshest[sanitiseName(p.Name)].After(p.LastSeen) {
+		if !p.Online(now) && !holds[p.ID()] && freshest[sanitiseName(p.Name)].After(p.LastSeen) {
 			continue
 		}
 		out = append(out, p)
+	}
+	return out
+}
+
+// Holders is which entries hold the name they claim (audit F-18): of the
+// keys claiming one, the one that has claimed it longest, online or not.
+// Names are self-asserted on a mesh with no admin, so the rule cannot be
+// "who is online": a member could wait for a laptop to sleep and be given
+// its ssh. Nor "who announced last", which a member wins by announcing more
+// often. A later claimant answers to its name and the last group of its
+// address until the holder is forgotten (ForgetAfter) or revoked. On a mesh
+// with an admin the name is the one its credential carries, so only the
+// admin can give two keys one name.
+func Holders(peers []PeerInfo) map[string]bool {
+	best := map[string]PeerInfo{}
+	for _, p := range peers {
+		n := sanitiseName(p.Name)
+		if n == "" {
+			continue
+		}
+		b, ok := best[n]
+		if !ok || p.Since.Before(b.Since) || p.Since.Equal(b.Since) && p.ID() < b.ID() {
+			best[n] = p
+		}
+	}
+	out := make(map[string]bool, len(best))
+	for _, p := range best {
+		out[p.ID()] = true
 	}
 	return out
 }

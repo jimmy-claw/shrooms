@@ -175,6 +175,13 @@ func (m *Mesh) loadRememberedPeers(now time.Time) {
 			LastSeen:  time.Unix(sp.Seen, 0),
 			Relay:     sp.Relay,
 		}
+		// The credential's name, as an announce would be given (checkMembership).
+		if probe.Name != "" {
+			p.Name = probe.Name
+		}
+		if sp.Since > 0 {
+			p.Since = time.Unix(sp.Since, 0)
+		}
 		if !m.roster.Restore(p) {
 			continue
 		}
@@ -221,6 +228,7 @@ func (m *Mesh) saveRememberedPeers() {
 			Endpoints:  p.Endpoints,
 			Seq:        p.Seq,
 			Seen:       p.LastSeen.Unix(),
+			Since:      p.Since.Unix(),
 			Relay:      p.Relay,
 			Credential: base64.StdEncoding.EncodeToString(m.creds[p.ID()]),
 		})

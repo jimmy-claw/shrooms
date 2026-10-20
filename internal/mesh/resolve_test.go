@@ -26,36 +26,71 @@ func TestResolveFindsPeerByName(t *testing.T) {
 	}
 }
 
-// Names are self-asserted, so two entries can claim one — and the ordinary way
-// that happens is one device that has changed identity, announcing under a new
-// key while the old entry lives out its ForgetAfter. The live one is the one
-// still announcing.
-func TestResolvePicksTheFreshestClaimant(t *testing.T) {
+// Names are self-asserted, so two entries can claim one. The name stays with
+// the key that has claimed it longest, online or not: one gone quiet is a
+// laptop asleep as often as a device that joined again, and "the one still
+// announcing" let a member wait for a laptop to sleep and take its ssh (audit
+// F-18, 2026-10-20). The later key answers to its fingerprint meanwhile.
+func TestANameStaysWithItsHolder(t *testing.T) {
 	nk, _ := identity.NewNetworkKey()
 	self, _ := identity.New()
-	old, _ := identity.New()
-	live, _ := identity.New()
-
-	m := &Mesh{roster: NewRoster(nk, self.DevicePub)}
+	holder, _ := identity.New()
+	later, _ := identity.New()
 	now := time.Now()
-	m.roster.Apply(newAnnounce(t, old, "box", nil, 1), now.Add(-2*time.Hour))
-	m.roster.Apply(newAnnounce(t, live, "box", nil, 1), now)
+	h, l := identity.OverlayAddr(nk, holder.DevicePub), identity.OverlayAddr(nk, later.DevicePub)
 
-	addr, ok := m.Resolve("box")
-	if !ok {
-		t.Fatal("a name claimed twice resolved to nothing")
+	// Order of arrival must not decide it.
+	for _, holderFirst := range []bool{true, false} {
+		m := &Mesh{roster: NewRoster(nk, self.DevicePub)}
+		apply := []func(){
+			func() { m.roster.Apply(newAnnounce(t, holder, "box", nil, 1), now.Add(-2*time.Hour)) },
+			func() { m.roster.Apply(newAnnounce(t, later, "box", nil, 1), now) },
+		}
+		if !holderFirst {
+			apply[0], apply[1] = apply[1], apply[0]
+		}
+		apply[0]()
+		apply[1]()
+		if addr, ok := m.Resolve("box"); !ok || addr != h {
+			t.Errorf("box resolved to %v, want the holder %v (holder first: %v)", addr, h, holderFirst)
+		}
+		if addr, ok := m.Resolve("box-" + lastGroup(l)); !ok || addr != l {
+			t.Errorf("the later claimant does not answer to its fingerprint: %v", addr)
+		}
+		// Revoked or forgotten, the name passes on.
+		m.roster.Forget(holder.DevicePub)
+		if addr, _ := m.Resolve("box"); addr != l {
+			t.Errorf("with the holder gone, box resolved to %v", addr)
+		}
 	}
-	if addr != identity.OverlayAddr(nk, live.DevicePub) {
-		t.Errorf("resolved to the stale entry: %v", addr)
-	}
+}
 
-	// Order of arrival must not decide it — the same two entries applied the
-	// other way round resolve the same.
-	m2 := &Mesh{roster: NewRoster(nk, self.DevicePub)}
-	m2.roster.Apply(newAnnounce(t, live, "box", nil, 1), now)
-	m2.roster.Apply(newAnnounce(t, old, "box", nil, 1), now.Add(-2*time.Hour))
-	if addr, _ := m2.Resolve("box"); addr != identity.OverlayAddr(nk, live.DevicePub) {
-		t.Errorf("resolution depends on insertion order: %v", addr)
+// A heartbeat keeps a claim; a rename starts a new one.
+func TestAClaimIsKeptAcrossAnnouncesAndRestarts(t *testing.T) {
+	nk, _ := identity.NewNetworkKey()
+	self, _ := identity.New()
+	holder, _ := identity.New()
+	later, _ := identity.New()
+	now := time.Now()
+	r := NewRoster(nk, self.DevicePub)
+	r.Apply(newAnnounce(t, holder, "box", nil, 1), now.Add(-time.Hour))
+	r.Apply(newAnnounce(t, later, "box", nil, 1), now.Add(-time.Minute))
+	r.Apply(newAnnounce(t, holder, "box", nil, 2), now)
+	if !Holders(r.Peers())[PeerInfo{DevicePub: holder.DevicePub}.ID()] {
+		t.Fatal("a heartbeat gave up the holder's claim")
+	}
+	// Remembered and restored, as on a restart: the claim's age comes back.
+	r2 := NewRoster(nk, self.DevicePub)
+	for _, p := range r.Peers() {
+		r2.Restore(p)
+	}
+	if !Holders(r2.Peers())[PeerInfo{DevicePub: holder.DevicePub}.ID()] {
+		t.Fatal("a restart gave the name to the later claimant")
+	}
+	r.Apply(newAnnounce(t, holder, "crate", nil, 3), now.Add(time.Second))
+	r.Apply(newAnnounce(t, holder, "box", nil, 4), now.Add(2*time.Second))
+	if Holders(r.Peers())[PeerInfo{DevicePub: holder.DevicePub}.ID()] {
+		t.Error("renaming away and back kept the old claim")
 	}
 }
 
@@ -228,10 +263,10 @@ func TestResolveQualifiedOnly(t *testing.T) {
 	}
 }
 
-// A name two online devices claim answers nothing, so a member cannot take
-// another's by announcing more often; each still answers to its name and the
-// last group of its address (audit F-18).
-func TestANameTwoOnlineDevicesClaimAnswersNothing(t *testing.T) {
+// Two online devices claiming one name: the one that claimed it first has it,
+// and the other its fingerprint, so a member can neither take a name nor
+// make it answer nothing (audit F-18).
+func TestANameTwoOnlineDevicesClaimStaysWithTheFirst(t *testing.T) {
 	nk, _ := identity.NewNetworkKey()
 	self, _ := identity.New()
 	a, _ := identity.New()
@@ -240,11 +275,12 @@ func TestANameTwoOnlineDevicesClaimAnswersNothing(t *testing.T) {
 	now := time.Now()
 	m.roster.Apply(newAnnounce(t, a, "laptop", nil, 1), now)
 	m.roster.Apply(newAnnounce(t, b, "laptop", nil, 1), now.Add(time.Second))
-	if addr, ok := m.Resolve("laptop"); ok {
-		t.Fatalf("an ambiguous name answered %v", addr)
+	m.roster.Apply(newAnnounce(t, b, "laptop", nil, 2), now.Add(2*time.Second))
+	aa, bb := identity.OverlayAddr(nk, a.DevicePub), identity.OverlayAddr(nk, b.DevicePub)
+	if got, ok := m.Resolve("laptop"); !ok || got != aa {
+		t.Fatalf("laptop: %v %v, want the first claimant", got, ok)
 	}
-	aa := identity.OverlayAddr(nk, a.DevicePub)
-	if got, ok := m.Resolve("laptop-" + lastGroup(aa)); !ok || got != aa {
-		t.Errorf("laptop-%s: %v %v", lastGroup(aa), got, ok)
+	if got, ok := m.Resolve("laptop-" + lastGroup(bb)); !ok || got != bb {
+		t.Errorf("laptop-%s: %v %v", lastGroup(bb), got, ok)
 	}
 }

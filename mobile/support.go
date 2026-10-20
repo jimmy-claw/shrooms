@@ -399,6 +399,7 @@ func snapshot(m *mesh.Mesh, suffix, label string) statusPayload {
 
 	stats, _ := m.PeerStats()
 	svc, bnd := m.Services(now), m.Bound(now)
+	holds := mesh.Holders(m.Roster().Peers())
 	for _, p := range m.Roster().Current(now) {
 		sp := statusPeer{
 			Services: svc[p.ID()],
@@ -412,6 +413,11 @@ func snapshot(m *mesh.Mesh, suffix, label string) statusPayload {
 			Overlay: p.Overlay.String(),
 			Online:  p.Online(now),
 			Relay:   p.Relay,
+		}
+		// Another device holds the name: this one answers to its name and the
+		// last group of its address, as the daemon reports it (audit F-18).
+		if !holds[p.ID()] {
+			sp.DNSName = mesh.QualifiedDNSName(mesh.ContestedName(p), label, suffix)
 		}
 		if st, ok := stats[p.WGPub.String()]; ok {
 			sp.Live = st.Live(now)

@@ -310,11 +310,11 @@ func TestDuplicateNamesKeepTheirOwnAliases(t *testing.T) {
 	}
 }
 
-// Who keeps a name claimed twice (audit F-18): the one online claimant over
-// one gone quiet; this device over anyone, in its own file.
+// Who keeps a name claimed twice (audit F-18): the one that holds it over a
+// later claimant, online or not; this device over anyone, in its own file.
 func TestANameClaimedTwiceGoesToNoImpostor(t *testing.T) {
 	got := Render([]Entry{
-		{Name: "box", Addr: "fd00::aaaa", Mesh: "home", Offline: true},
+		{Name: "box", Addr: "fd00::aaaa", Mesh: "home", Contested: true},
 		{Name: "box", Addr: "fd00::bbbb", Mesh: "home"},
 		{Name: "me", Addr: "fd00::cccc", Mesh: "home", Self: true},
 		{Name: "me", Addr: "fd00::1111", Mesh: "home"},

@@ -199,30 +199,42 @@ func TestForgetAfterOutlastsClockSkew(t *testing.T) {
 	}
 }
 
-// A device that changes identity leaves its old entry behind for hours. Both
-// are the same machine, the old one is unreachable, and on a device that has
-// been re-added a few times the roster is mostly ghosts.
+// A device that changes identity leaves its old entry behind for hours, and
+// on a device that has been re-added a few times the roster is mostly ghosts.
+// A ghost that does not hold its name is hidden; one that does is shown until
+// it is forgotten or revoked, beside the device that will take the name after
+// it (audit F-18): hiding a holder hid a sleeping laptop behind a member that
+// claimed its name.
 func TestCurrentHidesASupersededEntry(t *testing.T) {
 	nk, _ := identity.NewNetworkKey()
 	self, _ := identity.New()
-	old, _ := identity.New()
+	holder, _ := identity.New()
+	ghost, _ := identity.New()
 	live, _ := identity.New()
 	other, _ := identity.New()
 
 	r := NewRoster(nk, self.DevicePub)
 	now := time.Now()
-	r.Apply(newAnnounce(t, old, "k11", nil, 1), now.Add(-2*time.Hour))
+	r.Apply(newAnnounce(t, holder, "k11", nil, 1), now.Add(-3*time.Hour))
+	r.Apply(newAnnounce(t, ghost, "k11", nil, 1), now.Add(-2*time.Hour))
 	r.Apply(newAnnounce(t, live, "k11", nil, 1), now)
 	r.Apply(newAnnounce(t, other, "vps", nil, 1), now.Add(-2*time.Hour))
 
 	got := r.Current(now)
-	if len(got) != 2 {
-		t.Fatalf("roster shows %d peers, wanted 2", len(got))
+	if len(got) != 3 {
+		t.Fatalf("roster shows %d peers, wanted 3", len(got))
 	}
+	var sawHolder bool
 	for _, p := range got {
-		if p.ID() == hex.EncodeToString(old.DevicePub) {
+		switch p.ID() {
+		case hex.EncodeToString(ghost.DevicePub):
 			t.Error("the superseded entry is still shown")
+		case hex.EncodeToString(holder.DevicePub):
+			sawHolder = true
 		}
+	}
+	if !sawHolder {
+		t.Error("hid the entry that holds the name")
 	}
 
 	// An offline peer nothing has superseded stays: that one is a machine that

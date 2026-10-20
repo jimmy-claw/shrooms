@@ -58,7 +58,10 @@ type RosterPeer struct {
 	Endpoints []string `json:"endpoints,omitempty"`
 	Seq       uint64   `json:"seq"`
 	Seen      int64    `json:"seen"` // unix seconds, the real LastSeen
-	Relay     bool     `json:"relay,omitempty"`
+	// Since is when it began claiming its name (unix seconds): who holds a
+	// name contested by a later key must survive a restart (audit F-18).
+	Since int64 `json:"since,omitempty"`
+	Relay bool  `json:"relay,omitempty"`
 
 	// Credential is the wire form of the membership this peer announced, or
 	// empty on a mesh with no authority. Checked again on restore.

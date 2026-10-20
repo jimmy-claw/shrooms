@@ -890,6 +890,13 @@ func (m *Mesh) checkMembership(a *control.Announce, now time.Time) error {
 	if m.revoked.Revoked(c) {
 		return cred.ErrRevoked
 	}
+	// The name is the admin's, not the announce's: otherwise any member could
+	// claim another's, and the next renewal, which signs the names the roster
+	// shows, would sign it for them (audit F-18, 2026-10-20). Renaming a
+	// device on such a mesh is the admin issuing it a credential that says so.
+	if c.Name != "" {
+		a.Name = c.Name
+	}
 	m.mu.Lock()
 	if m.expiry == nil {
 		m.expiry = map[string]int64{}
@@ -2514,11 +2521,12 @@ func (m *Mesh) hostEntries() []hosts.Entry {
 		Name: m.cfg.Name, Addr: m.self.String(), AddrV4: m.aliasOf(m.self),
 		Mesh: m.cfg.MeshLabel, Self: true,
 	}}
-	now := time.Now()
-	for _, p := range m.roster.Peers() {
+	peers := m.roster.Peers()
+	holds := Holders(peers)
+	for _, p := range peers {
 		entries = append(entries, hosts.Entry{
 			Name: p.Name, Addr: p.Overlay.String(), AddrV4: m.aliasOf(p.Overlay),
-			Mesh: m.cfg.MeshLabel, Offline: !p.Online(now),
+			Mesh: m.cfg.MeshLabel, Contested: !holds[p.ID()],
 		})
 	}
 	return entries

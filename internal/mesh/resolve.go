@@ -3,7 +3,6 @@ package mesh
 import (
 	"net/netip"
 	"strings"
-	"time"
 
 	"github.com/vpavlin/shrooms/internal/v4"
 )
@@ -14,8 +13,8 @@ import (
 // file renders names, so what resolves is exactly what is written there —
 // otherwise a name would work in one and not the other.
 //
-// A name claimed by more than one peer resolves to the one heard from most
-// recently.
+// A name claimed by more than one peer resolves to the one that has held it
+// longest (resolveAmong); the history below is why it once did otherwise.
 //
 // This used to resolve to none of them, reasoning that names are self-asserted
 // (ADR-008) and picking one silently could send traffic to a machine the user
@@ -32,57 +31,52 @@ import (
 // machines share a name it is the one still running. The qualified
 // `<peer>.<mesh>` form and the address itself work regardless.
 func (m *Mesh) Resolve(host string) (netip.Addr, bool) {
-	return resolveAmong(m.roster.Peers(), host, time.Now())
+	return resolveAmong(m.roster.Peers(), host)
 }
 
 // resolveAmong answers a device name among peers.
 //
 // Names are self-asserted, so two devices may claim one. Answering the
 // freshest let a member take another's name, and with it its ssh and every
-// service named under it, by announcing more often (audit F-18,
-// 2026-10-19). So a name two online devices claim answers nothing. One
-// online claimant has it: a device that joined again under a new key leaves
-// its old entry offline behind it for hours. With none online, the freshest
-// as before. Every device also answers to its name and the last group of its
-// address ("box-dead"), as the hosts file writes a duplicate, unless that is
+// service named under it, by announcing more often; answering the one online
+// claimant let it wait for the other to sleep (audit F-18, 2026-10-19 and
+// 2026-10-20). So a name answers for the key that has held it longest
+// (Holders), online or not, until that key is forgotten or revoked. Every
+// device also answers to its name and the last group of its address
+// ("box-dead"), as the hosts file writes a later claimant, unless that is
 // claimed twice too.
-func resolveAmong(peers []PeerInfo, host string, now time.Time) (netip.Addr, bool) {
+//
+// The cost is a device that joined again under a new key: its name points at
+// the old, dead entry for up to ForgetAfter, unless the old key is revoked.
+func resolveAmong(peers []PeerInfo, host string) (netip.Addr, bool) {
 	want := sanitiseName(host)
 	if want == "" {
 		return netip.Addr{}, false
 	}
-	var online []netip.Addr
-	var freshest PeerInfo
+	holds := Holders(peers)
 	var fingerprinted []netip.Addr
 	for _, p := range peers {
 		name := sanitiseName(p.Name)
 		if name == "" {
 			continue
 		}
+		if name == want && holds[p.ID()] {
+			return p.Overlay, true
+		}
 		if name+"-"+lastGroup(p.Overlay) == want {
 			fingerprinted = append(fingerprinted, p.Overlay)
 		}
-		if name != want {
-			continue
-		}
-		if p.Online(now) {
-			online = append(online, p.Overlay)
-		}
-		if !freshest.Overlay.IsValid() || p.LastSeen.After(freshest.LastSeen) {
-			freshest = p
-		}
 	}
-	switch {
-	case len(online) == 1:
-		return online[0], true
-	case len(online) > 1:
-		return netip.Addr{}, false
-	case freshest.Overlay.IsValid():
-		return freshest.Overlay, true
-	case len(fingerprinted) == 1:
+	if len(fingerprinted) == 1 {
 		return fingerprinted[0], true
 	}
 	return netip.Addr{}, false
+}
+
+// ContestedName is the name a peer that does not hold its name answers to:
+// its name and the last group of its address, as the hosts file writes it.
+func ContestedName(p PeerInfo) string {
+	return sanitiseName(p.Name) + "-" + lastGroup(p.Overlay)
 }
 
 // lastGroup is the last group of an address, as internal/hosts disambiguates

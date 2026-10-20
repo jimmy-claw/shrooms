@@ -58,9 +58,10 @@ type Entry struct {
 	// The qualified name is kept because it is useful and shadows nothing.
 	Self bool
 
-	// Offline marks a peer that has not announced lately: it does not keep a
-	// name another, online, device claims too.
-	Offline bool
+	// Contested marks a peer claiming a name another device holds (the one
+	// that has claimed it longest, internal/mesh Holders): it is written with
+	// the last group of its address, never the plain name (audit F-18).
+	Contested bool
 }
 
 // Render builds the managed block.
@@ -103,10 +104,11 @@ func Render(entries []Entry, suffix string) string {
 	b.WriteString("# Regenerate with: logos-vpn hosts --write\n")
 
 	// Who keeps a plain name claimed more than once: this device, in its own
-	// file; else its one online claimant; two online claimants, nobody, and
-	// each is written with the last group of its address. A member that took
-	// a name by sorting first could take its ssh with it (audit F-18).
-	type claim struct{ self, online int }
+	// file; else the one claimant that holds it, online or not; if more than
+	// one says it does, nobody, and each is written with the last group of its
+	// address. A member that took a name by sorting first, or by being online
+	// while its holder slept, could take its ssh with it (audit F-18).
+	type claim struct{ self, holders int }
 	claims := map[string]*claim{}
 	for _, e := range sorted {
 		key := sanitise(e.Mesh) + "\x00" + sanitise(e.Name)
@@ -117,8 +119,8 @@ func Render(entries []Entry, suffix string) string {
 		}
 		if e.Self {
 			c.self++
-		} else if !e.Offline {
-			c.online++
+		} else if !e.Contested {
+			c.holders++
 		}
 	}
 	seen := map[string]bool{} // mesh+name, its plain name given out
@@ -133,10 +135,10 @@ func Render(entries []Entry, suffix string) string {
 		switch {
 		case c.self > 0:
 			plain = e.Self
-		case c.online > 1:
+		case c.holders > 1:
 			plain = false
-		case c.online == 1:
-			plain = !e.Offline
+		default:
+			plain = !e.Contested
 		}
 		if !plain {
 			if short := shortAddr(e.Addr); short != "" {

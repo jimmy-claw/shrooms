@@ -83,7 +83,7 @@ func hostsEntriesFrom(st statusPayload) []hosts.Entry {
 	}
 	for _, p := range st.Peers {
 		entries = append(entries, hosts.Entry{
-			Name: p.Name, Addr: p.Overlay, AddrV4: p.OverlayV4, Mesh: p.Mesh, Offline: !p.Online,
+			Name: p.Name, Addr: p.Overlay, AddrV4: p.OverlayV4, Mesh: p.Mesh, Contested: p.Contested,
 		})
 	}
 	return entries

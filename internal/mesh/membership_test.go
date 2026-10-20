@@ -147,3 +147,30 @@ func TestRevokeRefusesWhatThisMeshDidNotSign(t *testing.T) {
 		t.Error("a mesh with no admin keys accepted a revocation")
 	}
 }
+
+// On a mesh with an admin, a device is called what its credential says, not
+// what it announces: otherwise a member could claim another's name, and the
+// next renewal would sign it for them (audit F-18, 2026-10-20).
+func TestAnAdminMeshsNamesAreTheCredentials(t *testing.T) {
+	admin, _ := cred.NewAdmin()
+	auth, _ := cred.NewAuthority(admin.Pub)
+	id, _ := identity.New()
+	now := time.Now()
+	m := &Mesh{authority: auth}
+	c, err := admin.Issue(id.DevicePub, id.WGPub[:], "phone", 1, now, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.MeshID = auth.ID()
+	d, _ := c.Digest()
+	c.Sig = signWith(admin, d)
+	raw, _ := c.MarshalBinary()
+	a := announceFor(t, id, raw)
+	a.Name = "laptop"
+	if err := m.checkMembership(a, now); err != nil {
+		t.Fatal(err)
+	}
+	if a.Name != "phone" {
+		t.Errorf("a device announcing %q is called that, not its credential's name", a.Name)
+	}
+}
