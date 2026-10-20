@@ -402,6 +402,11 @@ func (a *Admin) Issue(devicePub, wgPub []byte, name string, serial uint64, now t
 		return nil, errors.New("a credential with no lifetime is already expired")
 	}
 
+	// The name is the device's on a mesh with an admin (ADR-066): without
+	// one it would fall back to whatever the device announces.
+	if name == "" {
+		return nil, errors.New("a credential names the device it admits: no name given")
+	}
 	c := &Credential{
 		MeshID:    MeshOf(a.Pub),
 		DevicePub: append([]byte(nil), devicePub...),

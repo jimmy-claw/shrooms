@@ -230,12 +230,14 @@ func run() error {
 	mux.Handle("/", agent.Handler(log, m, names.who))
 	// The mesh as this machine sees it, so a phone that knows one agent finds
 	// the rest without being told (the preview build has no peer list of its
-	// own). Names and mesh addresses only: what any member already sees.
-	mux.HandleFunc("GET /v1/peers", func(w http.ResponseWriter, r *http.Request) {
+	// own). Names and mesh addresses only: what any member already sees, and
+	// so behind the same gate, which only members and this machine's user
+	// pass (auditor, 2026-10-20).
+	mux.Handle("GET /v1/peers", agent.Gate(m, names.who, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		peers, self := names.list()
 		json.NewEncoder(w).Encode(map[string]any{"peers": peers, "self": self})
-	})
+	})))
 	// No Read or WriteTimeout: a session's events stream for as long as
 	// someone watches, and a blocking send waits up to 10 minutes. An idle
 	// connection and a header, though, are bounded (audit F-01).

@@ -62,6 +62,11 @@ func IssueWith(s Signer, devicePub, wgPub, sealPub []byte, name string, serial u
 	if s == nil {
 		return nil, errors.New("no signer")
 	}
+	// The name is the device's on a mesh with an admin (ADR-066): without
+	// one it would fall back to whatever the device announces.
+	if name == "" {
+		return nil, errors.New("a credential names the device it admits: no name given")
+	}
 	c := &Credential{
 		MeshID:    meshID,
 		DevicePub: append([]byte(nil), devicePub...),

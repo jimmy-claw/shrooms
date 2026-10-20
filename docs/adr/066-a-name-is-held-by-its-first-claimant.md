@@ -57,3 +57,18 @@ roster shows, so a claimed name would have been signed at the next renewal.
 - `Roster.Current` no longer hides an old entry that holds its name, so the
   lists show both until the old one goes.
 - A rename on a mesh with an admin waits for the admin.
+- **On a mesh without an admin, a name is only first come, first served.**
+  The auditor's re-check (2026-10-20) showed what is left there:
+  - A member can claim a name before the device that wants it joins.
+  - It can claim one while its device has been off long enough to be
+    forgotten, which a night can be, and keep it while it announces.
+  - Each node times claims by its own clock, so a member can make its claim
+    on some nodes and not others.
+
+  None of these can be closed without someone whose word on names counts, and
+  on such a mesh nobody's does: whoever holds the network key is a member as
+  good as any other (ADR-008). That is what an admin is for. A mesh whose
+  names matter should have one; home and office do, `default` does not.
+  Credentials always carry a name: every way of issuing one refuses an empty
+  name, so on a mesh with an admin a name never falls back to the announced
+  one.

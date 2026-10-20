@@ -103,6 +103,13 @@ func Handler(log *slog.Logger, m *Manager, who Who) http.Handler {
 	// make one: it binds loopback, or the machine's LAN or underlay address,
 	// and dials the agent's mesh address from there (auditor, 2026-10-19 and
 	// 2026-10-20). Refusing local addresses one at a time missed each next one.
+	return Gate(m, who, mux)
+}
+
+// Gate refuses every caller but this machine's user, over the socket, and a
+// device a mesh names (Handler); for what is served beside the Handler, such
+// as the agent's /v1/peers (auditor, 2026-10-20).
+func Gate(m *Manager, who Who, h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !overSocket(r) {
 			host, _, err := net.SplitHostPort(r.RemoteAddr)
@@ -119,7 +126,7 @@ func Handler(log *slog.Logger, m *Manager, who Who) http.Handler {
 				return
 			}
 		}
-		mux.ServeHTTP(w, r)
+		h.ServeHTTP(w, r)
 	})
 }
 

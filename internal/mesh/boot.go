@@ -164,7 +164,7 @@ func reserved4(a netip.Addr) bool {
 var reservedV4 = func() []netip.Prefix {
 	var out []netip.Prefix
 	for _, s := range []string{"0.0.0.0/8", "100.64.0.0/10", "192.0.0.0/24", "192.0.2.0/24",
-		"192.88.99.0/24", "198.18.0.0/15", "198.51.100.0/24", "203.0.113.0/24", "240.0.0.0/4"} {
+		"192.31.196.0/24", "192.52.193.0/24", "192.88.99.0/24", "192.175.48.0/24", "198.18.0.0/15", "198.51.100.0/24", "203.0.113.0/24", "240.0.0.0/4"} {
 		out = append(out, netip.MustParsePrefix(s))
 	}
 	return out
@@ -173,7 +173,7 @@ var reservedV4 = func() []netip.Prefix {
 // validPeerID is a libp2p peer id: base58btc of a multihash, identity
 // (0x00) or sha2-256 (0x12), whose stated length is what follows.
 func validPeerID(id string) bool {
-	if len(id) < 32 || len(id) > 64 {
+	if len(id) < 32 || len(id) > 128 { // an RSA key's identity hash is long
 		return false
 	}
 	n := new(big.Int)

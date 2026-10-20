@@ -34,6 +34,11 @@ func Draft(auth *Authority, devPub, wgPub, sealPub []byte, name string,
 	if serial == 0 {
 		serial = uint64(now.Unix())
 	}
+	// The name is the device's on a mesh with an admin (ADR-066): without
+	// one it would fall back to whatever the device announces.
+	if name == "" {
+		return nil, [32]byte{}, errors.New("a credential names the device it admits: no name given")
+	}
 	c := &Credential{
 		MeshID:    auth.ID(),
 		DevicePub: append([]byte(nil), devPub...),
