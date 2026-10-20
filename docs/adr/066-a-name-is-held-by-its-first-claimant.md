@@ -45,6 +45,15 @@ roster shows, so a claimed name would have been signed at the next renewal.
   - Renaming a device on such a mesh means the admin issuing it a credential
     with the new name.
 - **This device keeps its own name in its own hosts file**, as before.
+- **A tunnel key has one holder too** (audit F-03, 2026-10-20). One WireGuard
+  key is one data-plane peer, so a second device announcing a key another
+  holds would send both devices' traffic to whichever spoke last, and could
+  take the first one's traffic down without holding the private key. Such an
+  announce is refused, and so is one carrying this device's own key; the
+  first holder keeps the key until it is forgotten or revoked, and a
+  remembered copy cannot bring a duplicate back. This holds with or without
+  an admin: an admin who signs a credential with another device's key is
+  refused by every node all the same.
 
 ## Consequences
 

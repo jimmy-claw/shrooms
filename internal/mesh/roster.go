@@ -129,6 +129,24 @@ func (r *Roster) Apply(a *control.Announce, now time.Time) (PeerInfo, bool) {
 	return p, changed
 }
 
+// WGKeyHolder is the other device already holding a tunnel key, if any:
+// one key is one WireGuard peer, so a second device announcing it would have
+// the data plane send both devices' traffic to whichever endpoint spoke
+// last, and could take the first device's traffic down without ever holding
+// the key (audit F-03). The first holder keeps it until it is forgotten or
+// revoked, as with names (ADR-066).
+func (r *Roster) WGKeyHolder(devicePub []byte, wg identity.WGKey) (string, bool) {
+	id := hex.EncodeToString(devicePub)
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	for pid, p := range r.peers {
+		if pid != id && p.WGPub == wg {
+			return pid, true
+		}
+	}
+	return "", false
+}
+
 // Restore puts a remembered peer back without an announce to carry it.
 //
 // The timestamp is the one the peer actually had, not now. That is the whole
@@ -161,6 +179,11 @@ func (r *Roster) Restore(p PeerInfo) bool {
 	}
 	if _, exists := r.peers[id]; exists {
 		return false
+	}
+	for _, q := range r.peers {
+		if q.WGPub == p.WGPub {
+			return false // its key is another device's (WGKeyHolder)
+		}
 	}
 	p.Overlay = identity.OverlayAddr(r.nk, p.DevicePub)
 	if p.Since.IsZero() {

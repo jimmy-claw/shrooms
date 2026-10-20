@@ -267,3 +267,30 @@ func TestCurrentKeepsTwoLiveClaimants(t *testing.T) {
 		t.Errorf("roster shows %d peers, wanted both live claimants", len(got))
 	}
 }
+
+// One tunnel key, one device (audit F-03): a second device announcing a key
+// another holds is found, so the announce can be refused; the first keeps it
+// until it is forgotten, and a remembered copy cannot bring a duplicate back.
+func TestATunnelKeyHasOneHolder(t *testing.T) {
+	nk, _ := identity.NewNetworkKey()
+	self, _ := identity.New()
+	holder, _ := identity.New()
+	thief, _ := identity.New()
+	r := NewRoster(nk, self.DevicePub)
+	r.Apply(newAnnounce(t, holder, "lab-b", nil, 1), time.Now())
+
+	if id, ok := r.WGKeyHolder(thief.DevicePub, holder.WGPub); !ok || id != hex.EncodeToString(holder.DevicePub) {
+		t.Fatalf("another device's key was not found held: %q %v", id, ok)
+	}
+	if _, ok := r.WGKeyHolder(holder.DevicePub, holder.WGPub); ok {
+		t.Error("a device's own key counted as another's")
+	}
+	stolen := PeerInfo{DevicePub: thief.DevicePub, WGPub: holder.WGPub, Name: "aaa", LastSeen: time.Now()}
+	if r.Restore(stolen) {
+		t.Error("a remembered peer with another device's key was restored")
+	}
+	r.Forget(holder.DevicePub)
+	if _, ok := r.WGKeyHolder(thief.DevicePub, holder.WGPub); ok {
+		t.Error("a forgotten holder still holds its key")
+	}
+}

@@ -2080,6 +2080,21 @@ func (m *Mesh) handle(ev waku.Event) {
 		return
 	}
 
+	// A tunnel key another device holds, or ours: refused, the first holder
+	// keeps it (audit F-03, Roster.WGKeyHolder).
+	var wgKey identity.WGKey
+	copy(wgKey[:], a.WGPub)
+	if wgKey == m.st.Identity.WGPub {
+		m.log.Warn("refusing a peer announcing this device's tunnel key",
+			"peer", hex.EncodeToString(a.DevicePub)[:16])
+		return
+	}
+	if holder, ok := m.roster.WGKeyHolder(a.DevicePub, wgKey); ok {
+		m.log.Warn("refusing a peer announcing another device's tunnel key",
+			"peer", hex.EncodeToString(a.DevicePub)[:16], "holder", holder[:16])
+		return
+	}
+
 	if !m.guard.Accept(a) {
 		// Debug for the odd stale one — Store replays a few on every
 		// reconnect — and one warning once a device has been refused for
