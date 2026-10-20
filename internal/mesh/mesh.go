@@ -2082,9 +2082,11 @@ func (m *Mesh) handle(ev waku.Event) {
 
 	// A tunnel key another device holds, or ours: refused, the first holder
 	// keeps it (audit F-03, Roster.WGKeyHolder).
+	// Not for our own announce, which comes back to us from the bus and
+	// would read as a theft of our own key.
 	var wgKey identity.WGKey
 	copy(wgKey[:], a.WGPub)
-	if wgKey == m.st.Identity.WGPub {
+	if wgKey == m.st.Identity.WGPub && !bytes.Equal(a.DevicePub, m.st.Identity.DevicePub) {
 		m.log.Warn("refusing a peer announcing this device's tunnel key",
 			"peer", hex.EncodeToString(a.DevicePub)[:16])
 		return

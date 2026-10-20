@@ -148,7 +148,7 @@ func (m *Mesh) loadRememberedPeers(now time.Time) {
 			keeps[sp.WGPub], since[sp.WGPub] = sp.DevicePub, s
 		}
 	}
-	restored := 0
+	restored, dropped := 0, 0
 	for _, sp := range stored {
 		dev, err := base64.StdEncoding.DecodeString(sp.DevicePub)
 		if err != nil || len(dev) != ed25519.PublicKeySize {
@@ -161,6 +161,7 @@ func (m *Mesh) loadRememberedPeers(now time.Time) {
 		if string(wgRaw) == string(m.st.Identity.WGPub[:]) || keeps[sp.WGPub] != sp.DevicePub {
 			m.log.Info("not remembering a peer with another device's tunnel key",
 				"peer", hex.EncodeToString(dev)[:16])
+			dropped++
 			continue
 		}
 		var credRaw []byte
@@ -219,6 +220,12 @@ func (m *Mesh) loadRememberedPeers(now time.Time) {
 		}
 		m.mu.Unlock()
 		restored++
+	}
+	if dropped > 0 {
+		// Written back now, so the file agrees with the roster rather than
+		// carrying the dropped entry to be skipped on every start (the
+		// auditor, 2026-10-20).
+		m.saveRememberedPeers()
 	}
 	if restored > 0 {
 		// Evidence that peers exist, which is what lets Silent time a node

@@ -92,3 +92,28 @@ func TestOfTwoRememberedHoldersTheFirstClaimKeepsTheKey(t *testing.T) {
 		t.Fatalf("remembered %v, want only the first holder, lab-b", got)
 	}
 }
+
+// A dropped duplicate is dropped from the file too, not skipped on every
+// start.
+func TestADroppedDuplicateLeavesTheFile(t *testing.T) {
+	dir := t.TempDir()
+	nk, _ := identity.NewNetworkKey()
+	admin, _ := cred.NewAdmin()
+	auth, _ := cred.NewAuthority(admin.Pub)
+	now := time.Now()
+	first := rememberingMesh(t, dir, auth, nk)
+	selfWG := first.st.Identity.WGPub
+	thief, _ := identity.New()
+	a := newAnnounce(t, thief, "thief", nil, 1)
+	a.WGPub = append([]byte(nil), selfWG[:]...)
+	a.Credential = credentialled(t, admin, auth, thief, selfWG[:], "thief", now)
+	first.checkMembership(a, now)
+	first.roster.Apply(a, now)
+	first.saveRememberedPeers()
+
+	second := rememberingMesh(t, dir, auth, nk)
+	second.loadRememberedPeers(now)
+	if left := second.st.RosterPeers(second.networkID, now); len(left) != 0 {
+		t.Errorf("the file still holds %d dropped entries", len(left))
+	}
+}
