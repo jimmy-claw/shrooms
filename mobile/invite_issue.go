@@ -69,12 +69,11 @@ func InviteURI(token, configDir string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	_, stateDir := paths(configDir)
+	cfgPath, stateDir := paths(configDir)
 	boot := ""
 	if st := liveState(stateDir); st != nil {
-		if peers := st.BootPeers(time.Now()); len(peers) > 0 {
-			boot = peers[0]
-		}
+		// Its own address first, not the freshest heard (state.InviteBootPeer).
+		boot = st.InviteBootPeer(fleetFor(cfgPath).EntryNodes, time.Now())
 	}
 	return s.URIWithBoot(boot), nil
 }

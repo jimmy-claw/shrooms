@@ -151,6 +151,25 @@ func (s *State) OwnBootPeer(now time.Time) string {
 	return ""
 }
 
+// InviteBootPeer is the bootstrap address an invite this node mints offers:
+// its own, the one it is sure of; then one its operator configured; only then
+// the freshest it heard. Not the freshest first: that is whichever member
+// announces most often, and so the one a member could make every invite carry
+// (auditor, 2026-10-20). The joiner adds it to the preset's fleet, never in
+// place of it, so a learned one is an extra place to start, not the only one.
+func (s *State) InviteBootPeer(configured []string, now time.Time) string {
+	if own := s.OwnBootPeer(now); own != "" {
+		return own
+	}
+	if len(configured) > 0 {
+		return configured[0]
+	}
+	if peers := s.BootPeers(now); len(peers) > 0 {
+		return peers[0]
+	}
+	return ""
+}
+
 // ForgetBootPeersFrom drops what a device published: it was revoked, and a
 // revoked device's node is no place to start from, nor to send a joiner.
 func (s *State) ForgetBootPeersFrom(from string) error {

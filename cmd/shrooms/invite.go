@@ -817,12 +817,7 @@ func perMeshRequest(st *state.State, r *invite.Response, name string) (*invite.R
 
 // inviteBootAddr picks the bootstrap address to put in an invite.
 //
-// This node's own published address first, the one it is sure of; then one
-// its operator configured; only then the freshest it heard. Not the freshest
-// first: that is whichever member announces most often, and so the one a
-// member could make every invite carry (auditor, 2026-10-20). The joiner adds
-// it to the preset's fleet, never in place of it, so a learned one is an
-// extra place to start, not the only one.
+// Which one is state.InviteBootPeer's: this node's own first.
 //
 // Read from the state directory rather than asked of the daemon: the CLI
 // cannot build a multiaddr for itself, because the peer id needs a running
@@ -839,17 +834,7 @@ func inviteBootAddr(cfg state.Config, stateDir string) string {
 }
 
 func inviteBoot(st *state.State, cfg state.Config) string {
-	now := time.Now()
-	if own := st.OwnBootPeer(now); own != "" {
-		return own
-	}
-	if len(cfg.EntryNodes) > 0 {
-		return cfg.EntryNodes[0]
-	}
-	if peers := st.BootPeers(now); len(peers) > 0 {
-		return peers[0]
-	}
-	return ""
+	return st.InviteBootPeer(cfg.EntryNodes, time.Now())
 }
 
 // splitList turns a comma-separated flag into a slice, ignoring empties so that
