@@ -80,7 +80,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/big"
 	"runtime/cgo"
+	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -314,7 +317,60 @@ func (n *Node) PeersInMesh(pubsubTopic string) (string, error) {
 
 // PeerID returns this node's libp2p peer id.
 func (n *Node) PeerID() (string, error) {
-	return call("peer_id", func(ud C.uintptr_t) C.int { return C.bridge_my_peerid(n.ctx, ud) })
+	s, err := call("peer_id", func(ud C.uintptr_t) C.int { return C.bridge_my_peerid(n.ctx, ud) })
+	if err != nil {
+		return "", err
+	}
+	return peerIDText(s)
+}
+
+// peerIDText is the peer id as libp2p writes it. The library built from
+// source at the pin answers with the PeerId object's Nim repr,
+// "(data: @[0, 37, 8, 2, …])", where Basecamp's build answered "16Uiu2…": the
+// bytes are the multihash, and the text is their base58 (2026-10-20, found
+// when the two-node test got an empty id on deps-v2; pi5's arm64 build had
+// done it since 2026-09-18). Either form comes back as the text.
+func peerIDText(s string) (string, error) {
+	s = strings.TrimSpace(s)
+	const pre = "(data: @["
+	if !strings.HasPrefix(s, pre) {
+		return s, nil
+	}
+	body, ok := strings.CutSuffix(strings.TrimPrefix(s, pre), "])")
+	if !ok {
+		return "", fmt.Errorf("unreadable peer id %.60q", s)
+	}
+	var b []byte
+	for _, f := range strings.Split(body, ",") {
+		v, err := strconv.ParseUint(strings.TrimSpace(f), 10, 8)
+		if err != nil {
+			return "", fmt.Errorf("unreadable peer id %.60q", s)
+		}
+		b = append(b, byte(v))
+	}
+	return base58(b), nil
+}
+
+// base58 is Bitcoin's alphabet, the one libp2p peer ids use.
+func base58(b []byte) string {
+	const alphabet = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
+	n := new(big.Int).SetBytes(b)
+	var out []byte
+	mod, base := new(big.Int), big.NewInt(58)
+	for n.Sign() > 0 {
+		n.DivMod(n, base, mod)
+		out = append(out, alphabet[mod.Int64()])
+	}
+	for _, c := range b {
+		if c != 0 {
+			break
+		}
+		out = append(out, '1')
+	}
+	for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
+		out[i], out[j] = out[j], out[i]
+	}
+	return string(out)
 }
 
 // Events returns the channel asynchronous events are delivered on.
