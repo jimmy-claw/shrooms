@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1
 # Build liblogosdelivery from source in a controlled environment.
 #
 # Building on a current host (Ubuntu 25.10, git 2.51) fails two ways, neither in
@@ -72,9 +73,29 @@ RUN set -eux; \
     #    after an API change. A pattern tied to the argument list matched one
     #    of the three and silently skipped the others — which is how this
     #    reached CI. `waitFor node.publish` is the part that is actually wrong.
-    sed -i 's|waitFor node\.publish|await node.publish|g' \
-        logos_delivery/waku/rest_api/endpoint/relay/handlers.nim; \
-    ! grep -rq 'waitFor node.publish' logos_delivery/waku/rest_api/endpoint/relay/
+    #    Where that file still is: master moved the REST API elsewhere, and a
+    #    sed on a path that is gone was what failed the nightly build of
+    #    master on 2026-10-20 (it has never passed since it began on
+    #    2026-10-05). The check covers the whole tree, wherever it lives now.
+    f=logos_delivery/waku/rest_api/endpoint/relay/handlers.nim; \
+    if [ -f "$f" ]; then sed -i 's|waitFor node\.publish|await node.publish|g' "$f"; fi; \
+    ! grep -rq 'waitFor node.publish' logos_delivery/
+
+# A Core node relays only the shards it is configured for. The pinned tree
+# subscribed relay to every shard of the cluster at start, whatever `shards`
+# said, so the VPS carried the whole network: 356 GB in a day, 80% of it
+# another application's shard (2026-10-20). Upstream fixed it in 7253a291
+# (#4513, 2026-10-15), not in a release yet; this is the same change against
+# this revision, where upstream's does not apply as it stands. Delete it when
+# the pin passes 7253a291. Unset, `shards` is every shard, as before.
+COPY docker/patches/ /patches/
+# Applied only where the fix is absent: the nightly job builds upstream master
+# with this file, and master has it already. Verified by outcome either way.
+RUN set -eux; \
+    if grep -q 'subscribeAllAutoshards()' logos_delivery/waku/waku.nim; then \
+        git apply /patches/0001-subscribe-only-configured-shards.patch; \
+    fi; \
+    ! grep -rq 'subscribeAllAutoshards()' logos_delivery/waku/
 
 # The Makefile bootstraps its own pinned nim/nimble via install-nim/install-nimble.
 # Build serially: with -j, a real error surfaces as a 14000-line bogus
@@ -146,7 +167,20 @@ COPY docker/build-lib-nimblefree.sh /src/docker/build-lib-nimblefree.sh
 # now makes. Copying them again would just drift again.
 #
 # The pinned path runs exactly the commands it ran before.
-RUN cd /src \
+#
+# A GitHub token, when the build is given one (--secret id=github_token): this
+# step clones ~50 repositories, and GitHub refuses a burst of anonymous clones
+# from one address, the last 8 every time (2026-10-20). It is a BuildKit secret,
+# mounted for this step only, so it is in no layer and no log; and it only
+# authenticates, it changes nothing about what is fetched, which nimble.lock
+# pins by commit. Without one the build runs as before.
+RUN --mount=type=secret,id=github_token,required=false \
+    cd /src \
+    && if [ -s /run/secrets/github_token ]; then \
+           export GIT_CONFIG_COUNT=1 \
+                  GIT_CONFIG_KEY_0="http.https://github.com/.extraheader" \
+                  GIT_CONFIG_VALUE_0="Authorization: Basic $(printf 'x-access-token:%s' "$(cat /run/secrets/github_token)" | base64 -w0)"; \
+       fi \
     && if grep -q '^install-nim:' Makefile; then \
            make install-nim \
            && make librln \

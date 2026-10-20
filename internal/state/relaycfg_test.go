@@ -130,3 +130,26 @@ func TestEntryNodesWithoutPresetIsValid(t *testing.T) {
 		t.Error("no preset and no entry_nodes was accepted — the node has nowhere to bootstrap")
 	}
 }
+
+// A Core node relays only its mesh's shard unless told otherwise, and the
+// setting that brings the old behaviour back survives a rewrite (ADR-067).
+func TestRelayAllShardsIsOffAndRoundTrips(t *testing.T) {
+	if DefaultConfig().RelayAllShards {
+		t.Fatal("a Core node relays every shard by default")
+	}
+	in := DefaultConfig()
+	in.NetworkKey = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+	in.Name = "node"
+	in.RelayAllShards = true
+	path := t.TempDir() + "/config.toml"
+	if err := WriteConfig(path, in); err != nil {
+		t.Fatal(err)
+	}
+	out, err := LoadConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !out.RelayAllShards {
+		t.Error("relay_all_shards lost in the round trip")
+	}
+}

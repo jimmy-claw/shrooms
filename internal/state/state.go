@@ -248,6 +248,12 @@ type Config struct {
 	// decision rather than a surprise.
 	Mode string
 
+	// RelayAllShards makes a Core node relay every shard of the cluster, as
+	// it did before 2026-10-20. Off, it relays the one shard this mesh's
+	// topics use and nothing else: the VPS carried 356 GB in a day, 80% of it
+	// another application's shard it had no use for (ADR-067).
+	RelayAllShards bool
+
 	// Relay makes this node forward traffic for peers that cannot reach each
 	// other directly. Only useful on a node with a reachable address.
 	Relay bool
@@ -1033,6 +1039,8 @@ func parseConfig(text string) (Config, error) {
 			c.AdminKeys = parseArray(val)
 		case "relay":
 			c.Relay = unquote(val) == "true"
+		case "relay_all_shards":
+			c.RelayAllShards = unquote(val) == "true"
 		case "relay_addr":
 			c.RelayAddr = unquote(val)
 		case "relay_token":
@@ -1189,6 +1197,10 @@ func RenderConfig(c Config) (string, error) {
 	if c.Relay {
 		b.WriteString("\n# This node forwards traffic for peers that cannot reach each other.\n")
 		b.WriteString("relay = \"true\"\n")
+	}
+	if c.RelayAllShards {
+		b.WriteString("\n# A Core node relays every shard of the network, not only this mesh's.\n")
+		b.WriteString("relay_all_shards = \"true\"\n")
 	}
 	if c.RelayAddr != "" {
 		b.WriteString("\n# Pins a relay that is a member of this mesh, overriding discovery. Not\n")

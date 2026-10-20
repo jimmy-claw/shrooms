@@ -132,6 +132,10 @@ func PubsubTopic(clusterID uint16, application, version string, numShards uint64
 	return fmt.Sprintf("/waku/2/rs/%d/%d", clusterID, Shard(application, version, numShards))
 }
 
+// MeshShard is the shard every topic of the mesh routes to: what a Core node
+// relays when it relays only its own (ADR-067).
+func MeshShard(numShards uint64) uint64 { return Shard(Application, Version, numShards) }
+
 // MeshPubsubTopic returns the pubsub topic every rendezvous topic of this mesh
 // routes to, for the given cluster. Constant across epochs by construction.
 func MeshPubsubTopic(clusterID uint16, numShards uint64) string {

@@ -31,6 +31,7 @@ import (
 	"github.com/vpavlin/shrooms/internal/mesh"
 	"github.com/vpavlin/shrooms/internal/rendezvous"
 	"github.com/vpavlin/shrooms/internal/state"
+	"github.com/vpavlin/shrooms/internal/topic"
 	"github.com/vpavlin/shrooms/internal/v4"
 	"github.com/vpavlin/shrooms/internal/waku"
 	"github.com/vpavlin/shrooms/internal/wg"
@@ -109,6 +110,12 @@ func cmdDaemon(args []string) error {
 	}
 	if cfg.Preset != "" {
 		nodeCfg["preset"] = cfg.Preset
+	}
+	// A Core node relays this mesh's shard only, unless told to relay them
+	// all (ADR-067). The library relayed every shard whatever this said until
+	// the patch in docker/build-lib.Dockerfile; an Edge node relays nothing.
+	if cfg.Mode == state.ModeCore && !cfg.RelayAllShards {
+		nodeCfg["shards"] = []uint64{topic.MeshShard(topic.NumShardsLogosDev)}
 	}
 	// Configured addresses first, then ones peers published (ADR-031).
 	//

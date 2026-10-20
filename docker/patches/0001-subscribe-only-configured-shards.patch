@@ -1,0 +1,45 @@
+diff --git a/logos_delivery/waku/node/subscription_manager.nim b/logos_delivery/waku/node/subscription_manager.nim
+index 2c18a7b5..7355d047 100644
+--- a/logos_delivery/waku/node/subscription_manager.nim
++++ b/logos_delivery/waku/node/subscription_manager.nim
+@@ -273,18 +273,16 @@ proc isSubscribed*(
+   let shard = ?self.getShardForContentTopic(topic)
+   return ok(self.isContentSubscribed(shard, topic))
+ 
+-proc subscribeAllAutoshards*(self: SubscriptionManager): Result[void, string] =
+-  ## Subscribes the relay to every shard in the configured autosharding cluster.
++proc subscribeAutoshards*(
++    self: SubscriptionManager, shards: openArray[uint16]
++): Result[void, string] =
++  ## Subscribes the relay to the given shards of the autosharding cluster.
+   if self.node.wakuRelay.isNil() or self.node.wakuAutoSharding.isNone():
+     return ok()
+ 
+-  let autoSharding = self.node.wakuAutoSharding.get()
+-  let numShards = autoSharding.shardCountGenZero
+-  if numShards == 0:
+-    return ok()
+-
+-  for i in 0'u32 ..< numShards:
+-    let shardObj = RelayShard(clusterId: autoSharding.clusterId, shardId: uint16(i))
++  let clusterId = self.node.wakuAutoSharding.get().clusterId
++  for shardId in shards:
++    let shardObj = RelayShard(clusterId: clusterId, shardId: shardId)
+     self.subscribeShard(PubsubTopic($shardObj)).isOkOr:
+       error "failed to auto-subscribe relay to cluster shard",
+         shard = $shardObj, error = error
+diff --git a/logos_delivery/waku/waku.nim b/logos_delivery/waku/waku.nim
+index 29290483..8b20639a 100644
+--- a/logos_delivery/waku/waku.nim
++++ b/logos_delivery/waku/waku.nim
+@@ -433,8 +433,8 @@ proc start*(waku: Waku): Future[Result[void, string]] {.async: (raises: []).} =
+   except CatchableError:
+     return err("Caught exception in start: " & getCurrentExceptionMsg())
+ 
+-  waku.node.subscriptionManager.subscribeAllAutoshards().isOkOr:
+-    return err("failed to auto-subscribe autosharding shards: " & $error)
++  waku.node.subscriptionManager.subscribeAutoshards(waku.conf.subscribeShards).isOkOr:
++    return err("failed to subscribe to the configured shards: " & $error)
+ 
+   ## Health Monitor
+   waku.healthMonitor.startHealthMonitor().isOkOr:

@@ -1,6 +1,7 @@
 package topic
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -150,5 +151,16 @@ func TestSamePrefixRejectsMalformed(t *testing.T) {
 		if SamePrefix(s, Derive(mustNK(t), 1)) {
 			t.Errorf("SamePrefix accepted malformed topic %q", s)
 		}
+	}
+}
+
+// What a Core node relays is the shard the mesh's topics route to (ADR-067).
+func TestMeshShardIsTheMeshTopicsShard(t *testing.T) {
+	want := MeshPubsubTopic(2, NumShardsLogosDev)
+	if got := PubsubTopic(2, Application, Version, NumShardsLogosDev); got != want {
+		t.Fatal(got)
+	}
+	if got := fmt.Sprintf("/waku/2/rs/2/%d", MeshShard(NumShardsLogosDev)); got != want {
+		t.Errorf("MeshShard gives %s, the mesh's topics use %s", got, want)
 	}
 }

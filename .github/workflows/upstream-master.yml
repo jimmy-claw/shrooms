@@ -48,7 +48,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: docker/build/lib
-          key: liblogosdelivery-${{ steps.ld.outputs.rev }}-${{ hashFiles('docker/build-lib.Dockerfile', 'docker/build-lib-nimblefree.sh') }}
+          key: liblogosdelivery-${{ steps.ld.outputs.rev }}-${{ hashFiles('docker/build-lib.Dockerfile', 'docker/build-lib-nimblefree.sh', 'docker/patches/*') }}
 
       - name: Build liblogosdelivery
         if: steps.libcache.outputs.cache-hit != 'true'

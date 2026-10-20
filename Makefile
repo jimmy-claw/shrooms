@@ -22,6 +22,7 @@ export CGO_CFLAGS  += -I$(abspath $(LD_INC))
 export CGO_LDFLAGS += -L$(abspath $(LD_LIB)) -llogosdelivery -Wl,-rpath,$(abspath $(LD_LIB))
 
 GO ?= go
+comma := ,
 # Release tags only, so this never names a dependency drop.
 #
 # The one tag this repo had was deps-v1 — the release holding the
@@ -39,8 +40,11 @@ all: shrooms
 ## --- dependencies ---
 
 ## Build liblogosdelivery from source in a pinned container.
+## GITHUB_TOKEN, when set, authenticates the build's ~50 clones (a BuildKit
+## secret: in no layer, no log); GitHub refuses a burst of anonymous ones.
 deps:
-	docker build -f docker/build-lib.Dockerfile --target lib -o $(LD_DIR) .
+	docker build -f docker/build-lib.Dockerfile --target lib \
+		$(if $(GITHUB_TOKEN),--secret id=github_token$(comma)env=GITHUB_TOKEN) -o $(LD_DIR) .
 
 ## Reuse the library Logos Basecamp installed. Copies every shipped .so:
 ## liblogosdelivery dlopens libpq at runtime and that failure is fatal.
