@@ -3,7 +3,9 @@ package mesh
 import (
 	"net/netip"
 	"strings"
+	"time"
 
+	"github.com/vpavlin/shrooms/internal/lanhost"
 	"github.com/vpavlin/shrooms/internal/v4"
 )
 
@@ -217,6 +219,14 @@ func ResolveQualified(host string, meshFor func(label string) (func(string) (net
 func (m *Mesh) Lookup(host string) (netip.Addr, bool) {
 	labels := strings.Split(host, ".")
 
+	// A LAN host (ADR-068): <host>.lan.<gateway>. First, and final: a name of
+	// this shape answers for the granted host or for nothing. Read as a
+	// service on a device, "printer.lan.pi5" would be a service on a device
+	// called "lan", which anyone may name themselves.
+	if len(labels) == 3 && labels[1] == lanhost.Label {
+		return m.lookupLanHost(labels[0], labels[2])
+	}
+
 	// A device, by its own name — and only when that is the whole name. With
 	// trailing labels allowed here, "vps.anything" resolved to the device vps
 	// no matter what followed it, so a name qualified with another mesh's
@@ -258,4 +268,15 @@ func (m *Mesh) LookupV4(overlay netip.Addr) (netip.Addr, bool) {
 		return netip.Addr{}, false
 	}
 	return m.v4.Alias(overlay)
+}
+
+// lookupLanHost answers <host>.lan.<gateway> from the grants in force.
+func (m *Mesh) lookupLanHost(host, gateway string) (netip.Addr, bool) {
+	host, gateway = sanitiseName(host), sanitiseName(gateway)
+	for _, h := range m.LanHosts(time.Now()) {
+		if h.Name == host && h.GatewayName == gateway {
+			return h.Overlay, true
+		}
+	}
+	return netip.Addr{}, false
 }

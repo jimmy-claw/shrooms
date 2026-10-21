@@ -2583,6 +2583,12 @@ func (m *Mesh) hostEntries() []hosts.Entry {
 			Mesh: m.cfg.MeshLabel, Contested: !holds[p.ID()],
 		})
 	}
+	for _, h := range m.LanHosts(time.Now()) {
+		entries = append(entries, hosts.Entry{
+			Name: h.Name, Addr: h.Overlay.String(), AddrV4: m.aliasOf(h.Overlay),
+			Mesh: m.cfg.MeshLabel, Gateway: h.GatewayName,
+		})
+	}
 	return entries
 }
 

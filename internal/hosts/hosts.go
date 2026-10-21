@@ -62,6 +62,12 @@ type Entry struct {
 	// that has claimed it longest, internal/mesh Holders): it is written with
 	// the last group of its address, never the plain name (audit F-18).
 	Contested bool
+
+	// Gateway, when set, makes this a LAN host offered by that member
+	// (ADR-068): written as <name>.lan.<gateway>.<mesh>.<suffix>, a namespace
+	// no device or service name can take, so it plays no part in who keeps a
+	// plain name.
+	Gateway string
 }
 
 // Render builds the managed block.
@@ -111,6 +117,9 @@ func Render(entries []Entry, suffix string) string {
 	type claim struct{ self, holders int }
 	claims := map[string]*claim{}
 	for _, e := range sorted {
+		if e.Gateway != "" {
+			continue
+		}
 		key := sanitise(e.Mesh) + "\x00" + sanitise(e.Name)
 		c := claims[key]
 		if c == nil {
@@ -127,6 +136,21 @@ func Render(entries []Entry, suffix string) string {
 	for _, e := range sorted {
 		name, mesh := sanitise(e.Name), sanitise(e.Mesh)
 		if name == "" || mesh == "" {
+			continue
+		}
+		if e.Gateway != "" {
+			gw := sanitise(e.Gateway)
+			if gw == "" {
+				continue
+			}
+			full := name + ".lan." + gw + "." + mesh
+			if suffix != "" {
+				full += "." + suffix
+			}
+			fmt.Fprintf(&b, "%s  %s\n", e.Addr, full)
+			if e.AddrV4 != "" {
+				fmt.Fprintf(&b, "%s  %s\n", e.AddrV4, full)
+			}
 			continue
 		}
 		key := mesh + "\x00" + name

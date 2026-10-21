@@ -326,3 +326,19 @@ func TestANameClaimedTwiceGoesToNoImpostor(t *testing.T) {
 		}
 	}
 }
+
+// A LAN host is written in its own namespace, <host>.lan.<gateway>, and takes
+// no part in who keeps a plain name (ADR-068).
+func TestALanHostIsWrittenInItsOwnNamespace(t *testing.T) {
+	got := Render([]Entry{
+		{Name: "pi5", Addr: "fd00::5", Mesh: "office"},
+		{Name: "printer", Addr: "fd00::aa", AddrV4: "198.18.0.9", Mesh: "office", Gateway: "pi5"},
+		{Name: "printer", Addr: "fd00::bb", Mesh: "office"}, // a device calling itself printer
+	}, "mesh")
+	for _, line := range []string{"fd00::aa  printer.lan.pi5.office.mesh", "198.18.0.9  printer.lan.pi5.office.mesh",
+		"fd00::bb  printer.office.mesh", "fd00::5  pi5.office.mesh"} {
+		if !strings.Contains(got, line) {
+			t.Errorf("missing %q in:\n%s", line, got)
+		}
+	}
+}

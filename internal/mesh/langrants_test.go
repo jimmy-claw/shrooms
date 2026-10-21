@@ -105,3 +105,25 @@ func TestAGatewayOffersAHandfulOfHosts(t *testing.T) {
 		t.Error("a gateway was granted more than MaxPerGateway hosts")
 	}
 }
+
+// A host answers to <host>.lan.<gateway>, and nothing else answers to that
+// shape: a device that names itself "lan" does not get every LAN host's name.
+func TestALanHostHasANameNobodyElseCanTake(t *testing.T) {
+	f := newAdviceFixture(t, state.Config{})
+	gw, _ := identity.New()
+	squat, _ := identity.New()
+	f.m.roster.Apply(newAnnounce(t, gw, "pi5", nil, 1), time.Now())
+	f.m.roster.Apply(newAnnounce(t, squat, "lan", nil, 1), time.Now())
+	f.m.handleLanGrant(f.lanGrant(t, gw.DevicePub, "printer", "8883", 1, false), time.Now())
+
+	want := lanhost.Overlay(f.nk.Prefix(), gw.DevicePub, "printer")
+	if got, ok := f.m.Lookup("printer.lan.pi5"); !ok || got != want {
+		t.Fatalf("printer.lan.pi5 = %v %v, want %v", got, ok, want)
+	}
+	if got, ok := f.m.Lookup("camera.lan.pi5"); ok {
+		t.Errorf("an ungranted host resolved to %v", got)
+	}
+	if got, ok := f.m.Lookup("printer.lan.other"); ok {
+		t.Errorf("a host resolved under the wrong gateway: %v", got)
+	}
+}

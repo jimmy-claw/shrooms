@@ -691,6 +691,10 @@ type statusPayload struct {
 	// /config/announce and takes effect immediately.
 	Services []serviceStatus `json:"services,omitempty"`
 
+	// LanHosts are the LAN devices offered on this device's meshes
+	// (ADR-068): by peers acting as their gateway, and by this device.
+	LanHosts []lanHostStatus `json:"lan_hosts,omitempty"`
+
 	// NameRouter is the shared-port router that lets a service be reached
 	// without a port at all. Reported separately because it can fail on its
 	// own — port 80 needs a capability the services' own ports do not.
@@ -1679,6 +1683,15 @@ func serveControl(ctx context.Context, log *slog.Logger, path string, instances 
 			// qualified everywhere, so a peer's name needs its mesh however
 			// many meshes this device is on.
 			meshLabel := in.label
+			for _, h := range m.LanHosts(now) {
+				out.LanHosts = append(out.LanHosts, lanHostStatus{
+					Mesh: meshLabel, Name: h.Name, Gateway: h.GatewayName, Self: h.Self, Online: h.Online,
+					Overlay: h.Overlay.String(), OverlayV4: v4Of(m, h.Overlay),
+					Ports:   cred.FormatLanPorts(h.Ports),
+					Until:   h.NotAfter.Unix(),
+					DNSName: lanHostDNSName(h.Name, h.GatewayName, meshLabel, cfg.HostsSuffix),
+				})
+			}
 			svc, bnd := m.Services(now), m.Bound(now)
 			holds := mesh.Holders(m.Roster().Peers())
 			for _, p := range m.Roster().Current(now) {
@@ -2153,4 +2166,27 @@ func noSuchMesh(cfgPath, label string) string {
 		}
 	}
 	return "no mesh called " + label + " on this node"
+}
+
+// lanHostStatus is one LAN host as status reports it (ADR-068).
+type lanHostStatus struct {
+	Mesh      string `json:"mesh"`
+	Name      string `json:"name"`
+	Gateway   string `json:"gateway"`
+	Self      bool   `json:"self,omitempty"` // this device is its gateway
+	Online    bool   `json:"online"`         // its gateway is announcing
+	Overlay   string `json:"overlay"`
+	OverlayV4 string `json:"overlay_v4,omitempty"`
+	Ports     string `json:"ports"`
+	Until     int64  `json:"until"`
+	DNSName   string `json:"dns_name"`
+}
+
+// lanHostDNSName is <host>.lan.<gateway>.<mesh>.<suffix>.
+func lanHostDNSName(host, gateway, label, suffix string) string {
+	gw := mesh.QualifiedDNSName(gateway, label, suffix)
+	if gw == "" {
+		return ""
+	}
+	return mesh.SanitiseName(host) + ".lan." + gw
 }

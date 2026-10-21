@@ -409,7 +409,29 @@ func cmdStatus(args []string) error {
 
 	printServices(os.Stdout, st.Services, st.NameRouter)
 	printPeerServices(os.Stdout, st.Peers)
+	printLanHosts(os.Stdout, st.LanHosts)
 	return nil
+}
+
+// printLanHosts lists the LAN hosts on this device's meshes (ADR-068), with
+// their gateway: "printer via pi5".
+func printLanHosts(out io.Writer, hosts []lanHostStatus) {
+	if len(hosts) == 0 {
+		return
+	}
+	fmt.Fprintln(out, "\nLAN hosts:")
+	w := tabwriter.NewWriter(out, 0, 2, 2, ' ', 0)
+	for _, h := range hosts {
+		via := "via " + h.Gateway
+		switch {
+		case h.Self:
+			via = "offered by this device"
+		case !h.Online:
+			via += " (gateway offline)"
+		}
+		fmt.Fprintf(w, "  %s\t%s\ttcp %s\t%s\n", h.DNSName, via, h.Ports, h.Mesh)
+	}
+	w.Flush()
 }
 
 // printPeerServices lists what other devices say they offer (ADR-023).
