@@ -303,6 +303,13 @@ _shrooms() {
                         COMPREPLY=($(compgen -W "--dir --mesh --token --serial --socket --publish --sign-with --external-signer" -- "$cur"))
                     fi
                     ;;
+                lan)
+                    if [ "$cword" -eq 3 ]; then
+                        COMPREPLY=($(compgen -W "grant withdraw" -- "$cur"))
+                    else
+                        COMPREPLY=($(compgen -W "--dir --mesh --name --device --host --ports --life --serial --socket --publish --sign-with --external-signer" -- "$cur"))
+                    fi
+                    ;;
                 *)
                     COMPREPLY=($(compgen -W "--dir --mesh $common" -- "$cur")) ;;
             esac
