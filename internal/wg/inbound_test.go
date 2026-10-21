@@ -63,6 +63,23 @@ func TestSelfOnlyDeliversOnlyToSelf(t *testing.T) {
 // the packet, and only a kernel default kept it from being followed (F-39).
 func TestSelfOnlyRefusesWhatCouldGoFurther(t *testing.T) {
 	self := netip.MustParseAddr("fdaa:bbbb:cccc::1")
+	peer := netip.MustParseAddr("fdaa:bbbb:cccc::2")
+	other := netip.MustParseAddr("fdaa:bbbb:cccc::3")
+	// icmpErr is an error from `from` about a packet self sent to `to`.
+	icmpErr := func(typ byte, src, to, from netip.Addr) []byte {
+		p := make([]byte, 40+8+40)
+		p[0], p[6] = 6<<4, protoICMPv6
+		f, d := from.As16(), self.As16()
+		copy(p[8:24], f[:])
+		copy(p[24:40], d[:])
+		p[40] = typ
+		in := p[48:]
+		in[0], in[6] = 6<<4, protoTCP
+		s, t := src.As16(), to.As16()
+		copy(in[8:24], s[:])
+		copy(in[24:40], t[:])
+		return p
+	}
 	with := func(next byte, rest ...byte) []byte {
 		p := packetTo(self)[16:]
 		p[6] = next
@@ -73,19 +90,23 @@ func TestSelfOnlyRefusesWhatCouldGoFurther(t *testing.T) {
 		p    []byte
 		want bool
 	}{
-		"TCP":                     {with(protoTCP), true},
-		"UDP":                     {with(protoUDP), true},
-		"ping":                    {with(protoICMPv6, 128), true},
-		"too big":                 {with(protoICMPv6, 2), true},
-		"routing header":          {with(43, protoTCP), false},
-		"hop-by-hop":              {with(0, protoTCP), false},
-		"redirect":                {with(protoICMPv6, 137), false},
-		"router advertisement":    {with(protoICMPv6, 134), false},
-		"neighbour solicitation":  {with(protoICMPv6, 135), false},
-		"first fragment of UDP":   {with(protoFragment, protoUDP, 0, 0, 1), true},
-		"later fragment of UDP":   {with(protoFragment, protoUDP, 0, 0x05, 0x00), true},
-		"fragment hiding routing": {with(protoFragment, 43, 0, 0, 1), false},
-		"fragmented redirect":     {with(protoFragment, protoICMPv6, 0, 0, 1, 0, 0, 0, 0, 137), false},
+		"TCP":                             {with(protoTCP), true},
+		"UDP":                             {with(protoUDP), true},
+		"ping":                            {with(protoICMPv6, 128), true},
+		"too big, forged":                 {with(protoICMPv6, 2), false},
+		"too big, genuine":                {icmpErr(2, self, peer, peer), true},
+		"unreachable, genuine":            {icmpErr(1, self, peer, peer), true},
+		"unreachable, about another peer": {icmpErr(1, self, other, peer), false},
+		"router renumbering":              {with(protoICMPv6, 138), false},
+		"routing header":                  {with(43, protoTCP), false},
+		"hop-by-hop":                      {with(0, protoTCP), false},
+		"redirect":                        {with(protoICMPv6, 137), false},
+		"router advertisement":            {with(protoICMPv6, 134), false},
+		"neighbour solicitation":          {with(protoICMPv6, 135), false},
+		"first fragment of UDP":           {with(protoFragment, protoUDP, 0, 0, 1), true},
+		"later fragment of UDP":           {with(protoFragment, protoUDP, 0, 0x05, 0x00), true},
+		"fragment hiding routing":         {with(protoFragment, 43, 0, 0, 1), false},
+		"fragmented redirect":             {with(protoFragment, protoICMPv6, 0, 0, 1, 0, 0, 0, 0, 137), false},
 	} {
 		if got := ForSelf(c.p, self); got != c.want {
 			t.Errorf("%s: ForSelf = %v, want %v", name, got, c.want)

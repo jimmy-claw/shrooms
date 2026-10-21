@@ -60,8 +60,8 @@ func (t *SelfOnlyTun) Dropped() uint64 { return t.dropped.Load() }
 // the next hop inside the packet, so a packet "for" this node could ask its
 // kernel to pass it on, which only a kernel default (accept_source_route=0)
 // refused. So no extension header passes but a fragment header, which large
-// UDP needs and which names the protocol it carries too; and no ICMPv6 that
-// steers the node's routing or neighbours, which have no meaning on a tunnel.
+// UDP needs and which names the protocol it carries too; and of ICMPv6 only
+// echo, and errors about this node's own traffic to the peer reporting them.
 func ForSelf(p []byte, self netip.Addr) bool {
 	if len(p) < 40 || p[0]>>4 != 6 {
 		return false
@@ -89,12 +89,36 @@ func ForSelf(p []byte, self netip.Addr) bool {
 		if len(p) < at+1 {
 			return false
 		}
-		t := p[at]
-		// Router solicitation and advertisement, neighbour solicitation and
-		// advertisement, redirect.
-		return t < 133 || t > 137
+		switch t := p[at]; {
+		case t == 128 || t == 129: // echo request and reply
+			return true
+		case t >= 1 && t <= 4:
+			return errorAboutSender(p, at, self)
+		}
+		// Everything else: neighbour discovery, router advertisements,
+		// redirects, renumbering, multicast listeners. None has a meaning on
+		// a tunnel, and each steers the kernel.
+		return false
 	}
 	return false
+}
+
+// errorAboutSender reports whether an ICMPv6 error (unreachable, too big, time
+// exceeded, parameter problem) is about a packet this device sent to the peer
+// that sends the error. There is no router between two ends of a tunnel, so a
+// true error always comes from the destination itself; one about traffic to
+// anyone else is a member forging it to reset or shrink another member's
+// connection (the audit's residual on F-39).
+func errorAboutSender(p []byte, at int, self netip.Addr) bool {
+	inner := at + 8
+	if len(p) < inner+40 || p[inner]>>4 != 6 {
+		return false
+	}
+	var src, dst, from [16]byte
+	copy(src[:], p[inner+8:inner+24])
+	copy(dst[:], p[inner+24:inner+40])
+	copy(from[:], p[8:24])
+	return netip.AddrFrom16(src) == self && dst == from
 }
 
 const (

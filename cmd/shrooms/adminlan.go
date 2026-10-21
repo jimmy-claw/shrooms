@@ -23,9 +23,12 @@ import (
 // revocation.
 func cmdAdminLan(args []string) error {
 	if len(args) < 1 {
-		return errors.New("usage: shrooms admin lan {grant|withdraw} --name GATEWAY --host NAME [--ports P] [flags]")
+		return errors.New(adminLanUsage)
 	}
 	switch args[0] {
+	case "-h", "--help", "help":
+		fmt.Println(adminLanUsage)
+		return nil
 	case "grant":
 		return adminLanPublish("admin lan grant", args[1:], false)
 	case "withdraw":
@@ -35,11 +38,20 @@ func cmdAdminLan(args []string) error {
 	}
 }
 
+const adminLanUsage = `usage: shrooms admin lan {grant|withdraw} --mesh MESH (--device KEY | --name GATEWAY) --host NAME [--ports P] [flags]
+
+  grant     let a gateway member offer one LAN host on the listed TCP ports
+  withdraw  take it away; open connections to it are closed
+
+--name matches only a name the device's credential carries; otherwise pass
+--device with its key. 'shrooms admin lan grant --help' lists every flag.
+See ADR-068.`
+
 func adminLanPublish(name string, args []string, withdraw bool) error {
 	fs := flag.NewFlagSet(name, flag.ExitOnError)
 	dir := fs.String("dir", defaultAdminDir(), "where the admin key is kept")
 	label := fs.String("mesh", "", "which mesh the host is offered on (ADR-015)")
-	devName := fs.String("name", "", "the gateway member, by its name in the roster")
+	devName := fs.String("name", "", "the gateway member, by the name its credential carries (otherwise use --device)")
 	devHex := fs.String("device", "", "the gateway member, by its device key (hex)")
 	host := fs.String("host", "", "the host's name: printer in printer.lan.<gateway>.<mesh>.mesh")
 	ports := fs.String("ports", "", "TCP ports and ranges, e.g. 8883,990,50000-50100 (at most 256 ports)")
@@ -111,7 +123,7 @@ func adminLanPublish(name string, args []string, withdraw bool) error {
 			fmt.Printf("Granted gateway %x to offer LAN host %q on TCP %s, until %s (serial %d).\n",
 				gw[:8], *host, cred.FormatLanPorts(rs), time.Unix(g.NotAfter, 0).Format(time.DateOnly), *serial)
 			fmt.Println("The gateway serves it once its own config lists the host and its LAN")
-			fmt.Printf("address: mesh.<label>.lan_hosts = [\"%s=<LAN address>/tcp:%s\"]\n", *host, cred.FormatLanPorts(rs))
+			fmt.Printf("address: mesh.<label>.lan_hosts = [\"%s=<private LAN address>/tcp:%s\"]\n", *host, cred.FormatLanPorts(rs))
 		}
 		fmt.Println()
 	}

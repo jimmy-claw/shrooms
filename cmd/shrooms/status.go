@@ -436,7 +436,7 @@ func printLanHosts(out io.Writer, hosts []lanHostStatus) {
 			addr = h.OverlayV4 + "  " + h.Overlay
 		}
 		if h.LANAlias != "" {
-			addr += "  (and " + h.LANAlias + ")"
+			addr += "  (alias " + h.LANAlias + ")"
 		}
 		fmt.Fprintf(w, "  %s\t%s\t%s\ttcp %s\t%s\n", h.DNSName, addr, via, h.Ports, h.Mesh)
 	}
