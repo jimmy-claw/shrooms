@@ -654,6 +654,10 @@ including the phone on mobile data.
   while the grant is in force. Nothing else on the LAN is reachable. UDP and
   ping don't cross.
 - **A mesh with no admin has no LAN hosts.** Neither does a sealed cage.
+- **FTP, and anything else that names an address inside its own protocol,**
+  may not work through it. The device can tell the client to connect to its
+  LAN address directly, which only works on that LAN. That's a known gap,
+  found with a Bambu printer's file uploads.
 
 > **This is still a way from the mesh into your LAN, and it is worth naming.**
 > Every member can reach the host's listed ports, including a phone that

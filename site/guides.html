@@ -214,46 +214,52 @@ NAME      REACHABLE AS              FORWARDS TO       CONNS
 immich    http://immich.nas.mesh    127.0.0.1:2283    3
 jellyfin  http://jellyfin.nas.mesh  <span class="a">unavailable: connection refused</span>  0</code></pre>
 
-<h3>Pointing at a device that will never run a mesh node</h3>
+<h3>Reaching a device that will never run a mesh node: a LAN host</h3>
 
 <p>
-    The target does not have to be this machine. A service can point at anything
-    the publishing device can reach, which makes that device a gateway for
-    hardware that will never join — a Home Assistant box, a printer, a NAS web
-    interface:
+    A service forwards to this machine only. Hardware that will never join the
+    mesh, such as a Home Assistant box, a printer or a camera, is offered as a
+    <strong>LAN host</strong> instead: one device, on the TCP ports you list,
+    behind a member on its LAN that acts as its gateway, once the mesh's admin
+    has granted it (<a href="adr/068-a-member-can-speak-for-a-lan-host.html">ADR-068</a>).
 </p>
 
 <pre><code><span class="c"># on jimmy-crib, which is on the same LAN as 192.168.0.116</span>
-services = ["ha:8080-&gt;192.168.0.116:80"]</code></pre>
+mesh.home.lan_hosts = ["ha=192.168.0.116/tcp:80,8123"]
+
+<span class="c"># by the admin, wherever the admin key is</span>
+<span class="cmd">shrooms admin lan grant --mesh home --name jimmy-crib --host ha --ports 80,8123</span></code></pre>
 
 <p>
-    Then <code>http://ha.jimmy-crib.mesh</code> from any device on the mesh,
-    including the phone on mobile data. Nothing is installed on the Home
-    Assistant box and it needs no configuration; it sees an ordinary connection
-    from jimmy-crib's LAN address.
+    Then <code>http://ha.lan.jimmy-crib.home.mesh:8123</code> from any device
+    on the mesh, including the phone on mobile data. <code>shrooms status</code>
+    lists it with an IPv4 address too, for an application that asks for an IP.
+    Nothing is installed on the Home Assistant box and it needs no
+    configuration; it sees ordinary connections from jimmy-crib's LAN address.
 </p>
 
-<p>
-    Publish it on a port other than 80. <code>ha:80-&gt;192.168.0.116:80</code>
-    would work, but the service takes port 80 on the overlay address and the
-    shared-port name router cannot then have it — so every <em>other</em>
-    service on that device loses its bare name. Publishing on 8080 leaves 80 to
-    the router, and you get both <code>http://ha.jimmy-crib.mesh</code> and
-    <code>http://ha.jimmy-crib.mesh:8080</code>.
-</p>
+<ul>
+    <li><strong>Members never see its LAN address.</strong> The host gets an
+    address of its own on the mesh, and the gateway proxies.</li>
+    <li><strong>Only the listed ports, only while granted.</strong> Nothing else
+    on the LAN is reachable; UDP and ping do not cross.
+    <code>shrooms admin lan withdraw</code> takes it away.</li>
+    <li><strong>A mesh with no admin has no LAN hosts</strong>, and a sealed
+    cage cannot reach one.</li>
+    <li><strong>FTP and anything else that names an address inside its own
+    protocol</strong> may not work through it: the device can tell the client to
+    connect to its LAN address directly, which only works on that LAN.</li>
+</ul>
 
 <div class="warn">
-    <p><strong>This is a hole from the mesh into your LAN, and it is worth
-    naming.</strong> Every device holding the network key can now reach that
-    address and port, including a phone that leaves the house. The gateway
-    device is doing exactly what you asked; the thing to be deliberate about is
-    that mesh membership now implies access to a machine that never joined the
-    mesh.</p>
+    <p><strong>This is still a way from the mesh into your LAN, and it is worth
+    naming.</strong> Every member can reach the host's listed ports, including a
+    phone that leaves the house. List the ports you meant, not a router's admin
+    interface. The admin's grant is what makes that a decision.</p>
     <p>The same applies to a loopback service. Plenty of things bind
     <code>127.0.0.1</code> <em>as</em> their access control, on the reasoning
     that only a local user can reach them. Publishing one makes every mesh
-    member a local user. Publish the specific port you meant, not a router's
-    admin interface.</p>
+    member a local user. Publish the specific port you meant.</p>
 </div>
 
 <h2 id="bind">3. Binding a service to the mesh instead</h2>

@@ -27,6 +27,10 @@ that every path, ADR and package symbol below (such as `agent.LocalAddr`) still 
   part (`internal/cred`); it can live on a Keycard (ADR-022).
 - **Core / Edge**: Logos Delivery node modes. Phones run Edge
   (`state.ModeEdge`); ADR-035.
+- **LAN host**: one device that cannot run shrooms (a printer, a Home
+  Assistant box), offered on listed TCP ports by a member on its LAN, its
+  gateway, under the mesh admin's grant. Named `<host>.lan.<gateway>.<mesh>.mesh`.
+  `internal/lanhost`, `internal/lanproxy`, `cred.LanGrant`; ADR-068.
 - **`.mesh` names**: `laptop.office.mesh`, answered by the daemon's own DNS
   (`internal/dns`, `mesh.QualifiedDNSName`); ADR-032.
 
