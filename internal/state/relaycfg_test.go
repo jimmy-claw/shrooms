@@ -172,3 +172,25 @@ func TestAnArrayItemMayHoldCommas(t *testing.T) {
 		t.Errorf("round trip of an item with commas: %q", got)
 	}
 }
+
+// What formatArray writes, quotes and backslashes included, reads back as it
+// was, and a quote left open is an error rather than a merged item (audit
+// F-36).
+func TestAnArrayRoundTripsQuotesAndBackslashes(t *testing.T) {
+	in := []string{`say "hi"`, `C:\path`, "plain,with,commas"}
+	got := parseArray(formatArray(in))
+	if len(got) != len(in) {
+		t.Fatalf("parsed %q", got)
+	}
+	for i := range in {
+		if got[i] != in[i] {
+			t.Errorf("item %d: %q, want %q", i, got[i], in[i])
+		}
+	}
+	if _, err := parseConfig("name = \"laptop\nservices = [\"web\", \"ssh]\n"); err == nil {
+		t.Error("an unclosed quote was accepted")
+	}
+	if c, err := parseConfig(`name = "C:\path"` + "\n"); err != nil || c.Name != `C:\path` {
+		t.Errorf("a hand-written backslash: %q, %v", c.Name, err)
+	}
+}

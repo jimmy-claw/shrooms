@@ -1004,6 +1004,11 @@ func parseConfig(text string) (Config, error) {
 		}
 		key = strings.TrimSpace(key)
 		val = strings.TrimSpace(val)
+		// A quote left open would otherwise swallow the commas after it and
+		// turn the rest of an array into one item (audit F-36).
+		if !balancedQuotes(val) {
+			return c, fmt.Errorf("line %d: %s: a quote is not closed", n+1, key)
+		}
 
 		// mesh.<label>.<field>, the multi-mesh form (ADR-015). Checked before
 		// the switch so a mesh may be called anything without colliding with a
@@ -1113,9 +1118,33 @@ func parseConfig(text string) (Config, error) {
 func unquote(s string) string {
 	s = strings.TrimSpace(s)
 	if len(s) >= 2 && (s[0] == '"' && s[len(s)-1] == '"') {
+		// The escapes formatArray's %q writes, read back, so a value with a
+		// quote or a backslash in it survives a write and a read (audit
+		// F-36). A hand-written value Go cannot unquote, a Windows path
+		// with \p in it, is taken as it stands, as it always was.
+		if v, err := strconv.Unquote(s); err == nil {
+			return v
+		}
 		return s[1 : len(s)-1]
 	}
 	return s
+}
+
+// balancedQuotes reports whether every quote in s that opens a string also
+// closes it, a backslash inside one escaping the next character.
+func balancedQuotes(s string) bool {
+	inQuote, escaped := false, false
+	for _, r := range s {
+		switch {
+		case escaped:
+			escaped = false
+		case r == '\\' && inQuote:
+			escaped = true
+		case r == '"':
+			inQuote = !inQuote
+		}
+	}
+	return !inQuote
 }
 
 // formatArray renders a string slice as the TOML-subset array parseArray reads.

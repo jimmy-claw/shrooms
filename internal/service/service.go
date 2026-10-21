@@ -386,8 +386,14 @@ func (p *Publisher) accept(ctx context.Context, ln net.Listener, spec Spec, st *
 func (p *Publisher) forward(ctx context.Context, in net.Conn, spec Spec) {
 	defer in.Close()
 
-	d := net.Dialer{Timeout: dialTimeout}
-	out, err := d.DialContext(ctx, "tcp", spec.Target)
+	// Checked again for each connection: an address that was this machine's
+	// when the service was published may have moved to another (F-34).
+	if err := LocalTarget(spec.Target); err != nil {
+		p.log("service refused a connection: its target is no longer this machine",
+			"service", spec.Name, "target", spec.Target, "err", err)
+		return
+	}
+	out, err := dialLocal(ctx, spec.Target)
 	if err != nil {
 		// The mesh side worked and the application is not there. Worth a line:
 		// from the client this is an immediate reset and looks like the mesh.
@@ -515,6 +521,26 @@ func LocalTarget(target string) error {
 	}
 	return fmt.Errorf("%s is not this machine: a LAN device goes in mesh.<label>.lan_hosts "+
 		"(\"name=%s/tcp:PORTS\"), offered once the admin grants it with `shrooms admin lan grant` (ADR-068)", a, a)
+}
+
+// dialLocal dials a target LocalTarget accepted. "localhost" is dialled as
+// the loopback addresses themselves, not looked up: /etc/hosts or NSS can say
+// localhost is anywhere, and a service would then forward off the machine
+// (audit F-34).
+func dialLocal(ctx context.Context, target string) (net.Conn, error) {
+	d := net.Dialer{Timeout: dialTimeout}
+	host, port, err := net.SplitHostPort(target)
+	if err != nil || !strings.EqualFold(host, "localhost") {
+		return d.DialContext(ctx, "tcp", target)
+	}
+	c, err := d.DialContext(ctx, "tcp", net.JoinHostPort("127.0.0.1", port))
+	if err == nil {
+		return c, nil
+	}
+	if c6, err6 := d.DialContext(ctx, "tcp", net.JoinHostPort("::1", port)); err6 == nil {
+		return c6, nil
+	}
+	return nil, err
 }
 
 // ownAddress is whether a is assigned to one of this machine's interfaces.

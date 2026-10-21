@@ -38,7 +38,10 @@ type LanGrant struct {
 	// identity, from which its overlay address is derived.
 	Host string
 
-	// Ports are the TCP ports the host may be reached on.
+	// Ports are the TCP ports the host may be reached on. TCP is implied,
+	// not encoded: these bytes, under this domain, grant TCP and nothing
+	// else. A grant of UDP needs a protocol field and a new domain, so that
+	// no grant signed now can be read as one (audit F-37).
 	Ports []PortRange
 
 	Serial    uint64
