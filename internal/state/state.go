@@ -537,8 +537,16 @@ func parseAuthority(adminKeys []string) (*cred.Authority, error) {
 // malformed service rather than let somebody discover it as a service that
 // silently never appears. Load does not call it — see Validate.
 func (c *Config) ValidateServices() error {
-	if _, err := service.ParseSpecs(c.Services); err != nil {
+	specs, err := service.ParseSpecs(c.Services)
+	if err != nil {
 		return fmt.Errorf("services: %w", err)
+	}
+	// This machine only (ADR-068): refused when it is written, not first
+	// noticed as a service that never appears.
+	for _, sp := range specs {
+		if err := service.LocalTarget(sp.Target); err != nil {
+			return fmt.Errorf("services: %s: %w", sp.Name, err)
+		}
 	}
 	return nil
 }

@@ -444,3 +444,30 @@ func TestSpecRoundTrips(t *testing.T) {
 		}
 	}
 }
+
+// A service forwards to this machine only (ADR-068): a LAN device is a LAN
+// host, under the admin's grant, and a service is no way around that.
+func TestAServiceForwardsToThisMachineOnly(t *testing.T) {
+	was := ownAddress
+	ownAddress = func(a netip.Addr) bool { return a == netip.MustParseAddr("192.168.1.20") }
+	defer func() { ownAddress = was }()
+	for _, ok := range []string{"127.0.0.1:2283", "[::1]:80", "localhost:8096", "192.168.1.20:8123"} {
+		if err := LocalTarget(ok); err != nil {
+			t.Errorf("%s refused: %v", ok, err)
+		}
+	}
+	for _, bad := range []string{"192.168.1.5:8123", "homeassistant.local:8123", "[fd00::5]:80"} {
+		if err := LocalTarget(bad); err == nil {
+			t.Errorf("%s accepted", bad)
+		} else if strings.Contains(bad, "192.168.1.5") && !strings.Contains(err.Error(), "lan_hosts") {
+			t.Errorf("the refusal does not say what to write instead: %v", err)
+		}
+	}
+
+	specs, _ := ParseSpecs([]string{"ha:8123->192.168.1.5:8123"})
+	p := Publish(context.Background(), netip.MustParseAddr("::1"), "test", specs, nil)
+	defer p.Close()
+	if st := p.Status()[0]; st.Listening || st.Err == "" {
+		t.Errorf("a LAN-pointing service was published: %+v", st)
+	}
+}

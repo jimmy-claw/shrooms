@@ -623,34 +623,43 @@ why this is off by default and why only sockets on *exactly* the mesh address
 count — one on `::` is reachable from every network the machine is on, and
 listing it as mesh-only would be a lie.
 
-### Reaching things that are not on the mesh
+### Reaching things that are not on the mesh: LAN hosts
 
-The target does not have to be this machine. A service can point at anything
-the publishing device can reach, which makes it a gateway for hardware that
-will never run a mesh node — a Home Assistant box, a printer, a NAS web UI:
+A service forwards to this machine only. A device that will never run a mesh
+node, such as a Home Assistant box, a printer or a camera, is offered as a
+**LAN host**: one device, on the ports you list, behind a member that acts as
+its gateway, once the mesh's admin has granted it
+([ADR-068](docs/adr/068-a-member-can-speak-for-a-lan-host.md)).
+
+On the gateway, which is on the same LAN as the device:
 
 ```toml
 # on jimmy-crib, which is on the same LAN as 192.168.0.116
-services = ["ha:8080->192.168.0.116:80"]
+mesh.home.lan_hosts = ["ha=192.168.0.116/tcp:80,8123"]
 ```
 
-Then `http://ha.jimmy-crib.mesh` from any device on the mesh, including the
-phone on mobile data. Nothing is installed on the Home Assistant box and it
-needs no configuration; it sees an ordinary connection from jimmy-crib's LAN
-address.
+and, by the admin, wherever the admin key is:
 
-**Publish it on a port other than 80.** `ha:80->192.168.0.116:80` would work,
-but the service takes port 80 on the overlay address and the shared-port name
-router cannot then have it — so every *other* service on that device loses its
-bare name. Publishing on 8080 leaves 80 to the router, and you get both
-`http://ha.jimmy-crib.mesh` and `http://ha.jimmy-crib.mesh:8080`.
+```sh
+shrooms admin lan grant --mesh home --name jimmy-crib --host ha --ports 80,8123
+```
 
-> **This is a hole from the mesh into your LAN, and it is worth naming.**
-> Every device holding the network key can now reach that address and port,
-> including a phone that leaves the house. The gateway device is doing exactly
-> what you asked; the thing to be deliberate about is that mesh membership now
-> implies access to a machine that never joined the mesh. Publish the specific
-> port you want reachable, not a router's admin interface.
+Then `http://ha.lan.jimmy-crib.home.mesh:8123` from any device on the mesh,
+including the phone on mobile data.
+- **Nothing is installed on the device.** It sees ordinary connections from
+  the gateway's LAN address.
+- **Members never see its LAN address.** They reach an address of the host's
+  own on the mesh, and the gateway proxies to the LAN.
+- **What stays closed:** the gateway serves only the listed ports, and only
+  while the grant is in force. Nothing else on the LAN is reachable. UDP and
+  ping don't cross.
+- **A mesh with no admin has no LAN hosts.** Neither does a sealed cage.
+
+> **This is still a way from the mesh into your LAN, and it is worth naming.**
+> Every member can reach the host's listed ports, including a phone that
+> leaves the house. List the ports you want reachable, not a router's admin
+> interface. The grant is what makes that a decision, and `shrooms status`
+> lists every LAN host and its gateway.
 
 > **Publishing a loopback service exposes it to the whole mesh.** Plenty of
 > things bind `127.0.0.1` *as* their access control, on the reasoning that only

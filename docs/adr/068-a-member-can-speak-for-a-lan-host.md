@@ -1,6 +1,7 @@
 # 068. A member can speak for a named LAN host, never for a LAN
 
-**Status:** accepted 2026-10-21 by the owner, as the scope; not built. Amended
+**Status:** accepted 2026-10-21 by the owner; built the same day (`internal/cred`
+LanGrant, `internal/lanhost`, `internal/lanproxy`, `shrooms admin lan`). Amended
 the same day after the auditor's review (`08-adr-068-review.md` in the audit
 folder) and the owner's answers to it: normal cages stay network-open, and
 services become local-only when LAN hosts ship. Narrows the "subnet routing" in `docs/an-exit-node-for-the-mesh.md`,
@@ -99,10 +100,14 @@ reaches the mesh: services become this machine's own ports only.**
   - the gateway's device key;
   - the host ID and name;
   - the protocol and ports;
-  - a commitment to the LAN address (a hash, so the grant itself doesn't
-    publish it);
   - a serial, not-before and not-after;
   - a domain separator.
+
+  **Not the LAN address, not even as a commitment** (changed when built). The
+  review suggested a hash of it. But a private address is brute-forced from
+  its hash in moments: a /16 is 65,536 candidates. And the gateway is trusted
+  for its LAN regardless (above). So a commitment would hide nothing and bind
+  nothing. The address stays in the gateway's config and on no wire.
 - **Members verify it.** A node offers a host only with a valid, unexpired,
   unrevoked grant naming it. Members reject a host announced without one, or
   with ports beyond its grant.
@@ -117,10 +122,13 @@ reaches the mesh: services become this machine's own ports only.**
   connection to the LAN address. There is no IP forwarding and no broad DNAT,
   so nothing unlisted has anything to reach. Connections are capped per host
   and per member.
-- **In its own network namespace.** The host's overlay address lives on a
-  dedicated TUN in a namespace of its own. If it sat on the gateway's normal
-  interface, a member could reach any service the gateway binds to all
-  addresses through it.
+- **In no kernel namespace at all** (as built). The gateway wraps its data
+  plane's TUN device: packets WireGuard delivers for a host's overlay address
+  go into a userspace TCP stack (gVisor, through wireguard-go's netstack), and
+  the stack's replies are merged back into what WireGuard reads. The address
+  is never on any kernel interface, so nothing the gateway binds to all
+  addresses is reachable through it. That's stronger than the separate
+  namespace the review asked for, and needs no namespace setup.
 - **TCP only, to start.** Under a TCP proxy, every connection has a start and an
   end, so limits, logging and refusals are simple. UDP would need a per-flow
   translation table (NAT-style state), and many UDP protocols carry addresses
@@ -144,11 +152,12 @@ reaches the mesh: services become this machine's own ports only.**
   Limiting the network is what sealed is for. The auditor's review read the
   cage rule against the stricter goal; the owner confirmed this one
   (2026-10-21).
-- **A sealed session can't reach a host through another session either.** A
-  sealed session's task to an uncaged one (`/a2a`, `ask_agent`) could ask it
-  to fetch a LAN host: a confused deputy no network rule stops. Tasks from a
-  sealed session are marked as such, and the receiving session is told its
-  asker is sealed, so it shouldn't fetch mesh or LAN resources for it.
+- **A sealed session can't reach a host through another session either, and
+  that already holds.** A sealed cage "answers and asks nothing" (ADR-045):
+  its proxy refuses everything except updating its own tasks. It can't send
+  `ask_agent` or any `/a2a` message, so there's no deputy to fool. A task
+  from a normal cage is marked "in a cage", and a session can refuse those
+  (`accept_caged`, ADR-044).
 - **Visible.** `shrooms status` and both apps list LAN hosts as "printer via
   pi5", with whether the gateway is online.
 

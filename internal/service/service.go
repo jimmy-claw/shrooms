@@ -111,11 +111,10 @@ func defaultTarget(port uint16) string {
 //
 //	immich:2283                     published and forwarded on the same port
 //	jellyfin:8096->127.0.0.1:8920   published on 8096, forwarded to 8920
-//	ha->192.168.0.116:80            published on the target's port, 80
+//	web->127.0.0.1:8080             published on the target's port, 8080
 //
-// The last form is for reaching something that is not on the mesh at all: the
-// port is usually not a choice, it is whatever that device already serves on,
-// and repeating it either side of the arrow is noise.
+// The target is this machine: loopback, localhost or one of its own addresses
+// (LocalTarget). A device on the LAN is a LAN host instead (ADR-068).
 //
 // Deliberately a flat string rather than a config table: the config parser is a
 // TOML subset with no nesting (internal/state), and one line per service reads
@@ -180,7 +179,7 @@ func ParseSpec(s string) (Spec, error) {
 			return Spec{}, fmt.Errorf("%q: %q is not a port", s, portStr)
 		}
 	} else {
-		// "ha->192.168.0.116:80": publish on whatever the target serves on.
+		// "web->127.0.0.1:8080": publish on whatever the target serves on.
 		_, tp, err := net.SplitHostPort(target)
 		if err != nil {
 			return Spec{}, fmt.Errorf("%q: target %q is not host:port", s, target)
@@ -305,6 +304,17 @@ func Publish(ctx context.Context, addr netip.Addr, device string, specs []Spec, 
 
 	for _, spec := range specs {
 		st := p.stats[spec.Name]
+
+		// This machine only (ADR-068). A LAN device is offered as a LAN host,
+		// under the admin's grant; a service that forwards elsewhere would be a
+		// way around that grant. Refused, with what to write instead, rather
+		// than dropped: it used to be allowed, and a Home Assistant on the
+		// LAN was published exactly this way.
+		if err := LocalTarget(spec.Target); err != nil {
+			st.Err = err.Error()
+			log("service refused: it forwards off this machine", "service", spec.Name, "target", spec.Target, "err", err)
+			continue
+		}
 
 		ap := netip.AddrPortFrom(addr, spec.Port)
 		ln, err := net.Listen("tcp6", ap.String())
@@ -482,4 +492,44 @@ func ValidType(t string) error {
 		return fmt.Errorf("service type %q must contain a letter", t)
 	}
 	return nil
+}
+
+// LocalTarget is whether a service's target is this machine: "localhost", a
+// loopback address, or one of this machine's own addresses. Anything else is
+// a LAN device, which ADR-068 offers as a LAN host instead.
+func LocalTarget(target string) error {
+	host, _, err := net.SplitHostPort(target)
+	if err != nil {
+		return err
+	}
+	if strings.EqualFold(host, "localhost") {
+		return nil
+	}
+	a, err := netip.ParseAddr(host)
+	if err != nil {
+		return fmt.Errorf("%q is a name: a service's target is this machine, by address or as localhost", host)
+	}
+	a = a.Unmap()
+	if a.IsLoopback() || ownAddress(a) {
+		return nil
+	}
+	return fmt.Errorf("%s is not this machine: a LAN device goes in mesh.<label>.lan_hosts "+
+		"(\"name=%s/tcp:PORTS\"), offered once the admin grants it with `shrooms admin lan grant` (ADR-068)", a, a)
+}
+
+// ownAddress is whether a is assigned to one of this machine's interfaces.
+// A variable so tests can say what the machine has.
+var ownAddress = func(a netip.Addr) bool {
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return false
+	}
+	for _, ad := range addrs {
+		if ipn, ok := ad.(*net.IPNet); ok {
+			if own, ok := netip.AddrFromSlice(ipn.IP); ok && own.Unmap() == a {
+				return true
+			}
+		}
+	}
+	return false
 }
