@@ -647,7 +647,8 @@ shrooms admin lan grant --mesh home --name jimmy-crib --host ha --ports 80,8123
 Then `http://ha.lan.jimmy-crib.home.mesh:8123` from any device on the mesh,
 including the phone on mobile data.
 - **Nothing is installed on the device.** It sees ordinary connections from
-  the gateway's LAN address.
+  the gateway's LAN address, which must be a private one (192.168.x.x,
+  10.x.x.x, 172.16–31.x.x): a public address is not a LAN host.
 - **Members never see its LAN address.** They reach an address of the host's
   own on the mesh, and the gateway proxies to the LAN.
 - **What stays closed:** the gateway serves only the listed ports, and only

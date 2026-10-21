@@ -7,7 +7,9 @@ folder) and the owner's answers to it: normal cages stay network-open, and
 services become local-only when LAN hosts ship. Amended again the same day
 after the auditor's implementation audit (`09-adr-068-implementation.md`):
 the sentences below now say what the code enforces, and members gained LAN
-aliases for the printer's passive FTPS. Narrows the "subnet routing" in `docs/an-exit-node-for-the-mesh.md`,
+aliases for the printer's passive FTPS. Its re-check
+(`10-adr-068-fix-review.md`) closed those findings and its own F-39 to F-46
+are folded in below. Narrows the "subnet routing" in `docs/an-exit-node-for-the-mesh.md`,
 and doesn't change ADR-030's "no exit nodes".
 
 ## Context
@@ -79,11 +81,14 @@ reaches the mesh: services become this machine's own ports only.**
   - one of the gateway's own addresses;
   - a mesh or synthetic range (ADR-005, ADR-021).
 
-  A LAN interface is decided by type, not name: a physical one, or a bridge,
-  bond or VLAN over one (sysfs). A WAN neighbour is still on a physical link,
-  so the gateway's owner is trusted not to list one; a container on docker0,
-  a host behind another VPN and a tunnel are refused (audit F-30). Status
-  shows, on the gateway, which interface each host is on.
+  The address must be private: RFC 1918 IPv4, or IPv6 in fc00::/7 outside the
+  mesh's own fd00::/8, so in practice IPv4. A WAN is a physical link too, and
+  this is what keeps its neighbours, the ISP's router and public hosts out
+  (audit F-40). A LAN interface is decided by type, not name: a physical one,
+  or a bridge, bond or VLAN over one (sysfs); a container on docker0, a host
+  behind another VPN and a tunnel are refused (F-30). What remains is a
+  private network upstream of the gateway, which its owner is trusted not to
+  list, and which status shows by interface on the gateway.
 - **Limits.** At most 16 hosts per gateway and 256 ports per host, in at most
   8 ranges. A grant for 1–65535 is the whole device, so it's refused. These
   caps also bound the announce.
@@ -128,16 +133,21 @@ reaches the mesh: services become this machine's own ports only.**
 - **Revocable.** Withdrawing the grant, narrowing its ports or letting it
   lapse drops that host or port, including connections already open: the
   gateway closes them at once on a grant change and within five seconds of a
-  lapse (audit F-27). Revoking the gateway's credential, or its running out,
-  drops all its hosts from every listing (F-31). On a mesh with no admin, the
-  feature doesn't exist.
+  lapse (audit F-27). A gateway's credential running out drops all its
+  hosts from every listing (F-31), and the gateway itself stops serving them
+  (F-42). Revoking it drops them on each node as the revocation reaches it:
+  prompt where it has arrived, and as slow as its distribution elsewhere,
+  which repeats it each epoch (F-41). On a mesh with no admin, the feature
+  doesn't exist.
 - **Ordered by serial.** A node keeps the highest serial for each gateway and
   host. The admin tool's default serial is the time in nanoseconds, and a
   statement not newer than the one held is refused with the serial to use,
   not reported as done (audit F-28: a withdrawal in the same second as its
   grant once printed "Withdrew" and changed nothing). The admin names the
-  gateway by `--device`, or by `--name`, which matches only the device that
-  holds the name, never a later claimant (F-33).
+  gateway by `--device`, or by `--name`, which matches only a device whose
+  credential carries that name: never a claimant (F-33), and never a device
+  that merely asserts it after the real one was forgotten (F-43). A name is
+  not a key; the tool says which key it chose.
 
 ### The gateway
 
@@ -154,8 +164,13 @@ reaches the mesh: services become this machine's own ports only.**
   on, onward to the LAN or the internet. The audit found it on the gateway
   (F-26); every node did it. Each node now hands its kernel only packets
   addressed to its own overlay address (`wg.SelfOnly`, desktop and phone),
-  and the gateway checks the same in its own wrapper. So there is no IP
-  forwarding and no broad DNAT, whatever the kernel's forwarding setting.
+  and the gateway checks the same in its own wrapper. Only TCP, UDP and
+  ICMPv6 pass, with no extension header but a fragment header, and no ICMPv6
+  that steers routing or neighbours: a routing header would otherwise ask the
+  kernel to pass the packet on, refused only by a kernel default (F-39). So
+  there is no IP forwarding and no broad DNAT, whatever the kernel's
+  settings. What is dropped is counted, per mesh, as
+  `shrooms_mesh_dropped_not_for_self_total` (F-46).
 - **In no kernel namespace at all** (as built). The gateway wraps its data
   plane's TUN device: packets WireGuard delivers for a host's overlay address
   go into a userspace TCP stack (gVisor, through wireguard-go's netstack), and
@@ -209,12 +224,14 @@ from home, the camera didn't).
   address is routed into the mesh on this device, as a /32, more specific
   than any LAN's route, and translated to the host's overlay address; the
   replies come back from the address the application dialled.
-- **Only while the host is on the mesh.** The route is added when the host
-  resolves and taken away when its grant or gateway goes, so the address
-  belongs to the LAN again: a laptop back in the office reaches the printer
-  directly.
+- **Only while the host is on the mesh.** The route is added while the host
+  is listed and its gateway online, and taken away when its grant goes or its
+  gateway goes quiet (checked every 30 seconds), so the address belongs to
+  the LAN again: a laptop back in the office reaches the printer directly,
+  even with the gateway down (F-44).
 - **A private IPv4 address only.** A public one would quietly take a piece of
-  the internet with it.
+  the internet with it. The gateway's name in it is checked as a name, so an
+  alias that could never match is an error rather than silently idle (F-45).
 - **Nothing changes for the gateway or anyone else.** The gateway sees the
   same connections to the host's overlay address, under the same grant. The
   alias is local config, so the mesh learns nothing more about the LAN.
