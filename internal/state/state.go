@@ -1137,12 +1137,39 @@ func parseArray(s string) []string {
 	s = strings.TrimPrefix(s, "[")
 	s = strings.TrimSuffix(s, "]")
 	var out []string
-	for _, part := range strings.Split(s, ",") {
+	for _, part := range splitOutsideQuotes(s) {
 		if v := unquote(part); v != "" {
 			out = append(out, v)
 		}
 	}
 	return out
+}
+
+// splitOutsideQuotes splits an array's body on the commas between its items,
+// not those inside a quoted one. A LAN host's ports are a list of their own
+// ("printer=192.168.10.42/tcp:8883,990"), and a plain split on every comma cut
+// such an entry in two (found in the lab, 2026-10-21). formatArray writes items
+// with %q, so a backslash escapes the next character inside quotes.
+func splitOutsideQuotes(s string) []string {
+	var out []string
+	var cur strings.Builder
+	inQuote, escaped := false, false
+	for _, r := range s {
+		switch {
+		case escaped:
+			escaped = false
+		case r == '\\' && inQuote:
+			escaped = true
+		case r == '"':
+			inQuote = !inQuote
+		case r == ',' && !inQuote:
+			out = append(out, cur.String())
+			cur.Reset()
+			continue
+		}
+		cur.WriteRune(r)
+	}
+	return append(out, cur.String())
 }
 
 // WriteConfig writes a config file, creating the parent directory.

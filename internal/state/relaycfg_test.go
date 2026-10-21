@@ -153,3 +153,22 @@ func TestRelayAllShardsIsOffAndRoundTrips(t *testing.T) {
 		t.Error("relay_all_shards lost in the round trip")
 	}
 }
+
+// An array item may hold commas of its own, as a LAN host's ports do; only the
+// commas between items separate them (found in the lab, 2026-10-21).
+func TestAnArrayItemMayHoldCommas(t *testing.T) {
+	got := parseArray(`["web=10.77.0.13/tcp:8000,8001", "printer=192.168.10.42/tcp:8883,990,50000-50100"]`)
+	if len(got) != 2 || got[0] != "web=10.77.0.13/tcp:8000,8001" || got[1] != "printer=192.168.10.42/tcp:8883,990,50000-50100" {
+		t.Fatalf("parsed %q", got)
+	}
+	if got := parseArray(`["a", "b"]`); len(got) != 2 || got[1] != "b" {
+		t.Errorf("a plain list: %q", got)
+	}
+	if got := parseArray(`[a, b]`); len(got) != 2 || got[0] != "a" {
+		t.Errorf("bare items: %q", got)
+	}
+	in := []string{"web=10.77.0.13/tcp:8000,8001", "w"}
+	if got := parseArray(formatArray(in)); len(got) != 2 || got[0] != in[0] {
+		t.Errorf("round trip of an item with commas: %q", got)
+	}
+}
