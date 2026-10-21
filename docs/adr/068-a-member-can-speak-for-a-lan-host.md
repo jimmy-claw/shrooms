@@ -103,9 +103,11 @@ reaches the mesh: services become this machine's own ports only.**
 - **A namespace of its own.** LAN hosts are named
   `<host>.lan.<gateway>.<mesh>.mesh`, e.g. `printer.lan.pi5.office.mesh`. There
   is no short form. Neither a member's name (ADR-066) nor a service's name
-  (`<service>.<device>.<mesh>`) can take this shape: `lan` is reserved as a
-  service and device label. A declaration that collides is refused, not
-  resolved by first claim.
+  (`<service>.<device>.<mesh>`) can take this shape: the resolver answers a
+  name with `lan` as its second of three labels only from the grants, before
+  anything else. A device or service may still be called `lan`; it simply
+  never gets that shape (as built: the shape is reserved, not the label). A
+  host may not be called `lan`.
 
 ### The grant
 
@@ -126,10 +128,15 @@ reaches the mesh: services become this machine's own ports only.**
   review suggested a hash of it. But a private address is brute-forced from
   its hash in moments: a /16 is 65,536 candidates. And the gateway is trusted
   for its LAN regardless (above). So a commitment would hide nothing and bind
-  nothing. The address stays in the gateway's config and on no wire.
-- **Members verify it.** A node offers a host only with a valid, unexpired,
-  unrevoked grant naming it. Members reject a host announced without one, or
-  with ports beyond its grant.
+  nothing. The grant carries no address, and the mesh never does. That
+  doesn't make it secret: a device's own protocol may name it (a printer's
+  FTPS does, inside TLS), and a member's LAN alias puts it in that member's
+  config.
+- **Members verify it.** There is no host announcement: a member lists a host,
+  routes its address to the gateway and resolves its name only under a
+  valid, unexpired grant naming that gateway, verified against the mesh's
+  admin keys. It never sees or verifies the host's LAN address; the gateway
+  is trusted for that, and serves only the ports the grant names.
 - **Revocable.** Withdrawing the grant, narrowing its ports or letting it
   lapse drops that host or port, including connections already open: the
   gateway closes them at once on a grant change and within five seconds of a
@@ -165,9 +172,12 @@ reaches the mesh: services become this machine's own ports only.**
   (F-26); every node did it. Each node now hands its kernel only packets
   addressed to its own overlay address (`wg.SelfOnly`, desktop and phone),
   and the gateway checks the same in its own wrapper. Only TCP, UDP and
-  ICMPv6 pass, with no extension header but a fragment header, and no ICMPv6
-  that steers routing or neighbours: a routing header would otherwise ask the
-  kernel to pass the packet on, refused only by a kernel default (F-39). So
+  ICMPv6 pass, with no extension header but a fragment header: a routing
+  header would otherwise ask the kernel to pass the packet on, refused only
+  by a kernel default (F-39). Of ICMPv6, only echo, and errors about this
+  node's own traffic to the peer reporting them: two ends of a tunnel have
+  no router between them, so an error about anyone else is forged, to reset
+  or shrink another member's connection (the re-check's residual). So
   there is no IP forwarding and no broad DNAT, whatever the kernel's
   settings. What is dropped is counted, per mesh, as
   `shrooms_mesh_dropped_not_for_self_total` (F-46).
@@ -276,7 +286,7 @@ from home, the camera didn't).
   member is a new grant.
 - **The LAN host can't tell members apart:** everything comes from the
   gateway. Acceptable for an appliance; it's why members stay members.
-- **Until it's built**, `sshuttle` from one machine to an office member over
+- **Before this existed**, `sshuttle` from one machine to an office member over
   the mesh gives that machine the same reach, and nobody else.
 - **Settled in the build:**
   - IPv6 hosts;

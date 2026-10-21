@@ -644,33 +644,58 @@ and, by the admin, wherever the admin key is:
 shrooms admin lan grant --mesh home --name jimmy-crib --host ha --ports 80,8123
 ```
 
+`--name` matches only a name the device's credential carries, since anyone
+can call themselves anything. If it refuses, pass the gateway's key with
+`--device`; the tool prints the key it chose either way.
+
 Then `http://ha.lan.jimmy-crib.home.mesh:8123` from any device on the mesh,
 including the phone on mobile data.
 - **Nothing is installed on the device.** It sees ordinary connections from
-  the gateway's LAN address, which must be a private one (192.168.x.x,
-  10.x.x.x, 172.16–31.x.x): a public address is not a LAN host.
-- **Members never see its LAN address.** They reach an address of the host's
-  own on the mesh, and the gateway proxies to the LAN.
-- **What stays closed:** the gateway serves only the listed ports, and only
-  while the grant is in force; withdrawing it closes connections already
-  open. Nothing else on the LAN is reachable, and nothing else on the
-  gateway: a node takes from the mesh only packets addressed to itself. UDP
-  and ping don't cross.
-- **A mesh with no admin has no LAN hosts.** Neither does a sealed cage.
-- **An application that dials the device's LAN address** instead of the one
-  it was given needs a LAN alias on the member that runs it. Bambu Studio
-  does: it opens the printer's camera and FTPS data connections to the
-  address the printer reports. Without the alias those go nowhere, or, on a
-  LAN with the same range, to whatever local device has that address. On
-  the laptop that prints:
+  the gateway's LAN address.
+- **The device's address must be private:** 192.168.x.x, 10.x.x.x or
+  172.16–31.x.x, or an IPv6 ULA outside fd00::/8, which is the mesh's own
+  range. A public address is not a LAN host and is refused.
+- **The mesh does not carry its LAN address.** Members reach an address of
+  the host's own on the mesh, and the gateway proxies to the LAN. That isn't
+  a secret, though: the device's own protocol may tell a client its address
+  (a printer does), and a LAN alias (below) puts it in a member's config.
+- **What stays closed:** through the host's address, the gateway serves only
+  the listed ports, and only while the grant is in force; withdrawing it
+  closes connections already open. Nothing else on the LAN is reachable. The
+  gateway itself is a member like any other: its own services on its own
+  mesh address are as reachable as any member's, and a node takes from the
+  mesh only packets addressed to itself. UDP and ping don't cross.
+- **Who can reach it:** every member. A normal cage can, exactly as its
+  machine can; a sealed cage can't. A mesh with no admin has no LAN hosts.
 
-  ```toml
-  mesh.office.lan_aliases = ["192.168.10.143=printer.lan.proteus"]
-  ```
+#### When an application dials the device's own address: LAN aliases
 
-  That address goes to the printer over the mesh while the printer is on
-  it, and back to the LAN when it isn't, so the laptop still reaches it
-  directly in the office. Private IPv4 addresses only; desktop only.
+Some applications use the address the device reports instead of the one they
+were given. Bambu Studio does: it opens the printer's camera and FTPS data
+connections to the printer's LAN address. From another LAN those go nowhere,
+or, on a LAN with the same range, to whatever local device has that address.
+The member that runs such an application gives it a **LAN alias**:
+
+```toml
+# on the laptop that prints
+mesh.office.lan_aliases = ["192.168.10.143=printer.lan.proteus"]
+```
+
+That address goes to the printer over the mesh while the printer is offered
+and its gateway is online (checked every 30 seconds), and back to the LAN
+otherwise, so in the office the laptop reaches the printer directly even with
+the gateway down. A printer that is switched off while its gateway is up
+keeps the alias, and simply doesn't answer. Private IPv4 addresses only;
+desktops only.
+
+The grant must also include the port the device names for its data
+connections. On the office printer that is 2024, as seen in its connections;
+check your model's own rather than granting a wide range:
+
+```sh
+shrooms admin lan grant --mesh office --name proteus --host printer \
+  --ports 990,2024,3000,3002,6000,8883
+```
 
 > **This is still a way from the mesh into your LAN, and it is worth naming.**
 > Every member can reach the host's listed ports, including a phone that

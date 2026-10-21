@@ -231,6 +231,13 @@ mesh.home.lan_hosts = ["ha=192.168.0.116/tcp:80,8123"]
 <span class="cmd">shrooms admin lan grant --mesh home --name jimmy-crib --host ha --ports 80,8123</span></code></pre>
 
 <p>
+    <code>--name</code> matches only a name the device's credential carries,
+    since anyone can call themselves anything. If it refuses, pass the
+    gateway's key with <code>--device</code>; the tool prints the key it chose
+    either way.
+</p>
+
+<p>
     Then <code>http://ha.lan.jimmy-crib.home.mesh:8123</code> from any device
     on the mesh, including the phone on mobile data. <code>shrooms status</code>
     lists it with an IPv4 address too, for an application that asks for an IP.
@@ -239,14 +246,21 @@ mesh.home.lan_hosts = ["ha=192.168.0.116/tcp:80,8123"]
 </p>
 
 <ul>
-    <li><strong>Members never see its LAN address.</strong> The host gets an
-    address of its own on the mesh, and the gateway proxies.</li>
-    <li><strong>Only the listed ports, only while granted.</strong> Nothing else
-    on the LAN is reachable, nor anything else on the gateway; UDP and ping do
-    not cross. <code>shrooms admin lan withdraw</code> takes it away, and
-    closes connections already open.</li>
-    <li><strong>A mesh with no admin has no LAN hosts</strong>, and a sealed
-    cage cannot reach one.</li>
+    <li><strong>The device's address must be private:</strong> 192.168.x.x,
+    10.x.x.x or 172.16–31.x.x, or an IPv6 ULA outside <code>fd00::/8</code>,
+    which is the mesh's own range. A public address is refused.</li>
+    <li><strong>The mesh does not carry its LAN address.</strong> The host gets
+    an address of its own on the mesh, and the gateway proxies. That is not a
+    secret, though: the device's own protocol may tell a client its address,
+    and a LAN alias (below) puts it in a member's config.</li>
+    <li><strong>Only the listed ports, only while granted.</strong> Through the
+    host's address nothing else is reachable, on the LAN or on the gateway;
+    UDP and ping do not cross. <code>shrooms admin lan withdraw</code> takes it
+    away, and closes connections already open. The gateway itself is a member
+    like any other, and its own services are as reachable as any member's.</li>
+    <li><strong>Every member can reach it.</strong> A normal cage can, exactly
+    as its machine can; a sealed cage cannot. A mesh with no admin has no LAN
+    hosts.</li>
 </ul>
 
 <p>
@@ -255,16 +269,24 @@ mesh.home.lan_hosts = ["ha=192.168.0.116/tcp:80,8123"]
     connections to the address the printer reports, which from home goes
     nowhere, or, on a LAN with the same range, to whatever local device has
     that address. The member that runs such an application gives it a
-    <strong>LAN alias</strong>:
+    <strong>LAN alias</strong>, and the grant includes the port the device
+    names for its data connections (2024 on the office printer, as seen in its
+    connections; check your model's own rather than granting a wide range):
 </p>
 
 <pre><code><span class="c"># on the laptop that prints</span>
-mesh.office.lan_aliases = ["192.168.10.143=printer.lan.proteus"]</code></pre>
+mesh.office.lan_aliases = ["192.168.10.143=printer.lan.proteus"]
+
+<span class="c"># by the admin</span>
+<span class="cmd">shrooms admin lan grant --mesh office --name proteus --host printer --ports 990,2024,3000,3002,6000,8883</span></code></pre>
 
 <p>
-    That address goes to the printer over the mesh while the printer is on
-    it, and back to the LAN when it is not, so the laptop still reaches it
-    directly in the office. Private IPv4 addresses only, on desktops.
+    That address goes to the printer over the mesh while the printer is
+    offered and its gateway is online (checked every 30 seconds), and back to
+    the LAN otherwise, so in the office the laptop reaches it directly even
+    with the gateway down. A printer that is switched off while its gateway is
+    up keeps the alias and simply does not answer. Private IPv4 addresses only,
+    on desktops.
 </p>
 
 <div class="warn">
