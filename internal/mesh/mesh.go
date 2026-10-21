@@ -156,6 +156,12 @@ type Mesh struct {
 	lanGrants  map[string]heldLanGrant
 	lastLanOut time.Time
 	lanChanged func() // OnLanGrant
+	// lanAliases are this device's LAN aliases (lanhost.Alias); the active
+	// ones, those whose host resolves, are kept to tell the daemon when
+	// they change, so it routes exactly those.
+	lanAliases     []lanhost.Alias
+	lanAliasActive map[netip.Addr]netip.Addr
+	lanAliasHook   func(map[netip.Addr]netip.Addr)
 
 	// relayNow is the relay currently in use, for logging changes.
 	relayNow netip.AddrPort
@@ -412,6 +418,13 @@ func New(log *slog.Logger, cfg state.Config, st *state.State, node *waku.Node, d
 	// the bind the same way.
 	m.loadRelayAdvice()
 	m.loadLanGrants()
+	if len(cfg.LanAliases) > 0 {
+		if m.lanAliases, err = lanhost.ParseAliases(cfg.LanAliases); err != nil {
+			// Not fatal: an alias is a convenience on top of the host's
+			// mesh address, which still works.
+			log.Warn("lan_aliases not used", "err", err)
+		}
+	}
 
 	return m, nil
 }
@@ -2345,6 +2358,7 @@ func (m *Mesh) syncPeers() error {
 			entries = append(entries, v4.Entry{Overlay: h.Overlay, DevicePub: lanhost.AliasKey(h.Gateway, h.Name)})
 		}
 		m.v4.Update(entries)
+		m.syncLanAliases(lanHosts)
 	}
 	out := make([]wg.Peer, 0, len(peers))
 	drifted := false

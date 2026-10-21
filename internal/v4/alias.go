@@ -167,6 +167,11 @@ type Table struct {
 	// looks like a browser problem and is the exact failure ADR-021 exists to
 	// fix, so it must be visible somewhere rather than silent.
 	exhausted int
+	// lan maps a LAN address this device's owner aliased to a LAN host's
+	// overlay address (ADR-068, lanhost.Alias). Outbound only: Alias never
+	// answers with one, so DNS keeps giving the synthetic address, and a
+	// reply goes back from whichever address its flow was opened to.
+	lan map[netip.Addr]netip.Addr
 }
 
 // AliasGrace is how long a peer keeps its alias after leaving the roster.
@@ -294,12 +299,23 @@ func (t *Table) Alias(overlay netip.Addr) (netip.Addr, bool) {
 	return a, ok
 }
 
-// Overlay returns the address an alias stands for.
+// Overlay returns the address an alias stands for: a synthetic one, or a LAN
+// address aliased to a LAN host.
 func (t *Table) Overlay(alias netip.Addr) (netip.Addr, bool) {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
-	a, ok := t.to6[alias]
+	if a, ok := t.to6[alias]; ok {
+		return a, ok
+	}
+	a, ok := t.lan[alias]
 	return a, ok
+}
+
+// SetLanAliases replaces the LAN addresses that stand for LAN hosts.
+func (t *Table) SetLanAliases(m map[netip.Addr]netip.Addr) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.lan = m
 }
 
 // Block returns the range this mesh's aliases come from, which is what has to

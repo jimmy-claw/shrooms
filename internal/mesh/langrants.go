@@ -362,3 +362,60 @@ func (m *Mesh) OwnLanGrant(host string, now time.Time) *cred.LanGrant {
 	}
 	return h.g
 }
+
+// syncLanAliases points this device's LAN aliases at the hosts they name, and
+// tells the daemon which are active when that changes. An alias is active only
+// while its host is listed: otherwise the LAN address is left to the LAN, so a
+// member at the gateway's own site still reaches the device directly when the
+// grant or the gateway is gone.
+func (m *Mesh) syncLanAliases(hosts []LanHost) {
+	if len(m.lanAliases) == 0 || m.v4 == nil {
+		return
+	}
+	active := map[netip.Addr]netip.Addr{}
+	for _, al := range m.lanAliases {
+		for _, h := range hosts {
+			if !h.Self && h.Name == al.Host && h.GatewayName == al.Gateway {
+				active[al.LAN] = h.Overlay
+				break
+			}
+		}
+	}
+	m.v4.SetLanAliases(active)
+
+	m.lanMu.Lock()
+	same := len(active) == len(m.lanAliasActive)
+	for a, o := range active {
+		if m.lanAliasActive[a] != o {
+			same = false
+		}
+	}
+	m.lanAliasActive = active
+	hook := m.lanAliasHook
+	m.lanMu.Unlock()
+	if !same {
+		m.log.Info("LAN aliases", "active", len(active), "of", len(m.lanAliases))
+		if hook != nil {
+			hook(active)
+		}
+	}
+}
+
+// OnLanAliases registers f to run with the active LAN aliases whenever they
+// change: the daemon routes those addresses at the mesh's interface.
+func (m *Mesh) OnLanAliases(f func(map[netip.Addr]netip.Addr)) {
+	m.lanMu.Lock()
+	m.lanAliasHook = f
+	m.lanMu.Unlock()
+}
+
+// LanAliases is the LAN aliases now active, LAN address to host overlay.
+func (m *Mesh) LanAliases() map[netip.Addr]netip.Addr {
+	m.lanMu.Lock()
+	defer m.lanMu.Unlock()
+	out := make(map[netip.Addr]netip.Addr, len(m.lanAliasActive))
+	for a, o := range m.lanAliasActive {
+		out[a] = o
+	}
+	return out
+}

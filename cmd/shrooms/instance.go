@@ -8,6 +8,7 @@ import (
 	"net/netip"
 	"sort"
 	"strings"
+	"sync"
 	"sync/atomic"
 
 	"golang.zx2c4.com/wireguard/device"
@@ -39,10 +40,15 @@ type instance struct {
 	aliases *v4.Table
 	// lan answers for the LAN hosts this node offers on this mesh
 	// (ADR-068); nil when its config lists none.
-	lan    *lanproxy.Gateway
-	self   netip.Addr
-	prefix netip.Prefix
-	iface  string
+	lan *lanproxy.Gateway
+	// tunName is the interface as the kernel named it, and aliasRoutes the
+	// LAN aliases routed at it now (lanaliases.go).
+	tunName     string
+	aliasMu     sync.Mutex
+	aliasRoutes map[netip.Addr]bool
+	self        netip.Addr
+	prefix      netip.Prefix
+	iface       string
 
 	// port is the WireGuard port bound now; read it with listenPort. It moves
 	// when ephemeral is set (state.Config.EphemeralPort): a fresh port at start
@@ -141,6 +147,7 @@ func startInstance(ctx context.Context, log *slog.Logger, cfg state.Config, st *
 	if err != nil {
 		return nil, fmt.Errorf("mesh %q: tun: %w (need CAP_NET_ADMIN)", m.Label, err)
 	}
+	in.tunName, _ = tunDev.Name()
 	translated := v4.NewDevice(tunDev, in.aliases, wg.DefaultMTU-40-20)
 	// Only what is addressed to this device reaches the kernel: WireGuard
 	// checks a packet's source, not where it is going (F-26).
@@ -213,6 +220,10 @@ func startInstance(ctx context.Context, log *slog.Logger, cfg state.Config, st *
 		return in, fmt.Errorf("mesh %q: %w", m.Label, err)
 	}
 	in.mesh.SetV4(in.aliases)
+	if len(m.LanAliases) > 0 {
+		in.mesh.OnLanAliases(func(active map[netip.Addr]netip.Addr) { in.routeLanAliases(log, active) })
+		in.routeLanAliases(log, in.mesh.LanAliases())
+	}
 
 	in.specs = append([]string(nil), m.Services...)
 	if specs, err := meshCfg.ServiceSpecs(); err != nil {

@@ -211,3 +211,50 @@ func TestOutboundIPv6IsUntouched(t *testing.T) {
 		t.Error("did not translate the IPv4 packet behind it")
 	}
 }
+
+// A LAN address aliased to a LAN host goes to the host's overlay address, and
+// the reply comes back from the LAN address the application dialled, not
+// from the host's synthetic alias, which is the same overlay address
+// (ADR-068).
+func TestALanAliasIsAnsweredFromItself(t *testing.T) {
+	tbl, synthetic := testTable(t)
+	lan := netip.MustParseAddr("192.168.10.143")
+	tbl.SetLanAliases(map[netip.Addr]netip.Addr{lan: peer6})
+	if a, _ := tbl.Alias(peer6); a != synthetic {
+		t.Fatalf("the LAN alias replaced the synthetic one in DNS: %s", a)
+	}
+	ft := &fakeTun{}
+	d := NewDevice(ft, tbl, 1360)
+
+	ft.in = [][]byte{tcp4(t, tbl.Self(), lan, []byte("hello"), false, 1460)}
+	got := read(t, d)
+	if len(got) != 1 || !bytes.Equal(got[0][24:40], addr16(peer6)) {
+		t.Fatal("did not go to the host's overlay address")
+	}
+	reply := make([]byte, len(got[0]))
+	copy(reply, got[0])
+	copy(reply[8:24], addr16(peer6))
+	copy(reply[24:40], addr16(self6))
+	body := reply[v6HeaderLen:]
+	sport := binary.BigEndian.Uint16(body[0:2])
+	dport := binary.BigEndian.Uint16(body[2:4])
+	binary.BigEndian.PutUint16(body[0:2], dport)
+	binary.BigEndian.PutUint16(body[2:4], sport)
+	putChecksum(body, 16, tcpUDPChecksum(reply[8:24], reply[24:40], protoTCP, body))
+	framed := make([]byte, 16+len(reply))
+	copy(framed[16:], reply)
+	d.Write([][]byte{framed}, 16)
+	if len(ft.written) != 1 || ft.written[0][0]>>4 != 4 {
+		t.Fatal("the reply was not translated back to IPv4")
+	}
+	verify4(t, ft.written[0])
+	if !bytes.Equal(ft.written[0][12:16], addr4(lan)) {
+		t.Errorf("the reply came from %v, not the LAN address dialled", ft.written[0][12:16])
+	}
+
+	tbl.SetLanAliases(nil)
+	ft.in = [][]byte{tcp4(t, tbl.Self(), lan, []byte("hello"), false, 1460)}
+	if got := read(t, d); len(got) != 0 {
+		t.Error("an alias taken away still carried a packet")
+	}
+}

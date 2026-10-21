@@ -2,6 +2,7 @@ package mesh
 
 import (
 	"encoding/hex"
+	"net/netip"
 	"testing"
 	"time"
 
@@ -9,6 +10,7 @@ import (
 	"github.com/vpavlin/shrooms/internal/identity"
 	"github.com/vpavlin/shrooms/internal/lanhost"
 	"github.com/vpavlin/shrooms/internal/state"
+	"github.com/vpavlin/shrooms/internal/v4"
 )
 
 func (f *adviceFixture) lanGrant(t *testing.T, gw []byte, host, ports string, serial uint64, withdrawn bool) []byte {
@@ -186,5 +188,48 @@ func TestAnExpiredGatewaysHostsAreNotListed(t *testing.T) {
 	f.m.mu.Unlock()
 	if got := f.m.LanHosts(time.Now()); len(got) != 0 {
 		t.Errorf("an expired gateway's host is listed: %+v", got)
+	}
+}
+
+// A LAN alias points at its host while the host is on the mesh, and is let go
+// when the grant is withdrawn, so the address belongs to the LAN again; the
+// daemon hears of each change (ADR-068).
+func TestALanAliasFollowsItsHost(t *testing.T) {
+	f := newAdviceFixture(t, state.Config{})
+	gw, _ := identity.New()
+	f.m.roster.Apply(newAnnounce(t, gw, "proteus", nil, 1), time.Now())
+	f.m.v4 = v4.NewTableIn(netip.MustParsePrefix("198.19.128.0/19"), v4.Entry{}, nil)
+	var err error
+	if f.m.lanAliases, err = lanhost.ParseAliases([]string{"192.168.10.143=printer.lan.proteus", "192.168.10.9=camera.lan.proteus"}); err != nil {
+		t.Fatal(err)
+	}
+	var heard []map[netip.Addr]netip.Addr
+	f.m.OnLanAliases(func(a map[netip.Addr]netip.Addr) { heard = append(heard, a) })
+	lan := netip.MustParseAddr("192.168.10.143")
+
+	f.m.handleLanGrant(f.lanGrant(t, gw.DevicePub, "printer", "8883", 1, false), time.Now())
+	f.m.syncLanAliases(f.m.LanHosts(time.Now()))
+	want := lanhost.Overlay(f.nk.Prefix(), gw.DevicePub, "printer")
+	if got := f.m.LanAliases(); len(got) != 1 || got[lan] != want {
+		t.Fatalf("active: %v", got)
+	}
+	if o, ok := f.m.v4.Overlay(lan); !ok || o != want {
+		t.Errorf("the table does not send the LAN address to the host: %v %v", o, ok)
+	}
+	f.m.syncLanAliases(f.m.LanHosts(time.Now()))
+	if len(heard) != 1 {
+		t.Errorf("heard %d changes, want 1: the same set again is not a change", len(heard))
+	}
+
+	f.m.handleLanGrant(f.lanGrant(t, gw.DevicePub, "printer", "", 2, true), time.Now())
+	f.m.syncLanAliases(f.m.LanHosts(time.Now()))
+	if got := f.m.LanAliases(); len(got) != 0 {
+		t.Errorf("still active after the withdrawal: %v", got)
+	}
+	if _, ok := f.m.v4.Overlay(lan); ok {
+		t.Error("the table still sends the LAN address to the mesh")
+	}
+	if len(heard) != 2 || len(heard[1]) != 0 {
+		t.Errorf("the daemon was not told: %v", heard)
 	}
 }

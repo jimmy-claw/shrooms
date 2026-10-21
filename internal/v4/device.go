@@ -66,6 +66,11 @@ type flowKey struct {
 type flow struct {
 	seen  time.Time
 	local netip.Addr
+	// remote is the IPv4 address the flow was opened to, which its replies
+	// must come from. Usually the peer's alias; a LAN alias (ADR-068) is a
+	// second address for the same overlay one, and a reply from the alias
+	// the application did not dial is one it does not recognise.
+	remote netip.Addr
 }
 
 // FlowIdle is how long a flow is remembered after its last packet.
@@ -165,7 +170,7 @@ func (d *Device) toOverlay(pkt []byte) []byte {
 	if key, ok := keyOf(pkt[9], pkt[v4HeaderLen:], peer, true); ok {
 		// The source as sent, not the one we would have chosen.
 		src, _ := netip.AddrFromSlice(pkt[12:16])
-		d.remember(key, src)
+		d.remember(key, src, dst)
 	}
 	return six
 }
@@ -179,17 +184,19 @@ func (d *Device) toAlias(pkt []byte) []byte {
 	if !ok {
 		return nil
 	}
-	alias, mapped := d.table.Alias(src)
-	if !mapped {
-		return nil
-	}
 	key, ok := keyOf(pkt[6], pkt[v6HeaderLen:], src, false)
 	if !ok {
 		return nil // ordinary IPv6 traffic; leave it alone
 	}
-	local, seen := d.known(key)
+	local, alias, seen := d.known(key)
 	if !seen {
 		return nil
+	}
+	if !alias.IsValid() {
+		var mapped bool
+		if alias, mapped = d.table.Alias(src); !mapped {
+			return nil
+		}
 	}
 	if !local.IsValid() {
 		// A flow remembered before this carried the address, or a packet whose
@@ -226,11 +233,11 @@ func keyOf(proto byte, body []byte, peer netip.Addr, outbound bool) (flowKey, bo
 	return flowKey{}, false
 }
 
-func (d *Device) remember(k flowKey, local netip.Addr) {
+func (d *Device) remember(k flowKey, local, remote netip.Addr) {
 	now := time.Now()
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	d.flows[k] = flow{seen: now, local: local}
+	d.flows[k] = flow{seen: now, local: local, remote: remote}
 	// Swept here rather than on a timer: the table only grows when packets are
 	// being translated, so the moment one arrives is exactly when it is worth
 	// looking, and a daemon that is idle does no work.
@@ -245,17 +252,17 @@ func (d *Device) remember(k flowKey, local netip.Addr) {
 
 // known returns the local address the flow was opened from, if it is still
 // live. The address matters as much as the fact: see toAlias.
-func (d *Device) known(k flowKey) (netip.Addr, bool) {
+func (d *Device) known(k flowKey) (local, remote netip.Addr, ok bool) {
 	now := time.Now()
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	f, ok := d.flows[k]
 	if !ok || now.Sub(f.seen) > FlowIdle {
-		return netip.Addr{}, false
+		return netip.Addr{}, netip.Addr{}, false
 	}
 	// Refreshed on use, so a long-lived connection does not expire underneath
 	// itself while it is still carrying traffic.
 	f.seen = now
 	d.flows[k] = f
-	return f.local, true
+	return f.local, f.remote, true
 }

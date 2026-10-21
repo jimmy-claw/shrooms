@@ -371,6 +371,10 @@ type Config struct {
 	// ADR-068). There is no top-level form.
 	LanHosts []string
 
+	// LanAliases are LAN addresses this device sends to LAN hosts on the
+	// mesh instead (set by ForMesh from Mesh.LanAliases; ADR-068).
+	LanAliases []string
+
 	// HostsSuffix is the domain appended to peer names.
 	HostsSuffix string
 
@@ -1403,6 +1407,9 @@ func RenderConfig(c Config) (string, error) {
 			}
 			if len(m.LanHosts) > 0 {
 				fmt.Fprintf(&b, "mesh.%s.lan_hosts = %s\n", label, formatArray(m.LanHosts))
+			}
+			if len(m.LanAliases) > 0 {
+				fmt.Fprintf(&b, "mesh.%s.lan_aliases = %s\n", label, formatArray(m.LanAliases))
 			}
 			// Pinned by `shrooms mesh rename`, so that renaming a mesh cannot
 			// move its interface or its port. Absent means derived from

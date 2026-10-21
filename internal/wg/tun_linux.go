@@ -102,3 +102,31 @@ func CreateTUN(name string, addr netip.Addr, prefix netip.Prefix, mtu int, v4Add
 	}
 	return dev, nil
 }
+
+// RouteHost routes one IPv4 address at a mesh interface, from this device's
+// synthetic address: a LAN alias (ADR-068). The MTU is the IPv4 side's, as
+// for the synthetic range. Replaced rather than added, so a restart or a
+// repeat is not an error.
+func RouteHost(iface string, a, src netip.Addr, mtu int) error {
+	if mtu == 0 {
+		mtu = DefaultMTU
+	}
+	args := []string{"route", "replace", netip.PrefixFrom(a, a.BitLen()).String(), "dev", iface,
+		"mtu", strconv.Itoa(mtu - 20)}
+	if src.IsValid() {
+		args = append(args, "src", src.String())
+	}
+	if out, err := exec.Command("ip", args...).CombinedOutput(); err != nil {
+		return fmt.Errorf("ip %v: %w: %s", args, err, out)
+	}
+	return nil
+}
+
+// UnrouteHost takes such a route away again.
+func UnrouteHost(iface string, a netip.Addr) error {
+	args := []string{"route", "del", netip.PrefixFrom(a, a.BitLen()).String(), "dev", iface}
+	if out, err := exec.Command("ip", args...).CombinedOutput(); err != nil {
+		return fmt.Errorf("ip %v: %w: %s", args, err, out)
+	}
+	return nil
+}

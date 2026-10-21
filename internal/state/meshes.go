@@ -54,6 +54,12 @@ type Mesh struct {
 	// offered under one mesh's admin grant.
 	LanHosts []string
 
+	// LanAliases are LAN addresses this device sends to a LAN host on this
+	// mesh instead, in the form lanhost.ParseAlias reads:
+	// "192.168.10.143=printer.lan.proteus". For applications that dial the
+	// address a device reports rather than the one they were given.
+	LanAliases []string
+
 	// AnnounceServices lets this mesh's peers see the names (ADR-023). Per
 	// mesh, because telling your own machines what you run and telling
 	// somebody else's are different decisions.
@@ -562,6 +568,8 @@ func (c *Config) setMeshField(label, field, val string, line int) error {
 		m.Services = parseArray(val)
 	case "lan_hosts":
 		m.LanHosts = parseArray(val)
+	case "lan_aliases":
+		m.LanAliases = parseArray(val)
 	case "announce_services":
 		m.AnnounceServices = unquote(val) == "true"
 	case "announce_bound":
@@ -634,6 +642,7 @@ func (c Config) ForMesh(m Mesh, port uint16) Config {
 	out.Relay = m.Relay
 	out.Services = m.Services
 	out.LanHosts = m.LanHosts
+	out.LanAliases = m.LanAliases
 	out.AnnounceServices = m.AnnounceServices
 	out.AnnounceBound = m.AnnounceBound
 	out.QuietRevocations = m.QuietRevocations

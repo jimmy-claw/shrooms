@@ -1691,6 +1691,10 @@ func serveControl(ctx context.Context, log *slog.Logger, path string, instances 
 			if in.lan != nil {
 				links = in.lan.Links()
 			}
+			aliasOf := map[netip.Addr]string{}
+			for lan, o := range m.LanAliases() {
+				aliasOf[o] = lan.String()
+			}
 			for _, h := range m.LanHosts(now) {
 				st := lanHostStatus{
 					Mesh: meshLabel, Name: h.Name, Gateway: h.GatewayName, Self: h.Self, Online: h.Online,
@@ -1699,6 +1703,7 @@ func serveControl(ctx context.Context, log *slog.Logger, path string, instances 
 					Until:   h.NotAfter.Unix(),
 					DNSName: lanHostDNSName(h.Name, h.GatewayName, meshLabel, cfg.HostsSuffix),
 				}
+				st.LANAlias = aliasOf[h.Overlay]
 				if h.Self {
 					st.LAN = links[h.Name]
 					if st.LAN == "" {
@@ -2202,6 +2207,9 @@ type lanHostStatus struct {
 	// LAN is, on the gateway only, where the host really is: its LAN
 	// address and interface, or why it cannot be served (F-30).
 	LAN string `json:"lan,omitempty"`
+	// LANAlias is the LAN address this device sends to the host instead,
+	// when its own config says so and the host is on the mesh.
+	LANAlias string `json:"lan_alias,omitempty"`
 }
 
 // lanHostDNSName is <host>.lan.<gateway>.<mesh>.<suffix>.
