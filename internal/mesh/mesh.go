@@ -29,6 +29,7 @@ import (
 	"github.com/vpavlin/shrooms/internal/disco"
 	"github.com/vpavlin/shrooms/internal/hosts"
 	"github.com/vpavlin/shrooms/internal/identity"
+	"github.com/vpavlin/shrooms/internal/lanhost"
 	"github.com/vpavlin/shrooms/internal/relay"
 	"github.com/vpavlin/shrooms/internal/state"
 	"github.com/vpavlin/shrooms/internal/topic"
@@ -2328,10 +2329,16 @@ func (m *Mesh) syncPeers() error {
 	// this is already the one place that runs when the roster changes, and an
 	// alias that lagged the roster would answer DNS for a peer the data plane
 	// has not been told about.
+	// LAN hosts (ADR-068) ride their gateway's peer entry, and get an alias
+	// of their own the same way a peer does.
+	lanHosts := m.LanHosts(time.Now())
 	if m.v4 != nil {
-		entries := make([]v4.Entry, 0, len(peers))
+		entries := make([]v4.Entry, 0, len(peers)+len(lanHosts))
 		for _, p := range peers {
 			entries = append(entries, v4.Entry{Overlay: p.Overlay, DevicePub: p.DevicePub})
+		}
+		for _, h := range lanHosts {
+			entries = append(entries, v4.Entry{Overlay: h.Overlay, DevicePub: lanhost.AliasKey(h.Gateway, h.Name)})
 		}
 		m.v4.Update(entries)
 	}
@@ -2375,6 +2382,7 @@ func (m *Mesh) syncPeers() error {
 		peer := wg.Peer{
 			WGPub:     p.WGPub,
 			AllowedIP: p.Overlay,
+			Extra:     lanHostsVia(lanHosts, p.DevicePub),
 			PSK:       identity.PairPSK(m.nk, m.st.Identity.WGPub, p.WGPub),
 			Keepalive: Keepalive,
 		}
@@ -2471,6 +2479,10 @@ func (m *Mesh) setMSSLimits(peers []wg.Peer) {
 	for _, p := range peers {
 		if p.RelayVia != nil {
 			relayed[p.AllowedIP] = true
+			// A LAN host behind a relayed gateway is relayed too.
+			for _, x := range p.Extra {
+				relayed[x] = true
+			}
 		}
 	}
 	m.dev.SetMSSLimit(func(dst netip.Addr) uint16 {

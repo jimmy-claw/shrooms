@@ -2,9 +2,13 @@ package wg
 
 import (
 	"net/netip"
+	"sort"
+	"strings"
 	"testing"
 
 	"github.com/vpavlin/shrooms/internal/identity"
+	"golang.zx2c4.com/wireguard/device"
+	"golang.zx2c4.com/wireguard/tun/tuntest"
 )
 
 func peer(b byte, endpoint string) Peer {
@@ -135,4 +139,55 @@ func TestInvalidateForcesTheNextWrite(t *testing.T) {
 	if d.applied != nil {
 		t.Error("Invalidate left the applied configuration in place")
 	}
+}
+
+// A peer's extra addresses are its LAN hosts (ADR-068): a change to them is a
+// change, and a withdrawn one stops being routed to the peer rather than being
+// left behind by IpcSet's habit of adding.
+func TestAPeersExtraAddressesAreReplacedNotAdded(t *testing.T) {
+	a := []Peer{peer(1, "203.0.113.1:51820")}
+	b := []Peer{peer(1, "203.0.113.1:51820")}
+	b[0].Extra = []netip.Addr{netip.MustParseAddr("fd00::aa")}
+	if samePeers(a, b) {
+		t.Error("an added LAN host was missed")
+	}
+
+	id, _ := identity.New()
+	dev, err := NewDevice(tuntest.NewChannelTUN().TUN(), id.WGPriv, 0, device.NewLogger(device.LogLevelSilent, ""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = dev.Close() })
+	other, _ := identity.New()
+	p := Peer{WGPub: other.WGPub, AllowedIP: netip.MustParseAddr("fd00::1"),
+		Extra: []netip.Addr{netip.MustParseAddr("fd00::aa"), netip.MustParseAddr("fd00::bb")}}
+	if err := dev.SetPeers([]Peer{p}); err != nil {
+		t.Fatal(err)
+	}
+	if got := allowedIPs(t, dev); got != "fd00::1/128 fd00::aa/128 fd00::bb/128" {
+		t.Fatalf("allowed ips %q", got)
+	}
+	p.Extra = []netip.Addr{netip.MustParseAddr("fd00::bb")}
+	if err := dev.SetPeers([]Peer{p}); err != nil {
+		t.Fatal(err)
+	}
+	if got := allowedIPs(t, dev); got != "fd00::1/128 fd00::bb/128" {
+		t.Errorf("a withdrawn LAN host is still routed: %q", got)
+	}
+}
+
+func allowedIPs(t *testing.T, dev *Device) string {
+	t.Helper()
+	s, err := dev.IpcGet()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out []string
+	for _, l := range strings.Split(s, "\n") {
+		if v, ok := strings.CutPrefix(l, "allowed_ip="); ok {
+			out = append(out, v)
+		}
+	}
+	sort.Strings(out)
+	return strings.Join(out, " ")
 }

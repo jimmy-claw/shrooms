@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/netip"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -20,7 +21,10 @@ type Peer struct {
 	WGPub     identity.WGKey
 	Endpoint  string // host:port; empty means "wait for them to reach us"
 	AllowedIP netip.Addr
-	PSK       [32]byte
+	// Extra are more addresses routed to this peer: the LAN hosts it offers
+	// as their gateway (ADR-068). Each is written /128, like AllowedIP.
+	Extra []netip.Addr
+	PSK   [32]byte
 
 	// PersistentKeepalive in seconds. DESIGN §10: 15-25s, never above 25 —
 	// 74% of CGNATs expire idle UDP state within 60s and the non-cellular CGN
@@ -202,9 +206,18 @@ func (d *Device) SetPeers(peers []Peer) error {
 			fmt.Fprintf(&b, "persistent_keepalive_interval=%d\n", p.Keepalive)
 		}
 		if p.AllowedIP.IsValid() {
+			// Replaced, not appended: a peer's extra addresses come and go
+			// with its LAN hosts, and IpcSet adds to what a peer has unless
+			// told otherwise, so a withdrawn host would stay routed to it.
+			b.WriteString("replace_allowed_ips=true\n")
 			// /128 — the address is a pure function of the peer's device key,
 			// so cryptokey routing is self-enforcing with no shared state.
 			fmt.Fprintf(&b, "allowed_ip=%s/128\n", p.AllowedIP)
+			for _, x := range p.Extra {
+				if x.IsValid() {
+					fmt.Fprintf(&b, "allowed_ip=%s/128\n", x)
+				}
+			}
 		}
 	}
 	if err := d.IpcSet(b.String()); err != nil {
@@ -231,8 +244,8 @@ func samePeers(a, b []Peer) bool {
 	for _, p := range b {
 		prev, ok := idx[p.WGPub]
 		if !ok || prev.Endpoint != p.Endpoint || prev.PSK != p.PSK ||
-			prev.AllowedIP != p.AllowedIP || prev.Keepalive != p.Keepalive ||
-			prev.KeepEndpoint != p.KeepEndpoint {
+			prev.AllowedIP != p.AllowedIP || !slices.Equal(prev.Extra, p.Extra) ||
+			prev.Keepalive != p.Keepalive || prev.KeepEndpoint != p.KeepEndpoint {
 			return false
 		}
 		// Relay endpoints compare by their serialised form, which encodes both
