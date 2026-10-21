@@ -366,6 +366,11 @@ type Config struct {
 	// internal/service for the syntax.
 	Services []string
 
+	// LanHosts are the LAN devices this node offers as their gateway, on the
+	// one mesh this Config is for (set by ForMesh from Mesh.LanHosts;
+	// ADR-068). There is no top-level form.
+	LanHosts []string
+
 	// HostsSuffix is the domain appended to peer names.
 	HostsSuffix string
 
@@ -1331,6 +1336,9 @@ func RenderConfig(c Config) (string, error) {
 			}
 			if len(m.Services) > 0 {
 				fmt.Fprintf(&b, "mesh.%s.services = %s\n", label, formatArray(m.Services))
+			}
+			if len(m.LanHosts) > 0 {
+				fmt.Fprintf(&b, "mesh.%s.lan_hosts = %s\n", label, formatArray(m.LanHosts))
 			}
 			// Pinned by `shrooms mesh rename`, so that renaming a mesh cannot
 			// move its interface or its port. Absent means derived from

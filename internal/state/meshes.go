@@ -48,6 +48,12 @@ type Mesh struct {
 	// Services published on this mesh, in the form ParseSpec reads.
 	Services []string
 
+	// LanHosts are LAN devices this node offers to this mesh as their
+	// gateway (ADR-068), in the form lanhost.ParseSpec reads:
+	// "printer=192.168.10.42/tcp:8883,990". Per mesh only: each host is
+	// offered under one mesh's admin grant.
+	LanHosts []string
+
 	// AnnounceServices lets this mesh's peers see the names (ADR-023). Per
 	// mesh, because telling your own machines what you run and telling
 	// somebody else's are different decisions.
@@ -554,6 +560,8 @@ func (c *Config) setMeshField(label, field, val string, line int) error {
 		m.Disabled = unquote(val) == "false"
 	case "services":
 		m.Services = parseArray(val)
+	case "lan_hosts":
+		m.LanHosts = parseArray(val)
 	case "announce_services":
 		m.AnnounceServices = unquote(val) == "true"
 	case "announce_bound":
@@ -625,6 +633,7 @@ func (c Config) ForMesh(m Mesh, port uint16) Config {
 	out.AdminKeys = m.AdminKeys
 	out.Relay = m.Relay
 	out.Services = m.Services
+	out.LanHosts = m.LanHosts
 	out.AnnounceServices = m.AnnounceServices
 	out.AnnounceBound = m.AnnounceBound
 	out.QuietRevocations = m.QuietRevocations
