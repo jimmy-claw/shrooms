@@ -429,7 +429,13 @@ func printLanHosts(out io.Writer, hosts []lanHostStatus) {
 		case !h.Online:
 			via += " (gateway offline)"
 		}
-		fmt.Fprintf(w, "  %s\t%s\ttcp %s\t%s\n", h.DNSName, via, h.Ports, h.Mesh)
+		// The IPv4 address too: an application that asks for "an IP", as
+		// Bambu Studio does, cannot use the name and may not take IPv6.
+		addr := h.Overlay
+		if h.OverlayV4 != "" {
+			addr = h.OverlayV4 + "  " + h.Overlay
+		}
+		fmt.Fprintf(w, "  %s\t%s\t%s\ttcp %s\t%s\n", h.DNSName, addr, via, h.Ports, h.Mesh)
 	}
 	w.Flush()
 }
