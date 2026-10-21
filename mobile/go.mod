@@ -12,7 +12,7 @@ module github.com/vpavlin/shrooms/mobile
 
 go 1.26.0
 
-toolchain go1.26.9
+toolchain go1.26.10
 
 require (
 	github.com/ethereum/go-ethereum v1.17.0

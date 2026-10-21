@@ -2,7 +2,7 @@ module github.com/vpavlin/shrooms
 
 go 1.26.0
 
-toolchain go1.26.9
+toolchain go1.26.10
 
 require (
 	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.4.1
