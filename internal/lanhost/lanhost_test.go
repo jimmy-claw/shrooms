@@ -30,6 +30,9 @@ func TestASpecIsALiteralHostOnListedPorts(t *testing.T) {
 		"printer=fe80::1%eth0/tcp:80",
 		"lan=192.168.10.42/tcp:80", // the namespace's own label
 		"printer=192.168.10.42",
+		"printer=8.8.8.8/tcp:80",              // public: a WAN neighbour is not a LAN host (F-40)
+		"printer=2a01:4f8::1/tcp:80",          // a global IPv6 address, the same
+		"printer=fec0::5054:ff:feaa:1/tcp:80", // the lab's WAN
 	} {
 		if _, err := ParseSpec(bad); err == nil {
 			t.Errorf("%q accepted", bad)

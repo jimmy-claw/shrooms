@@ -53,12 +53,53 @@ func (t *SelfOnlyTun) Write(bufs [][]byte, offset int) (int, error) {
 // Dropped is how many packets were not for this device.
 func (t *SelfOnlyTun) Dropped() uint64 { return t.dropped.Load() }
 
-// ForSelf reports whether p is an IPv6 packet addressed to self.
+// ForSelf reports whether p is an IPv6 packet addressed to self that carries
+// TCP, UDP or ICMPv6 and nothing that could send it further.
+//
+// The destination alone was not enough (audit F-39): a routing header names
+// the next hop inside the packet, so a packet "for" this node could ask its
+// kernel to pass it on, which only a kernel default (accept_source_route=0)
+// refused. So no extension header passes but a fragment header, which large
+// UDP needs and which names the protocol it carries too; and no ICMPv6 that
+// steers the node's routing or neighbours, which have no meaning on a tunnel.
 func ForSelf(p []byte, self netip.Addr) bool {
 	if len(p) < 40 || p[0]>>4 != 6 {
 		return false
 	}
 	var a [16]byte
 	copy(a[:], p[24:40])
-	return netip.AddrFrom16(a) == self
+	if netip.AddrFrom16(a) != self {
+		return false
+	}
+	next, at, first := p[6], 40, true
+	if next == protoFragment {
+		if len(p) < 48 {
+			return false
+		}
+		next, at = p[40], 48
+		first = p[42] == 0 && p[43]&0xf8 == 0 // fragment offset zero
+	}
+	switch next {
+	case protoTCP, protoUDP:
+		return true
+	case protoICMPv6:
+		if !first {
+			return true // the type is in the first fragment, checked there
+		}
+		if len(p) < at+1 {
+			return false
+		}
+		t := p[at]
+		// Router solicitation and advertisement, neighbour solicitation and
+		// advertisement, redirect.
+		return t < 133 || t > 137
+	}
+	return false
 }
+
+const (
+	protoTCP      = 6
+	protoUDP      = 17
+	protoFragment = 44
+	protoICMPv6   = 58
+)

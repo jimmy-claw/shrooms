@@ -57,8 +57,11 @@ func ParseAlias(s string) (Alias, error) {
 	if err := cred.CheckLanHostName(labels[0]); err != nil {
 		return Alias{}, fmt.Errorf("%q: %w", s, err)
 	}
-	if labels[2] == "" {
-		return Alias{}, fmt.Errorf("%q: no gateway named", s)
+	// The gateway's name is a DNS label like the host's: one that is not
+	// could never match a gateway, and the alias would sit there silently
+	// inactive (audit F-45).
+	if err := cred.CheckLanHostName(labels[2]); err != nil {
+		return Alias{}, fmt.Errorf("%q: the gateway: %w", s, err)
 	}
 	return Alias{LAN: a, Host: labels[0], Gateway: labels[2]}, nil
 }

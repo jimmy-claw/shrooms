@@ -39,7 +39,7 @@ func rosterSocket(t *testing.T, body string) string {
 }
 
 const twoMeshRoster = `{"peers":[
-  {"name":"nothing","mesh":"kc2","device":"aabbccddeeff00112233445566778899aabbccddeeff001122334455667788ff"},
+  {"name":"nothing","mesh":"kc2","device":"aabbccddeeff00112233445566778899aabbccddeeff001122334455667788ff","name_signed":true},
   {"name":"nothing","mesh":"home","device":"1111111111111111111111111111111111111111111111111111111111111111"},
   {"name":"k11","mesh":"home","device":"2222222222222222222222222222222222222222222222222222222222222222"}
 ]}`
@@ -104,7 +104,7 @@ func TestRevokeWithNoDaemonPointsAtTheHex(t *testing.T) {
 // grant or revocation would go to whoever squatted the name.
 func TestANameResolvesToItsHolderNotAClaimant(t *testing.T) {
 	sock := rosterSocket(t, `{"peers":[
-  {"name":"pi5","mesh":"office","device":"3333333333333333333333333333333333333333333333333333333333333333","online":false},
+  {"name":"pi5","mesh":"office","device":"3333333333333333333333333333333333333333333333333333333333333333","online":false,"name_signed":true},
   {"name":"pi5","mesh":"office","device":"4444444444444444444444444444444444444444444444444444444444444444","online":true,"contested":true,"dns_name":"pi5-1a2b.office.mesh"}
 ]}`)
 	got, err := deviceByName(sock, "office", "pi5")
@@ -119,5 +119,21 @@ func TestANameResolvesToItsHolderNotAClaimant(t *testing.T) {
 		t.Fatalf("resolved to the claimant %s", got)
 	} else if !strings.Contains(err.Error(), "--device") || !strings.Contains(err.Error(), "4444") {
 		t.Errorf("the error does not show the claimant and the way out: %v", err)
+	}
+}
+
+// A name the device only asserts is not taken as evidence: after the real
+// device is forgotten, whoever claimed its name is the only match (audit
+// F-43). The admin gets the key and the way to say it is the one.
+func TestANameOnlyAssertedIsNotEnough(t *testing.T) {
+	sock := rosterSocket(t, `{"peers":[
+  {"name":"pi5","mesh":"office","device":"5555555555555555555555555555555555555555555555555555555555555555"}
+]}`)
+	got, err := deviceByName(sock, "office", "pi5")
+	if err == nil {
+		t.Fatalf("resolved an unsigned name to %s", got)
+	}
+	if !strings.Contains(err.Error(), "--device 5555") {
+		t.Errorf("the error does not offer the key: %v", err)
 	}
 }

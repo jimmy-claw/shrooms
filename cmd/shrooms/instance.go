@@ -44,6 +44,7 @@ type instance struct {
 	// tunName is the interface as the kernel named it, and aliasRoutes the
 	// LAN aliases routed at it now (lanaliases.go).
 	tunName     string
+	inbound     *wg.SelfOnlyTun // what peers may hand the kernel (F-26)
 	aliasMu     sync.Mutex
 	aliasRoutes map[netip.Addr]bool
 	self        netip.Addr
@@ -152,6 +153,7 @@ func startInstance(ctx context.Context, log *slog.Logger, cfg state.Config, st *
 	// Only what is addressed to this device reaches the kernel: WireGuard
 	// checks a packet's source, not where it is going (F-26).
 	inbound := wg.SelfOnly(translated, self)
+	in.inbound = inbound
 
 	// LAN hosts this node offers (ADR-068): their packets are diverted into
 	// a userspace stack above the kernel TUN, so a host's address is in no

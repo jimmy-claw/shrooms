@@ -466,6 +466,10 @@ type meshStatus struct {
 	Iface     string `json:"interface"`
 	Port      uint16 `json:"port"`
 	Peers     int    `json:"peers"`
+	// NotForSelf counts packets peers sent this device that were not for it,
+	// dropped before the kernel (wg.SelfOnly, audit F-26): zero on a quiet
+	// mesh, and a member probing past this node otherwise.
+	NotForSelf uint64 `json:"not_for_self,omitempty"`
 
 	// Relays counts the devices on this mesh that offer to forward, this one
 	// included. Reported because zero is a configuration, not a fault, and it
@@ -807,6 +811,9 @@ type peerStatus struct {
 	// Contested: another device holds the name this one claims, so it answers
 	// to DNSName, its name with the last group of its address (audit F-18).
 	Contested bool `json:"contested,omitempty"`
+	// NameSigned: the name is the one the admin signed into its credential,
+	// not only what it announces (mesh.NameSigned).
+	NameSigned bool `json:"name_signed,omitempty"`
 
 	// Services are the names this peer says it publishes (ADR-023), empty
 	// unless that peer has been told to announce them. A claim about what it
@@ -1551,6 +1558,9 @@ func serveControl(ctx context.Context, log *slog.Logger, path string, instances 
 				Port:    in.listenPort(),
 				Peers:   len(in.mesh.Roster().Current(now)),
 			}
+			if in.inbound != nil {
+				ms.NotForSelf = in.inbound.Dropped()
+			}
 			if in.relay {
 				ms.Relays++
 			}
@@ -1729,7 +1739,8 @@ func serveControl(ctx context.Context, log *slog.Logger, path string, instances 
 					Online:    p.Online(now),
 					Relay:     p.Relay,
 					// Qualified: the only form the resolver answers.
-					DNSName: mesh.QualifiedDNSName(p.Name, meshLabel, cfg.HostsSuffix),
+					DNSName:    mesh.QualifiedDNSName(p.Name, meshLabel, cfg.HostsSuffix),
+					NameSigned: m.NameSigned(p.ID(), p.Name),
 				}
 				if !holds[p.ID()] {
 					ps.Contested = true

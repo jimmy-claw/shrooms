@@ -9,8 +9,9 @@ import (
 )
 
 func packetTo(dst netip.Addr) []byte {
-	p := make([]byte, 16+40)
+	p := make([]byte, 16+40+20)
 	p[16] = 6 << 4
+	p[16+6] = protoTCP
 	d := dst.As16()
 	copy(p[16+24:16+40], d[:])
 	return p
@@ -54,5 +55,40 @@ func TestSelfOnlyDeliversOnlyToSelf(t *testing.T) {
 	}
 	if f.Dropped() != 4 {
 		t.Errorf("dropped %d, want 4", f.Dropped())
+	}
+}
+
+// A packet for this device that could be sent on, or that steers its routing
+// or neighbours, is dropped too: a routing header names a further hop inside
+// the packet, and only a kernel default kept it from being followed (F-39).
+func TestSelfOnlyRefusesWhatCouldGoFurther(t *testing.T) {
+	self := netip.MustParseAddr("fdaa:bbbb:cccc::1")
+	with := func(next byte, rest ...byte) []byte {
+		p := packetTo(self)[16:]
+		p[6] = next
+		copy(p[40:], rest)
+		return p
+	}
+	for name, c := range map[string]struct {
+		p    []byte
+		want bool
+	}{
+		"TCP":                     {with(protoTCP), true},
+		"UDP":                     {with(protoUDP), true},
+		"ping":                    {with(protoICMPv6, 128), true},
+		"too big":                 {with(protoICMPv6, 2), true},
+		"routing header":          {with(43, protoTCP), false},
+		"hop-by-hop":              {with(0, protoTCP), false},
+		"redirect":                {with(protoICMPv6, 137), false},
+		"router advertisement":    {with(protoICMPv6, 134), false},
+		"neighbour solicitation":  {with(protoICMPv6, 135), false},
+		"first fragment of UDP":   {with(protoFragment, protoUDP, 0, 0, 1), true},
+		"later fragment of UDP":   {with(protoFragment, protoUDP, 0, 0x05, 0x00), true},
+		"fragment hiding routing": {with(protoFragment, 43, 0, 0, 1), false},
+		"fragmented redirect":     {with(protoFragment, protoICMPv6, 0, 0, 1, 0, 0, 0, 0, 137), false},
+	} {
+		if got := ForSelf(c.p, self); got != c.want {
+			t.Errorf("%s: ForSelf = %v, want %v", name, got, c.want)
+		}
 	}
 }

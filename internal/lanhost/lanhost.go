@@ -57,6 +57,15 @@ func ParseSpec(s string) (Spec, error) {
 	if err := CheckAddr(a); err != nil {
 		return Spec{}, fmt.Errorf("%q: %w", s, err)
 	}
+	// A LAN's addresses are private. The gateway's own check accepts any
+	// address on a physical link, and its WAN is one: without this, a host
+	// on the WAN's subnet, the ISP's router or a public neighbour, was a
+	// "LAN host" (audit F-40). What is left is a private network upstream,
+	// which the gateway's owner is trusted not to list, and which status
+	// shows by interface.
+	if !a.Unmap().IsPrivate() {
+		return Spec{}, fmt.Errorf("%q: %s is not a private address (10/8, 172.16/12, 192.168/16, fc00::/7): a LAN host is on a LAN", s, a)
+	}
 	rs, err := cred.ParseLanPorts(ports)
 	if err != nil {
 		return Spec{}, fmt.Errorf("%q: %w", s, err)

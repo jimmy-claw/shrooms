@@ -233,3 +233,51 @@ func TestALanAliasFollowsItsHost(t *testing.T) {
 		t.Errorf("the daemon was not told: %v", heard)
 	}
 }
+
+// A gateway serves its own hosts only while its own credential is in force:
+// expired, it stops, rather than waiting for members to notice (F-42).
+func TestAGatewayStopsWithItsOwnCredential(t *testing.T) {
+	f := newAdviceFixture(t, state.Config{})
+	id := f.m.st.Identity
+	issue := func(life time.Duration, at time.Time) {
+		c, err := f.admin.Issue(id.DevicePub, id.WGPub[:], "lab-a", 1, at, life)
+		if err != nil {
+			t.Fatal(err)
+		}
+		raw, _ := c.MarshalBinary()
+		f.m.st.Credential = raw
+	}
+	issue(time.Hour, time.Now())
+	f.m.handleLanGrant(f.lanGrant(t, id.DevicePub, "web", "8000", 1, false), time.Now())
+	if f.m.OwnLanGrant("web", time.Now()) == nil || len(f.m.LanHosts(time.Now())) != 1 {
+		t.Fatal("not served while the gateway's credential is in force")
+	}
+	issue(time.Minute, time.Now().Add(-time.Hour))
+	if f.m.OwnLanGrant("web", time.Now()) != nil {
+		t.Error("served on an expired credential")
+	}
+	if got := f.m.LanHosts(time.Now()); len(got) != 0 {
+		t.Errorf("listed on an expired credential: %+v", got)
+	}
+}
+
+// An alias lets go of its address while the gateway is offline, so the device
+// is reachable on the LAN it is on (F-44).
+func TestALanAliasLetsGoWhileItsGatewayIsOffline(t *testing.T) {
+	f := newAdviceFixture(t, state.Config{})
+	gw, _ := identity.New()
+	f.m.roster.Apply(newAnnounce(t, gw, "proteus", nil, 1), time.Now())
+	f.m.v4 = v4.NewTableIn(netip.MustParsePrefix("198.19.128.0/19"), v4.Entry{}, nil)
+	f.m.lanAliases, _ = lanhost.ParseAliases([]string{"192.168.10.143=printer.lan.proteus"})
+	f.m.handleLanGrant(f.lanGrant(t, gw.DevicePub, "printer", "8883", 1, false), time.Now())
+
+	f.m.syncLanAliases(f.m.LanHosts(time.Now()))
+	if len(f.m.LanAliases()) != 1 {
+		t.Fatal("not active while the gateway is online")
+	}
+	later := time.Now().Add(2 * OfflineAfter)
+	f.m.syncLanAliases(f.m.LanHosts(later))
+	if got := f.m.LanAliases(); len(got) != 0 {
+		t.Errorf("active while the gateway is offline: %v", got)
+	}
+}

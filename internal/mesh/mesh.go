@@ -701,6 +701,10 @@ func (m *Mesh) Run(ctx context.Context) error {
 	// node that has just started does not look serviceless for five minutes.
 	servicesTicker := time.NewTicker(ServicesInterval)
 	defer servicesTicker.Stop()
+	// A gateway going quiet is not an event anything else notices, and a LAN
+	// alias must let go of its address when it does (lanAliasCheck).
+	aliasTicker := time.NewTicker(lanAliasCheck)
+	defer aliasTicker.Stop()
 	m.loadServices(time.Now())
 	if err := m.publishServices(time.Now()); err != nil {
 		m.log.Debug("could not announce services", "err", err)
@@ -730,6 +734,8 @@ func (m *Mesh) Run(ctx context.Context) error {
 			if err := m.syncPeers(); err != nil {
 				m.log.Error("failed to reconfigure data plane", "err", err)
 			}
+		case now := <-aliasTicker.C:
+			m.syncLanAliases(m.LanHosts(now))
 		case <-m.reannounce:
 			// Skip if we announced recently: the new peer will already have
 			// that one, and this exists to shorten discovery, not to add
@@ -1031,6 +1037,22 @@ func (m *Mesh) Unenrolled() bool {
 	}
 	_, err := cred.UnmarshalCredential(m.st.Credential)
 	return err != nil
+}
+
+// NameSigned reports whether a peer's name is the one its admin-signed
+// credential carries, rather than one its announce asserts. Only then is a
+// name evidence of which device it is: anyone can claim a name, and the
+// first claimant holds it once the real device has been forgotten (audit
+// F-43).
+func (m *Mesh) NameSigned(id, name string) bool {
+	if m.authority == nil {
+		return false
+	}
+	m.mu.Lock()
+	raw := m.creds[id]
+	m.mu.Unlock()
+	c, err := cred.UnmarshalCredential(raw)
+	return err == nil && c.Name != "" && sanitiseName(c.Name) == sanitiseName(name)
 }
 
 // PeerExpiry is when a peer's credential runs out, or the zero time when this

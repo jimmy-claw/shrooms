@@ -909,7 +909,17 @@ func deviceByName(sock, label, name string) (string, error) {
 	}
 	switch len(hits) {
 	case 1:
-		return hits[0].Device, nil
+		// A name only the device itself asserts is not evidence of which
+		// device it is: once the real one has been forgotten, a member
+		// that claimed its name is the only match (audit F-43). The admin's
+		// own machine, matched from this daemon's status, is not a claim.
+		h := hits[0]
+		if h.Mesh != "" && !h.NameSigned && !(st.Name == name && isOwnDevice(st, h.Device)) {
+			return "", fmt.Errorf("%q is only what %s calls itself: its credential does not carry that name, "+
+				"so the name is no evidence it is the device you mean.\n\n"+
+				"If it is, pass its key with --device %s", name, h.Device[:16]+"…", h.Device)
+		}
+		return h.Device, nil
 	case 0:
 		if len(claimants) > 0 {
 			var who []string
@@ -930,6 +940,16 @@ func deviceByName(sock, label, name string) (string, error) {
 	}
 	return "", fmt.Errorf("%q is on more than one mesh, so name which with --mesh:\n%s",
 		name, strings.Join(where, "\n"))
+}
+
+// isOwnDevice reports whether device is one of this machine's own mesh keys.
+func isOwnDevice(st statusPayload, device string) bool {
+	for _, m := range st.Meshes {
+		if m.Device == device {
+			return true
+		}
+	}
+	return false
 }
 
 // publishRevocation hands a signed revocation to the local daemon.

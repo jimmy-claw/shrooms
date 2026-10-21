@@ -154,6 +154,13 @@ func (m *metricsServer) write(w io.Writer) {
 		e.sample("shrooms_mesh_peers", float64(ms.Peers), "mesh", ms.Label)
 	}
 
+	e.family("shrooms_mesh_dropped_not_for_self_total", "counter", "Packets peers sent this node that were not addressed to it, or could have gone further, dropped before the kernel.")
+	for _, ms := range st.Meshes {
+		if !ms.NotRunning {
+			e.sample("shrooms_mesh_dropped_not_for_self_total", float64(ms.NotForSelf), "mesh", ms.Label)
+		}
+	}
+
 	peers := append([]peerStatus(nil), st.Peers...)
 	sort.Slice(peers, func(i, j int) bool { return peers[i].Mesh+peers[i].Name < peers[j].Mesh+peers[j].Name })
 	e.family("shrooms_peer_receive_bytes_total", "counter", "Bytes received from a peer through its tunnel (WireGuard, since the tunnel was set up).")

@@ -18,6 +18,8 @@ func TestAnAliasIsAPrivateAddressForAHost(t *testing.T) {
 		"printer=printer.lan.proteus",         // no address
 		"127.0.0.1=printer.lan.proteus",       // loopback
 		"192.168.10.143=printer.lan.p.office", // the mesh is not part of it
+		"192.168.10.143=printer.lan.pro_teus", // not a name a gateway can have
+		"192.168.10.143=printer.lan.-x",
 	} {
 		if _, err := ParseAlias(bad); err == nil {
 			t.Errorf("%q was accepted", bad)

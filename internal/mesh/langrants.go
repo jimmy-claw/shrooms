@@ -264,6 +264,9 @@ func (m *Mesh) LanHosts(now time.Time) []LanHost {
 			NotAfter: time.Unix(g.NotAfter, 0),
 		}
 		if m.st != nil && bytes.Equal(g.Gateway, m.st.Identity.DevicePub) {
+			if !m.ownCredentialInForce(now) {
+				continue
+			}
 			h.Self, h.Online, h.GatewayName = true, true, sanitiseName(m.cfg.Name)
 		} else if p, ok := peers[hex.EncodeToString(g.Gateway)]; ok && !m.expired(p.ID(), now) {
 			// An expired gateway is in the roster until ForgetAfter, but it
@@ -354,6 +357,9 @@ func (m *Mesh) OwnLanGrant(host string, now time.Time) *cred.LanGrant {
 	if m.st == nil {
 		return nil
 	}
+	if !m.ownCredentialInForce(now) {
+		return nil
+	}
 	m.lanMu.Lock()
 	defer m.lanMu.Unlock()
 	h, ok := m.lanGrants[lanGrantKey(m.st.Identity.DevicePub, host)]
@@ -363,11 +369,29 @@ func (m *Mesh) OwnLanGrant(host string, now time.Time) *cred.LanGrant {
 	return h.g
 }
 
+// ownCredentialInForce reports whether this device's own credential is
+// unexpired and not revoked: a gateway stops serving its hosts when its
+// membership ends, rather than for as long as members are slow to notice
+// (audit F-42). A mesh with no admin has no credentials, and no LAN hosts
+// either.
+func (m *Mesh) ownCredentialInForce(now time.Time) bool {
+	if m.authority == nil {
+		return true
+	}
+	c, err := cred.UnmarshalCredential(m.st.Credential)
+	if err != nil || now.After(time.Unix(c.NotAfter, 0)) {
+		return false
+	}
+	return m.revoked == nil || !m.revoked.Revoked(c)
+}
+
 // syncLanAliases points this device's LAN aliases at the hosts they name, and
 // tells the daemon which are active when that changes. An alias is active only
-// while its host is listed: otherwise the LAN address is left to the LAN, so a
-// member at the gateway's own site still reaches the device directly when the
-// grant or the gateway is gone.
+// while its host is listed and its gateway is online: otherwise the LAN
+// address is left to the LAN, so a member at the gateway's own site still
+// reaches the device directly when the grant or the gateway is gone. Listed
+// was not enough: an offline gateway's hosts are still listed, and its alias
+// took the device away from a laptop standing next to it (audit F-44).
 func (m *Mesh) syncLanAliases(hosts []LanHost) {
 	if len(m.lanAliases) == 0 || m.v4 == nil {
 		return
@@ -375,7 +399,7 @@ func (m *Mesh) syncLanAliases(hosts []LanHost) {
 	active := map[netip.Addr]netip.Addr{}
 	for _, al := range m.lanAliases {
 		for _, h := range hosts {
-			if !h.Self && h.Name == al.Host && h.GatewayName == al.Gateway {
+			if !h.Self && h.Online && h.Name == al.Host && h.GatewayName == al.Gateway {
 				active[al.LAN] = h.Overlay
 				break
 			}
@@ -400,6 +424,10 @@ func (m *Mesh) syncLanAliases(hosts []LanHost) {
 		}
 	}
 }
+
+// lanAliasCheck is how often LAN aliases are checked against their gateways
+// being online, between the resyncs that check them anyway.
+const lanAliasCheck = 30 * time.Second
 
 // OnLanAliases registers f to run with the active LAN aliases whenever they
 // change: the daemon routes those addresses at the mesh's interface.
