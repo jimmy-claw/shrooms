@@ -1186,7 +1186,9 @@ func Start(tunFd int, configDir string, dnsServers string, p Protector, l Logger
 		// transport packet names its device only by an index that device
 		// allocated.
 		listen := cfg.ListenPort + uint16(i)
-		dev, err := wg.NewDevice(translated, ms.Identity.WGPriv, listen,
+		// Only what is addressed to this device reaches the phone: WireGuard
+		// checks a packet's source, not where it is going (F-26).
+		dev, err := wg.NewDevice(wg.SelfOnly(translated, self), ms.Identity.WGPriv, listen,
 			device.NewLogger(device.LogLevelError, "[wg "+mc.Label+"] "))
 		if err != nil {
 			closeAll()

@@ -34,11 +34,19 @@ import (
 // gateway binds to its own addresses is reachable through it, which is what
 // the review asked a separate namespace for.
 //
-// The stack listens on each host's configured ports. Every connection is
-// checked, when it arrives, against an in-force grant naming this gateway,
-// the host and the port; the LAN address is checked on-link and not the
-// gateway's own; and only then is the LAN dialled. Only TCP enters the stack:
-// UDP and ICMP for a host's address are dropped, not answered.
+// The stack listens on each host's configured ports, but a packet reaches it
+// only for a port the grant in force opens: anything else is dropped before
+// the stack, so an ungranted host or port does not even answer with a reset
+// (F-32). Every connection is checked again when it is accepted, the LAN
+// address is checked on-link and not the gateway's own, and only then is the
+// LAN dialled. Only TCP enters the stack: UDP and ICMP for a host's address
+// are dropped, not answered.
+//
+// The grant is checked for as long as a connection lasts, not only when it
+// opens: a withdrawal, a narrowing or the grant's end closes what it no longer
+// covers (F-27). The audit found a stream that outlived its withdrawal, which
+// a member that keeps the route in its own WireGuard config could hold open
+// for as long as it liked.
 
 // Connection caps, per host and per member: an appliance on a LAN is not built
 // for a crowd, and one member should not be able to fill a host's sockets.
@@ -46,6 +54,10 @@ const (
 	MaxConnsPerHost   = 64
 	MaxConnsPerMember = 16
 	dialTimeout       = 5 * time.Second
+	// recheckEvery bounds how long a connection outlives its grant's end
+	// when nothing else prompts a check; a withdrawal or a narrowing
+	// prompts one at once (Recheck).
+	recheckEvery = 5 * time.Second
 	// packetOffset is the headroom wireguard-go reads and writes packets with
 	// (device.MessageTransportHeaderSize); the kernel TUN needs it for its
 	// virtio header.
@@ -59,9 +71,27 @@ type GrantFunc func(host string, now time.Time) *cred.LanGrant
 type servedHost struct {
 	spec    lanhost.Spec
 	overlay netip.Addr
-	conns   atomic.Int32
+	// grant is the grant in force at the last check, or nil: what the packet
+	// path admits by.
+	grant   atomic.Pointer[cred.LanGrant]
 	mu      sync.Mutex
+	conns   int
 	perPeer map[netip.Addr]int
+	live    map[*liveConn]struct{}
+}
+
+// liveConn is one member's connection to a host, as long as it lasts.
+type liveConn struct {
+	port uint16
+	from netip.Addr
+	c    net.Conn
+	lan  net.Conn // set once the LAN answers
+}
+
+// allows reports whether the grant last seen opens port now.
+func (h *servedHost) allows(port uint16, now time.Time) bool {
+	gr := h.grant.Load()
+	return gr != nil && gr.Active(now) && gr.Contains(port)
 }
 
 type packet struct {
@@ -107,7 +137,7 @@ func NewGateway(inner tun.Device, specs []lanhost.Spec, prefix netip.Prefix, gat
 	var addrs []netip.Addr
 	for _, sp := range specs {
 		o := lanhost.Overlay(prefix, gateway, sp.Name)
-		g.hosts[o] = &servedHost{spec: sp, overlay: o, perPeer: map[netip.Addr]int{}}
+		g.hosts[o] = &servedHost{spec: sp, overlay: o, perPeer: map[netip.Addr]int{}, live: map[*liveConn]struct{}{}}
 		addrs = append(addrs, o)
 	}
 	ns, n, err := netstack.CreateNetTUN(addrs, nil, mtu)
@@ -130,12 +160,62 @@ func NewGateway(inner tun.Device, specs []lanhost.Spec, prefix netip.Prefix, gat
 	}
 	go g.pumpInner()
 	go g.pumpStack()
+	go g.recheckLoop()
 	return g, nil
 }
 
 // SetGrants sets where grants are looked up. Until it is called, every
 // connection is refused.
-func (g *Gateway) SetGrants(f GrantFunc) { g.grant.Store(&f) }
+func (g *Gateway) SetGrants(f GrantFunc) {
+	g.grant.Store(&f)
+	g.Recheck()
+}
+
+// Recheck looks every host's grant up again, and closes each connection the
+// grant no longer covers. Called when a grant changes, and on a timer for
+// grants that lapse.
+func (g *Gateway) Recheck() {
+	now := time.Now()
+	gf := g.grant.Load()
+	for _, h := range g.hosts {
+		var gr *cred.LanGrant
+		if gf != nil {
+			if gr = (*gf)(h.spec.Name, now); gr != nil && !gr.Active(now) {
+				gr = nil
+			}
+		}
+		h.grant.Store(gr)
+		var ended []liveConn
+		h.mu.Lock()
+		for l := range h.live {
+			if !h.allows(l.port, now) {
+				ended = append(ended, *l)
+			}
+		}
+		h.mu.Unlock()
+		for _, l := range ended {
+			g.log.Info("closed a LAN host connection: its grant no longer covers it",
+				"host", h.spec.Name, "port", l.port, "from", l.from)
+			l.c.Close()
+			if l.lan != nil {
+				l.lan.Close()
+			}
+		}
+	}
+}
+
+func (g *Gateway) recheckLoop() {
+	t := time.NewTicker(recheckEvery)
+	defer t.Stop()
+	for {
+		select {
+		case <-t.C:
+			g.Recheck()
+		case <-g.closed:
+			return
+		}
+	}
+}
 
 // Overlays is the hosts' overlay addresses, for status.
 func (g *Gateway) Overlays() map[string]netip.Addr {
@@ -154,23 +234,36 @@ func dst6(p []byte) (netip.Addr, bool, bool) {
 	}
 	var a [16]byte
 	copy(a[:], p[24:40])
-	return netip.AddrFrom16(a), p[6] == 6, true
+	return netip.AddrFrom16(a), p[6] == 6 && len(p) >= 40+20, true
 }
 
-// Write is WireGuard handing packets to the machine: those for a host go to
-// the stack, the rest to the kernel.
+// tcpDstPort is the destination port of an IPv6 TCP packet dst6 accepted.
+func tcpDstPort(p []byte) uint16 { return uint16(p[42])<<8 | uint16(p[43]) }
+
+// Write is WireGuard handing packets to the machine: TCP for a host goes to
+// the stack, anything for the gateway itself to the kernel, and the rest
+// nowhere. The rest used to go to the kernel too, which made the gateway a
+// router into its LAN for any member that addressed a packet there (F-26);
+// the daemon also wraps every node's device in wg.SelfOnly, and this check
+// stays so the gateway does not depend on what it is stacked on.
 func (g *Gateway) Write(bufs [][]byte, offset int) (int, error) {
 	var kernel, stack [][]byte
 	for _, b := range bufs {
-		if dst, tcp, ok := dst6(b[offset:]); ok {
-			if _, ours := g.hosts[dst]; ours {
-				if tcp {
-					stack = append(stack, b)
-				}
-				continue // UDP and ICMP for a host are dropped (ADR-068: TCP only)
-			}
+		dst, tcp, ok := dst6(b[offset:])
+		if !ok {
+			continue
 		}
-		kernel = append(kernel, b)
+		if h, ours := g.hosts[dst]; ours {
+			// UDP and ICMP for a host are dropped (ADR-068: TCP only), and so
+			// is TCP to a port no grant in force opens.
+			if tcp && h.allows(tcpDstPort(b[offset:]), time.Now()) {
+				stack = append(stack, b)
+			}
+			continue
+		}
+		if dst == g.self {
+			kernel = append(kernel, b)
+		}
 	}
 	if len(stack) > 0 {
 		if _, err := g.ns.Write(stack, offset); err != nil {
@@ -321,68 +414,87 @@ func (g *Gateway) Close() error {
 	return err
 }
 
-// accept serves one host port.
+// accept serves one host port. The grant and the caps are checked here,
+// before a goroutine is spent: a member opening connections as fast as it
+// can costs the gateway a closed socket each, not a goroutine and a log line
+// (F-32). Refusals are logged at Debug for the same reason: the remote sets
+// their pace.
 func (g *Gateway) accept(h *servedHost, port uint16, ln net.Listener) {
 	for {
 		c, err := ln.Accept()
 		if err != nil {
 			return
 		}
-		go g.serve(h, port, c)
+		from := remoteAddr(c)
+		if !h.allows(port, time.Now()) {
+			g.log.Debug("refused a LAN host connection: no grant in force for that host and port",
+				"host", h.spec.Name, "port", port, "from", from)
+			c.Close()
+			continue
+		}
+		l := &liveConn{port: port, from: from, c: c}
+		if !h.take(l) {
+			g.log.Debug("refused a LAN host connection: too many at once", "host", h.spec.Name, "from", from)
+			c.Close()
+			continue
+		}
+		go g.serve(h, l)
 	}
 }
 
-func (g *Gateway) serve(h *servedHost, port uint16, c net.Conn) {
-	defer c.Close()
-	from := remoteAddr(c)
-	now := time.Now()
-	if gf := g.grant.Load(); gf == nil {
-		g.log.Info("refused a LAN host connection: no grants known yet", "host", h.spec.Name, "port", port, "from", from)
-		return
-	} else if gr := (*gf)(h.spec.Name, now); gr == nil || !gr.Active(now) || !gr.Contains(port) {
-		g.log.Info("refused a LAN host connection: no grant in force for that host and port",
-			"host", h.spec.Name, "port", port, "from", from)
-		return
-	}
-	if !h.take(from) {
-		g.log.Info("refused a LAN host connection: too many at once", "host", h.spec.Name, "from", from)
-		return
-	}
-	defer h.give(from)
+func (g *Gateway) serve(h *servedHost, l *liveConn) {
+	defer h.give(l)
+	defer l.c.Close()
 	if err := g.onLink(h.spec.Addr); err != nil {
 		g.log.Warn("refused a LAN host connection: its LAN address is not usable here", "host", h.spec.Name, "err", err)
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), dialTimeout)
-	lan, err := (&net.Dialer{}).DialContext(ctx, "tcp", netip.AddrPortFrom(h.spec.Addr, port).String())
+	lan, err := (&net.Dialer{}).DialContext(ctx, "tcp", netip.AddrPortFrom(h.spec.Addr, l.port).String())
 	cancel()
 	if err != nil {
-		g.log.Info("LAN host did not answer", "host", h.spec.Name, "port", port, "err", err)
+		g.log.Info("LAN host did not answer", "host", h.spec.Name, "port", l.port, "err", err)
 		return
 	}
 	defer lan.Close()
-	g.log.Debug("LAN host connection", "host", h.spec.Name, "port", port, "from", from)
-	splice(c, lan)
+	// Registered before the copy, then checked once more: a withdrawal that
+	// landed while the LAN was being dialled found no LAN side to close.
+	if !h.attach(l, lan) {
+		return
+	}
+	g.log.Debug("LAN host connection", "host", h.spec.Name, "port", l.port, "from", l.from)
+	splice(l.c, lan)
 }
 
-func (h *servedHost) take(from netip.Addr) bool {
+func (h *servedHost) take(l *liveConn) bool {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	if h.conns.Load() >= MaxConnsPerHost || h.perPeer[from] >= MaxConnsPerMember {
+	if h.conns >= MaxConnsPerHost || h.perPeer[l.from] >= MaxConnsPerMember {
 		return false
 	}
-	h.conns.Add(1)
-	h.perPeer[from]++
+	h.conns++
+	h.perPeer[l.from]++
+	h.live[l] = struct{}{}
 	return true
 }
 
-func (h *servedHost) give(from netip.Addr) {
+// attach records the LAN side of a connection, and reports whether its grant
+// still covers it.
+func (h *servedHost) attach(l *liveConn, lan net.Conn) bool {
+	h.mu.Lock()
+	l.lan = lan
+	h.mu.Unlock()
+	return h.allows(l.port, time.Now())
+}
+
+func (h *servedHost) give(l *liveConn) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	h.conns.Add(-1)
-	if h.perPeer[from]--; h.perPeer[from] <= 0 {
-		delete(h.perPeer, from)
+	h.conns--
+	if h.perPeer[l.from]--; h.perPeer[l.from] <= 0 {
+		delete(h.perPeer, l.from)
 	}
+	delete(h.live, l)
 }
 
 func remoteAddr(c net.Conn) netip.Addr {

@@ -142,19 +142,22 @@ func startInstance(ctx context.Context, log *slog.Logger, cfg state.Config, st *
 		return nil, fmt.Errorf("mesh %q: tun: %w (need CAP_NET_ADMIN)", m.Label, err)
 	}
 	translated := v4.NewDevice(tunDev, in.aliases, wg.DefaultMTU-40-20)
+	// Only what is addressed to this device reaches the kernel: WireGuard
+	// checks a packet's source, not where it is going (F-26).
+	inbound := wg.SelfOnly(translated, self)
 
 	// LAN hosts this node offers (ADR-068): their packets are diverted into
 	// a userspace stack above the kernel TUN, so a host's address is in no
 	// kernel namespace. Only when the config lists some: every other node's
 	// data plane is untouched.
-	var dataDev tun.Device = translated
+	var dataDev tun.Device = inbound
 	if len(m.LanHosts) > 0 {
 		specs, err := lanhost.ParseSpecs(m.LanHosts)
 		if err != nil {
 			tunDev.Close()
 			return nil, fmt.Errorf("mesh %q: lan_hosts: %w", m.Label, err)
 		}
-		gw, err := lanproxy.NewGateway(translated, specs, nk.Prefix(), ms.Identity.DevicePub, self,
+		gw, err := lanproxy.NewGateway(inbound, specs, nk.Prefix(), ms.Identity.DevicePub, self,
 			wg.DefaultMTU, log.With("mesh", m.Label, "part", "lan-hosts"))
 		if err != nil {
 			tunDev.Close()
@@ -204,6 +207,7 @@ func startInstance(ctx context.Context, log *slog.Logger, cfg state.Config, st *
 	in.mesh, err = mesh.New(log.With("mesh", m.Label), meshCfg, stateFor(st, ms), node, in.dev)
 	if err == nil && in.lan != nil {
 		in.lan.SetGrants(in.mesh.OwnLanGrant)
+		in.mesh.OnLanGrant(in.lan.Recheck)
 	}
 	if err != nil {
 		return in, fmt.Errorf("mesh %q: %w", m.Label, err)

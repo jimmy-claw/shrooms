@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net"
 	"net/netip"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -44,6 +45,7 @@ type rig struct {
 	member *netstack.Net
 	gw     *Gateway
 	host   netip.Addr
+	inner  *tuntest.ChannelTUN // the gateway's kernel side
 }
 
 func newRig(t *testing.T, sp lanhost.Spec, grant GrantFunc) *rig {
@@ -53,7 +55,7 @@ func newRig(t *testing.T, sp lanhost.Spec, grant GrantFunc) *rig {
 	self := netip.MustParseAddr("fdaa:bbbb:cccc::1")
 	memberAddr := netip.MustParseAddr("fdaa:bbbb:cccc::2")
 
-	inner := tuntest.NewChannelTUN() // the gateway's kernel side, unused here
+	inner := tuntest.NewChannelTUN()
 	g, err := NewGateway(inner.TUN(), []lanhost.Spec{sp}, prefix, gwKey, self, 1280, slog.New(slog.DiscardHandler))
 	if err != nil {
 		t.Fatal(err)
@@ -99,7 +101,7 @@ func newRig(t *testing.T, sp lanhost.Spec, grant GrantFunc) *rig {
 			}
 		}
 	}()
-	return &rig{member: mnet, gw: g, host: lanhost.Overlay(prefix, gwKey, sp.Name)}
+	return &rig{member: mnet, gw: g, host: lanhost.Overlay(prefix, gwKey, sp.Name), inner: inner}
 }
 
 func grantFor(ports string) GrantFunc {
@@ -186,5 +188,93 @@ func TestOnLinkRefusesTheGatewayAndElsewhere(t *testing.T) {
 				return
 			}
 		}
+	}
+}
+
+// packet6 is a minimal IPv6 packet from a member to dst, with headroom.
+func packet6(dst netip.Addr, proto byte, port uint16) []byte {
+	p := make([]byte, packetOffset+40+20)
+	h := p[packetOffset:]
+	h[0] = 6 << 4
+	h[4], h[5] = 0, 20
+	h[6], h[7] = proto, 64
+	src := netip.MustParseAddr("fdaa:bbbb:cccc::2").As16()
+	copy(h[8:24], src[:])
+	d := dst.As16()
+	copy(h[24:40], d[:])
+	h[42], h[43] = byte(port>>8), byte(port)
+	return p
+}
+
+// Only packets for the gateway itself reach its kernel. Anything else a
+// member addresses there, the gateway's LAN or public IPv6, another member,
+// a host's UDP, IPv4, is dropped rather than routed onward (F-26).
+func TestAGatewayHandsItsKernelOnlyItsOwnPackets(t *testing.T) {
+	_, port := echo(t)
+	rs := []cred.PortRange{{From: port, To: port}}
+	r := newRig(t, lanhost.Spec{Name: "printer", Addr: netip.MustParseAddr("127.0.0.1"), Ports: rs},
+		grantFor(cred.FormatLanPorts(rs)))
+	got := make(chan []byte, 16)
+	go func() {
+		for p := range r.inner.Inbound {
+			got <- p
+		}
+	}()
+
+	v4 := make([]byte, packetOffset+40)
+	v4[packetOffset] = 4 << 4
+	for name, p := range map[string][]byte{
+		"TCP to another address": packet6(netip.MustParseAddr("fdaa:bbbb:cccc::99"), 6, 22),
+		"UDP to another address": packet6(netip.MustParseAddr("2001:db8::1"), 17, 53),
+		"UDP to a host":          packet6(r.host, 17, port),
+		"IPv4":                   v4,
+	} {
+		r.gw.Write([][]byte{p}, packetOffset)
+		select {
+		case <-got:
+			t.Errorf("%s reached the gateway's kernel", name)
+		case <-time.After(50 * time.Millisecond):
+		}
+	}
+
+	r.gw.Write([][]byte{packet6(netip.MustParseAddr("fdaa:bbbb:cccc::1"), 6, 22)}, packetOffset)
+	select {
+	case <-got:
+	case <-time.After(time.Second):
+		t.Error("a packet for the gateway itself did not reach its kernel")
+	}
+}
+
+// A connection open when the grant is withdrawn, or narrowed off its port, is
+// closed: the grant holds for as long as the connection lasts (F-27).
+func TestAWithdrawalClosesAnOpenConnection(t *testing.T) {
+	_, port := echo(t)
+	rs := []cred.PortRange{{From: port, To: port}}
+	var current atomic.Pointer[cred.LanGrant]
+	current.Store(&cred.LanGrant{Host: "printer", Ports: rs, NotAfter: time.Now().Add(time.Hour).Unix()})
+	r := newRig(t, lanhost.Spec{Name: "printer", Addr: netip.MustParseAddr("127.0.0.1"), Ports: rs},
+		func(host string, now time.Time) *cred.LanGrant { return current.Load() })
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	c, err := r.member.DialContextTCPAddrPort(ctx, netip.AddrPortFrom(r.host, port))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	c.SetDeadline(time.Now().Add(5 * time.Second))
+	buf := make([]byte, 5)
+	if _, err := c.Write([]byte("hello")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := io.ReadFull(c, buf); err != nil {
+		t.Fatalf("before the withdrawal: %v", err)
+	}
+
+	current.Store(nil)
+	r.gw.Recheck()
+	c.Write([]byte("again"))
+	if n, err := io.ReadFull(c, buf); err == nil {
+		t.Fatalf("still answered after the withdrawal: %q", buf[:n])
 	}
 }
