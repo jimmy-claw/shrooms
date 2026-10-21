@@ -1965,6 +1965,37 @@ func serveControl(ctx context.Context, log *slog.Logger, path string, instances 
 		w.WriteHeader(http.StatusNoContent)
 	}))
 
+	// A LAN host grant from the admin tooling (ADR-068), with the same shape
+	// and trust as /relay-advice: the socket decides who may ask, the admin
+	// signature inside decides whether any node acts on it.
+	mux.HandleFunc("/lan-grant", requireRoot(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "POST a LAN host grant", http.StatusMethodNotAllowed)
+			return
+		}
+		raw, err := io.ReadAll(io.LimitReader(r.Body, 4096))
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		blob, err := base64.StdEncoding.DecodeString(strings.TrimSpace(string(raw)))
+		if err != nil {
+			http.Error(w, "LAN host grant is not base64: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+		target := pickMesh(r.URL.Query().Get("mesh"))
+		if target == nil {
+			http.Error(w, "no such mesh is running here", http.StatusNotFound)
+			return
+		}
+		if err := target.LanGrant(blob); err != nil {
+			log.Warn("refused a LAN host grant", "err", err)
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+
 	// Rotating the announce generation after a revocation.
 	//
 	// Root, like /revoke: it carries the generation secret in the clear over

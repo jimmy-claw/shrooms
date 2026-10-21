@@ -170,7 +170,7 @@ func adminPathToRead(dir, label string) string {
 
 func cmdAdmin(args []string) error {
 	if len(args) < 1 {
-		return errors.New("usage: shrooms admin {init|issue|renew|revoke|relay|show} [flags]")
+		return errors.New("usage: shrooms admin {init|issue|renew|revoke|relay|lan|show} [flags]")
 	}
 	switch args[0] {
 	case "init":
@@ -185,6 +185,8 @@ func cmdAdmin(args []string) error {
 		return cmdAdminShow(args[1:])
 	case "relay":
 		return cmdAdminRelay(args[1:])
+	case "lan":
+		return cmdAdminLan(args[1:])
 	default:
 		return fmt.Errorf("unknown admin command %q", args[0])
 	}

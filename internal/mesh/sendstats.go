@@ -24,6 +24,7 @@ const (
 	SendAnnounce   = "announce"
 	SendRekey      = "rekey"
 	SendAdvice     = "relay_advice"
+	SendLanGrant   = "lan_grant"
 	SendServices   = "services"
 	SendRevocation = "revocation"
 	SendGrant      = "grant"

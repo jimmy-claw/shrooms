@@ -149,6 +149,12 @@ type Mesh struct {
 	adviceRaw     []byte
 	lastAdviceOut time.Time
 
+	// lanMu guards the LAN host grants held (langrants.go, ADR-068), keyed
+	// by gateway and host name.
+	lanMu      sync.Mutex
+	lanGrants  map[string]heldLanGrant
+	lastLanOut time.Time
+
 	// relayNow is the relay currently in use, for logging changes.
 	relayNow netip.AddrPort
 
@@ -403,6 +409,7 @@ func New(log *slog.Logger, cfg state.Config, st *state.State, node *waku.Node, d
 	// After the relay identities: adopting advice registers its relays with
 	// the bind the same way.
 	m.loadRelayAdvice()
+	m.loadLanGrants()
 
 	return m, nil
 }
@@ -743,6 +750,7 @@ func (m *Mesh) Run(ctx context.Context) error {
 					// The admin's relay advice is the other standing
 					// statement, and needs repeating for the same reason.
 					m.republishRelayAdvice(now)
+					m.republishLanGrants(now)
 					// And hand the current generation to every member that can
 					// receive it, for the same reason and on the same schedule:
 					// a device that wakes finds its envelope waiting instead of
@@ -2053,6 +2061,11 @@ func (m *Mesh) handle(ev waku.Event) {
 				m.handleRelayAdvice(ad.Payload, now)
 				return
 			}
+			if lg, lerr := kr.OpenLanGrant(ep, msg.Payload, now); lerr == nil {
+				m.health.announceOpened(now)
+				m.handleLanGrant(lg.Payload, now)
+				return
+			}
 		}
 	}
 	if err != nil {
@@ -2166,6 +2179,7 @@ func (m *Mesh) handle(ev waku.Event) {
 		// expired, which is up to a month.
 		m.revocationsOnDiscovery(now)
 		m.adviceOnDiscovery(now)
+		m.lanGrantsOnDiscovery(now)
 	}
 
 	// Introduce ourselves when asked, or when this peer plainly cannot reach us.

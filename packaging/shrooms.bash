@@ -282,7 +282,7 @@ _shrooms() {
             ;;
         admin)
             if [ "$cword" -eq 2 ]; then
-                COMPREPLY=($(compgen -W "init issue renew revoke relay show" -- "$cur"))
+                COMPREPLY=($(compgen -W "init issue renew revoke relay lan show" -- "$cur"))
                 return
             fi
             case ${words[2]} in
