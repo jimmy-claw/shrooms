@@ -23,6 +23,8 @@ again. CI fails while this file is out of date.
 | `internal/identity` | Package identity holds device keys, the mesh network key, and the derived addressing scheme. |
 | `internal/invite` | Package invite implements one-time enrolment tokens (ADR-017). |
 | `internal/keycard` | Package keycard drives a Keycard: pairing, the secure channel, the PIN, and signing at this project's own derivation path (ADR-022). |
+| `internal/lanhost` | Package lanhost is the part of ADR-068 both sides share: a LAN host's config entry, the checks on its LAN address, and the overlay address and name a host is known by on the mesh. |
+| `internal/lanproxy` | Package lanproxy is the gateway side of ADR-068: it answers for the LAN hosts a node offers, in a userspace TCP stack, and proxies to the LAN. |
 | `internal/listeners` | Package listeners finds what is listening on this device's mesh addresses. |
 | `internal/logtail` | Package logtail keeps the last few hundred log lines in memory so a UI can show them. |
 | `internal/memstat` | Package memstat says where a shrooms process's memory goes. |
