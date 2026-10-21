@@ -280,3 +280,18 @@ func (m *Mesh) publishLanGrant(raw []byte, now time.Time) error {
 	_, err = m.send(SendLanGrant, sealed, now)
 	return err
 }
+
+// OwnLanGrant is the grant in force for one of this device's own LAN hosts,
+// or nil: what the gateway checks each connection against.
+func (m *Mesh) OwnLanGrant(host string, now time.Time) *cred.LanGrant {
+	if m.st == nil {
+		return nil
+	}
+	m.lanMu.Lock()
+	defer m.lanMu.Unlock()
+	h, ok := m.lanGrants[lanGrantKey(m.st.Identity.DevicePub, host)]
+	if !ok || !h.g.Active(now) {
+		return nil
+	}
+	return h.g
+}

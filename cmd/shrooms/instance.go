@@ -11,9 +11,12 @@ import (
 	"sync/atomic"
 
 	"golang.zx2c4.com/wireguard/device"
+	"golang.zx2c4.com/wireguard/tun"
 
 	dnssrv "github.com/vpavlin/shrooms/internal/dns"
 	"github.com/vpavlin/shrooms/internal/identity"
+	"github.com/vpavlin/shrooms/internal/lanhost"
+	"github.com/vpavlin/shrooms/internal/lanproxy"
 	"github.com/vpavlin/shrooms/internal/mesh"
 	"github.com/vpavlin/shrooms/internal/service"
 	"github.com/vpavlin/shrooms/internal/state"
@@ -34,9 +37,12 @@ type instance struct {
 	mesh    *mesh.Mesh
 	dev     *wg.Device
 	aliases *v4.Table
-	self    netip.Addr
-	prefix  netip.Prefix
-	iface   string
+	// lan answers for the LAN hosts this node offers on this mesh
+	// (ADR-068); nil when its config lists none.
+	lan    *lanproxy.Gateway
+	self   netip.Addr
+	prefix netip.Prefix
+	iface  string
 
 	// port is the WireGuard port bound now; read it with listenPort. It moves
 	// when ephemeral is set (state.Config.EphemeralPort): a fresh port at start
@@ -137,6 +143,28 @@ func startInstance(ctx context.Context, log *slog.Logger, cfg state.Config, st *
 	}
 	translated := v4.NewDevice(tunDev, in.aliases, wg.DefaultMTU-40-20)
 
+	// LAN hosts this node offers (ADR-068): their packets are diverted into
+	// a userspace stack above the kernel TUN, so a host's address is in no
+	// kernel namespace. Only when the config lists some: every other node's
+	// data plane is untouched.
+	var dataDev tun.Device = translated
+	if len(m.LanHosts) > 0 {
+		specs, err := lanhost.ParseSpecs(m.LanHosts)
+		if err != nil {
+			tunDev.Close()
+			return nil, fmt.Errorf("mesh %q: lan_hosts: %w", m.Label, err)
+		}
+		gw, err := lanproxy.NewGateway(translated, specs, nk.Prefix(), ms.Identity.DevicePub, self,
+			wg.DefaultMTU, log.With("mesh", m.Label, "part", "lan-hosts"))
+		if err != nil {
+			tunDev.Close()
+			return nil, fmt.Errorf("mesh %q: lan_hosts: %w", m.Label, err)
+		}
+		in.lan = gw
+		dataDev = gw
+		log.Info("offering LAN hosts, each once the admin grants it", "mesh", m.Label, "hosts", len(specs))
+	}
+
 	wgLevel := device.LogLevelError
 	if verbose {
 		wgLevel = device.LogLevelVerbose
@@ -149,7 +177,7 @@ func startInstance(ctx context.Context, log *slog.Logger, cfg state.Config, st *
 	if ephemeral {
 		bind = 0
 	}
-	in.dev, err = wg.NewDevice(translated, ms.Identity.WGPriv, bind,
+	in.dev, err = wg.NewDevice(dataDev, ms.Identity.WGPriv, bind,
 		device.NewLogger(wgLevel, "[wg "+m.Label+"] "))
 	if err != nil {
 		return in, fmt.Errorf("mesh %q: wireguard: %w", m.Label, err)
@@ -174,6 +202,9 @@ func startInstance(ctx context.Context, log *slog.Logger, cfg state.Config, st *
 	in.relay = m.Relay
 
 	in.mesh, err = mesh.New(log.With("mesh", m.Label), meshCfg, stateFor(st, ms), node, in.dev)
+	if err == nil && in.lan != nil {
+		in.lan.SetGrants(in.mesh.OwnLanGrant)
+	}
 	if err != nil {
 		return in, fmt.Errorf("mesh %q: %w", m.Label, err)
 	}
