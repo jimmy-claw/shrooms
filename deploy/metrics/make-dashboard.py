@@ -74,6 +74,30 @@ panel("timeseries", "Delivery messages per second",
       [('sum by (node) (rate(shrooms_delivery_messages_total[5m]))', "{{node}}")], 12, 6, unit="short")
 advance(6)
 
+row("Delivery — what shrooms itself publishes (for RLN's rate limits)")
+panel("timeseries", "Published messages per minute, by machine and kind",
+      [('sum by (node, kind) (rate(shrooms_delivery_sent_messages_total[5m])) * 60', "{{node}} {{kind}}")],
+      16, 9, unit="short",
+      desc="This node's own publishes on the rendezvous plane, not what it relays. An announce goes out every 45 s per mesh, plus one in answer to a peer that restarted.")
+panel("bargauge", "Published, last 24 h per machine",
+      [('sum by (node) (increase(shrooms_delivery_sent_messages_total[24h]))', "{{node}}")], 8, 9, x=16, unit="short")
+advance(9)
+panel("timeseries", "Busiest second, last 10 min",
+      [('shrooms_delivery_sent_peak_per_second', "{{node}}")], 8, 7, unit="short",
+      desc="The most messages a node published in any one second over the 10 minutes before each scrape, all its meshes together.")
+panel("timeseries", "Message size (payload)",
+      [('histogram_quantile(0.5, sum by (le) (rate(shrooms_delivery_sent_message_bytes_bucket[1h])))', "median"),
+       ('histogram_quantile(0.99, sum by (le) (rate(shrooms_delivery_sent_message_bytes_bucket[1h])))', "p99")],
+      8, 7, x=8, unit="bytes", desc="From the histogram's buckets, so a bucket bound rather than an exact size. The announce is a fixed 1064 B.")
+panel("bargauge", "Published, last 24 h by kind",
+      [('sum by (kind) (increase(shrooms_delivery_sent_messages_total[24h]))', "{{kind}}")], 8, 7, x=16, unit="short")
+advance(7)
+panel("timeseries", "Published payload bytes per second, by machine",
+      [('sum by (node) (rate(shrooms_delivery_sent_bytes_total[5m]))', "{{node}}"),
+       ('sum by (node) (rate(shrooms_delivery_send_failures_total[5m]))', "{{node}} failures/s")],
+      24, 6, desc="Payload as handed to the delivery node; the wire adds the envelope. Failures are publishes the delivery node refused.")
+advance(6)
+
 row("Tunnels — shrooms between peers")
 panel("timeseries", "Tunnel traffic per peer (as each machine counts it)",
       [('sum by (node, mesh, peer) (rate(shrooms_peer_receive_bytes_total[5m]) + rate(shrooms_peer_transmit_bytes_total[5m]))', "{{node}} ↔ {{peer}} ({{mesh}})")],

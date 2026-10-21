@@ -455,13 +455,273 @@
   },
   {
    "type": "row",
-   "title": "Tunnels — shrooms between peers",
+   "title": "Delivery — what shrooms itself publishes (for RLN's rate limits)",
    "collapsed": false,
    "gridPos": {
     "h": 1,
     "w": 24,
     "x": 0,
     "y": 30
+   },
+   "panels": []
+  },
+  {
+   "type": "timeseries",
+   "title": "Published messages per minute, by machine and kind",
+   "description": "This node's own publishes on the rendezvous plane, not what it relays. An announce goes out every 45 s per mesh, plus one in answer to a peer that restarted.",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "h": 9,
+    "w": 16,
+    "x": 0,
+    "y": 31
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short",
+     "custom": {
+      "fillOpacity": 10,
+      "lineWidth": 1
+     }
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "sum by (node, kind) (rate(shrooms_delivery_sent_messages_total[5m])) * 60",
+     "legendFormat": "{{node}} {{kind}}",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     }
+    }
+   ]
+  },
+  {
+   "type": "bargauge",
+   "title": "Published, last 24 h per machine",
+   "description": "",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "h": 9,
+    "w": 8,
+    "x": 16,
+    "y": 31
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short"
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "sum by (node) (increase(shrooms_delivery_sent_messages_total[24h]))",
+     "legendFormat": "{{node}}",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     }
+    }
+   ],
+   "options": {
+    "orientation": "horizontal",
+    "displayMode": "gradient",
+    "showUnfilled": true,
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "values": false
+    }
+   }
+  },
+  {
+   "type": "timeseries",
+   "title": "Busiest second, last 10 min",
+   "description": "The most messages a node published in any one second over the 10 minutes before each scrape, all its meshes together.",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "h": 7,
+    "w": 8,
+    "x": 0,
+    "y": 40
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short",
+     "custom": {
+      "fillOpacity": 10,
+      "lineWidth": 1
+     }
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "shrooms_delivery_sent_peak_per_second",
+     "legendFormat": "{{node}}",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     }
+    }
+   ]
+  },
+  {
+   "type": "timeseries",
+   "title": "Message size (payload)",
+   "description": "From the histogram's buckets, so a bucket bound rather than an exact size. The announce is a fixed 1064 B.",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "h": 7,
+    "w": 8,
+    "x": 8,
+    "y": 40
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "bytes",
+     "custom": {
+      "fillOpacity": 10,
+      "lineWidth": 1
+     }
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "histogram_quantile(0.5, sum by (le) (rate(shrooms_delivery_sent_message_bytes_bucket[1h])))",
+     "legendFormat": "median",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     }
+    },
+    {
+     "refId": "B",
+     "expr": "histogram_quantile(0.99, sum by (le) (rate(shrooms_delivery_sent_message_bytes_bucket[1h])))",
+     "legendFormat": "p99",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     }
+    }
+   ]
+  },
+  {
+   "type": "bargauge",
+   "title": "Published, last 24 h by kind",
+   "description": "",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "h": 7,
+    "w": 8,
+    "x": 16,
+    "y": 40
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short"
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "sum by (kind) (increase(shrooms_delivery_sent_messages_total[24h]))",
+     "legendFormat": "{{kind}}",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     }
+    }
+   ],
+   "options": {
+    "orientation": "horizontal",
+    "displayMode": "gradient",
+    "showUnfilled": true,
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "values": false
+    }
+   }
+  },
+  {
+   "type": "timeseries",
+   "title": "Published payload bytes per second, by machine",
+   "description": "Payload as handed to the delivery node; the wire adds the envelope. Failures are publishes the delivery node refused.",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "h": 6,
+    "w": 24,
+    "x": 0,
+    "y": 47
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "Bps",
+     "custom": {
+      "fillOpacity": 10,
+      "lineWidth": 1
+     }
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "sum by (node) (rate(shrooms_delivery_sent_bytes_total[5m]))",
+     "legendFormat": "{{node}}",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     }
+    },
+    {
+     "refId": "B",
+     "expr": "sum by (node) (rate(shrooms_delivery_send_failures_total[5m]))",
+     "legendFormat": "{{node}} failures/s",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     }
+    }
+   ]
+  },
+  {
+   "type": "row",
+   "title": "Tunnels — shrooms between peers",
+   "collapsed": false,
+   "gridPos": {
+    "h": 1,
+    "w": 24,
+    "x": 0,
+    "y": 53
    },
    "panels": []
   },
@@ -477,7 +737,7 @@
     "h": 9,
     "w": 16,
     "x": 0,
-    "y": 31
+    "y": 54
    },
    "fieldConfig": {
     "defaults": {
@@ -513,7 +773,7 @@
     "h": 9,
     "w": 8,
     "x": 16,
-    "y": 31
+    "y": 54
    },
    "fieldConfig": {
     "defaults": {
@@ -556,7 +816,7 @@
     "h": 8,
     "w": 24,
     "x": 0,
-    "y": 40
+    "y": 63
    },
    "fieldConfig": {
     "defaults": {
@@ -616,7 +876,7 @@
     "h": 1,
     "w": 24,
     "x": 0,
-    "y": 48
+    "y": 71
    },
    "panels": []
   },
@@ -632,7 +892,7 @@
     "h": 8,
     "w": 12,
     "x": 0,
-    "y": 49
+    "y": 72
    },
    "fieldConfig": {
     "defaults": {
@@ -668,7 +928,7 @@
     "h": 8,
     "w": 12,
     "x": 0,
-    "y": 49
+    "y": 72
    },
    "fieldConfig": {
     "defaults": {
@@ -704,7 +964,7 @@
     "h": 7,
     "w": 8,
     "x": 0,
-    "y": 57
+    "y": 80
    },
    "fieldConfig": {
     "defaults": {
@@ -747,7 +1007,7 @@
     "h": 7,
     "w": 8,
     "x": 8,
-    "y": 57
+    "y": 80
    },
    "fieldConfig": {
     "defaults": {
@@ -790,7 +1050,7 @@
     "h": 7,
     "w": 8,
     "x": 16,
-    "y": 57
+    "y": 80
    },
    "fieldConfig": {
     "defaults": {
@@ -829,7 +1089,7 @@
     "h": 1,
     "w": 24,
     "x": 0,
-    "y": 64
+    "y": 87
    },
    "panels": []
   },
@@ -845,7 +1105,7 @@
     "h": 8,
     "w": 12,
     "x": 0,
-    "y": 65
+    "y": 88
    },
    "fieldConfig": {
     "defaults": {
@@ -881,7 +1141,7 @@
     "h": 8,
     "w": 12,
     "x": 0,
-    "y": 65
+    "y": 88
    },
    "fieldConfig": {
     "defaults": {
@@ -917,7 +1177,7 @@
     "h": 8,
     "w": 8,
     "x": 0,
-    "y": 73
+    "y": 96
    },
    "fieldConfig": {
     "defaults": {
@@ -960,7 +1220,7 @@
     "h": 8,
     "w": 8,
     "x": 8,
-    "y": 73
+    "y": 96
    },
    "fieldConfig": {
     "defaults": {
@@ -1003,7 +1263,7 @@
     "h": 8,
     "w": 8,
     "x": 16,
-    "y": 73
+    "y": 96
    },
    "fieldConfig": {
     "defaults": {
@@ -1046,7 +1306,7 @@
     "h": 8,
     "w": 8,
     "x": 0,
-    "y": 81
+    "y": 104
    },
    "fieldConfig": {
     "defaults": {
@@ -1089,7 +1349,7 @@
     "h": 8,
     "w": 8,
     "x": 8,
-    "y": 81
+    "y": 104
    },
    "fieldConfig": {
     "defaults": {
@@ -1132,7 +1392,7 @@
     "h": 8,
     "w": 8,
     "x": 16,
-    "y": 81
+    "y": 104
    },
    "fieldConfig": {
     "defaults": {
@@ -1175,7 +1435,7 @@
     "h": 8,
     "w": 12,
     "x": 0,
-    "y": 89
+    "y": 112
    },
    "fieldConfig": {
     "defaults": {
@@ -1211,7 +1471,7 @@
     "h": 8,
     "w": 12,
     "x": 0,
-    "y": 89
+    "y": 112
    },
    "fieldConfig": {
     "defaults": {
