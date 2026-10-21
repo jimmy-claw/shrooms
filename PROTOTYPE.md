@@ -95,7 +95,7 @@ derived addressing. Those are the parts Android will reuse unchanged.
 |---|---|
 | 2 Linux boxes (home, office) | mesh nodes, Core Waku |
 | 1 small VPS, public IPv4 | relay + echo anchor + Core Waku (+ Store fallback) |
-| Go 1.23+, cgo, C toolchain | the daemon |
+| Go 1.26+ (`go.mod`), cgo, C toolchain | the daemon |
 | Nim + logos-delivery build | to produce `liblogosdelivery` |
 
 No domain (logos.dev entry nodes are hardcoded `/dns4/` in the library), no

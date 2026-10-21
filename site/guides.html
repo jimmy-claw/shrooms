@@ -710,6 +710,10 @@ learns it from whoever is up.</code></pre>
     measures differently and would therefore disagree on, and both ends must
     pick the same relay for relaying to work at all. <code>relay_addr</code>
     pins one and overrides discovery, which is rarely what you want.
+    A member chooses its own device key, though, so on a mesh with people you
+    do not trust, being the lowest is a choice they can win, and with it every
+    relayed pair's traffic pattern: relay only among members you trust there,
+    or pin one with <code>relay_addr</code>.
 </p>
 
 <p>What the status output means, per peer:</p>
@@ -814,7 +818,8 @@ relay_token = "…"     <span class="c"># only if its operator asks for one</spa
     <a href="https://github.com/vpavlin/shrooms/blob/master/docs/blind-relays.md">docs/blind-relays.md</a>
     and
     <a href="https://github.com/vpavlin/shrooms/blob/master/docs/security-review-2026-08.md">a security review</a>
-    that records its own misses, and nobody independent has audited any of it.
+    that records its own misses, and an October 2026 audit by an AI auditing
+    agent, not a security firm.
 </p>
 
 <h3>Why an open one is not an open proxy</h3>
@@ -902,7 +907,8 @@ OK — forwards, and cannot be pointed at an address that does not answer</code>
     A node joins a public, shared rendezvous cluster, and by default it relays
     for that cluster. That is the neighbourly setting and it is not free.
     Measured on a home connection, idle — no VPN traffic at all — over ten
-    minutes each:
+    minutes each, before a Core node was limited to its own mesh's shard
+    (ADR-067):
 </p>
 
 <table>
@@ -916,8 +922,11 @@ OK — forwards, and cannot be pointed at an address that does not answer</code>
 <p>
     <strong>Almost none of that is yours.</strong> Of 745 messages the Core node
     handled, 693 belonged to another application entirely and 14 were on this
-    mesh's shard. A Core node subscribes to every shard in the cluster, so it
-    carries the cluster, not your mesh.
+    mesh's shard. A Core node then subscribed to every shard in the cluster,
+    so it carried the cluster, not your mesh. Since ADR-067 it relays only the
+    shard its meshes use, unless <code>relay_all_shards = true</code> says
+    otherwise; that cuts the other applications' traffic out, and the figures
+    above have not been measured again since.
 </p>
 
 <p>

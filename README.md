@@ -178,7 +178,7 @@ authoritative behind it.
 
 | | |
 |---|---|
-| Go 1.23+ | with cgo enabled and a C toolchain (`build-essential`) |
+| Go 1.26+ (`go.mod`) | with cgo enabled and a C toolchain (`build-essential`) |
 | Docker | only if you deploy to a remote host |
 | `liblogosdelivery` | see below — there is no canonical distribution |
 | `/dev/net/tun` | to run a node locally |

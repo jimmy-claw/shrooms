@@ -73,8 +73,10 @@
 </p>
 
 <p>
-    With a file, that key exists in a directory, and anything running as you can
-    read it. With a card, the private half is generated on the card and never
+    With a file, that key exists in a directory, encrypted with your
+    passphrase: anything running as you can read the file, and the passphrase
+    is what stands between it and a signature. A process that can read your
+    terminal can capture that too. With a card, the private half is generated on the card and never
     leaves it: signing happens on the card, and the most a compromised machine
     can do is ask it to sign while it is plugged in and unlocked
     (<a href="https://github.com/vpavlin/shrooms/blob/master/docs/adr/022-keycard-for-the-admin-key.md">ADR-022</a>).
@@ -283,10 +285,16 @@
 <h2 id="daily">8. Day to day</h2>
 
 <pre><code><span class="cmd">shrooms admin show</span>                    <span class="c"># every authority this machine holds</span>
-<span class="cmd">shrooms admin issue --name nas</span>        <span class="c"># enrol a device by its keys, no invite</span>
+<span class="cmd">shrooms admin issue --device &lt;hex&gt; --wg &lt;hex&gt; --name nas</span>  <span class="c"># enrol a device by its keys, no invite</span>
 <span class="cmd">shrooms admin renew --dry-run</span>         <span class="c"># who is near expiry</span>
 <span class="cmd">shrooms admin renew --all</span>             <span class="c"># reissue before credentials expire</span>
 <span class="cmd">shrooms admin revoke --device HEX</span>      <span class="c"># withdraw one before it expires</span></code></pre>
+
+<p>
+    <code>--device</code> and <code>--wg</code> are the joining machine's public
+    keys, which <code>shrooms keys</code> prints on it. Without them,
+    <code>issue</code> enrols the machine it runs on.
+</p>
 
 <p>
     Each of these asks for the card's PIN and signs on the card. Credentials

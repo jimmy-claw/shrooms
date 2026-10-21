@@ -255,7 +255,7 @@ and back here:
 <p>
     <code>make install</code> relinks the binary with an rpath pointing at
     <code>/usr/local/lib/shrooms</code>, so it keeps working after you delete
-    the checkout. It needs Go 1.23+ with cgo and a C toolchain to build, and
+    the checkout. It needs the Go version in <code>go.mod</code> (1.26 now) with cgo and a C toolchain to build, and
     glibc 2.38 or newer to run — Debian 12 has 2.36 and will not do, which is
     the case the container exists for. <code>make deps</code> builds the library
     from source and currently fails on an upstream compile error;

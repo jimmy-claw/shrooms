@@ -16,10 +16,10 @@ The claim is about a component that is **absent**, not one that is new.
 | | Shrooms | Tailscale | Nebula | ZeroTier | Yggdrasil | WireGuard alone |
 |---|---|---|---|---|---|---|
 | **Coordination service** | none | Tailscale's (or self-host Headscale) | lighthouses **you** run | root servers ZeroTier runs; moons self-hostable | none | none |
-| **Who can see your topology** | nobody | Tailscale, or you if self-hosted | you | ZeroTier, or you with moons | nobody | you |
+| **Who can see your topology** | no third party; members see each other, a relay sees its pairs | Tailscale, or you if self-hosted | you | ZeroTier, or you with moons | nobody | you |
 | **Data plane** | WireGuard | WireGuard | Noise (own protocol) | own L2 overlay | own encrypted IPv6 routing | WireGuard |
 | **Peer discovery** | public gossip bus (Waku), rendezvous only | coordination server | lighthouses | roots/controller | link-local + configured peers | manual config |
-| **Traffic transits other members** | no | no | no | no | **yes** — it is a routing mesh | no |
+| **Traffic transits other members** | only through a relay you, or a member, run; a direct tunnel transits nobody | no | no | no | **yes** — it is a routing mesh | no |
 | **NAT traversal** | yes | yes, best in class | yes | yes | via peers | no |
 | **Relay fallback** | discovered from its own announce | DERP, run by Tailscale | relays you configure | roots/moons | inherent to routing | none |
 | **Addressing** | derived from device key | assigned by coordinator | assigned in cert | assigned by controller | derived from public key | manual |
@@ -139,8 +139,10 @@ Worth stating plainly, since the point of this page is credibility.
   claim is "no dependency that anybody operates on your behalf".
 - **Metadata.** Content topics and timestamps are cleartext on that bus, and
   directly-connected relay peers see your IP. See SECURITY.md.
-- **No audit.** The cryptography is standard and the compositions are ordinary,
-  but nobody independent has looked.
+- **One outside audit, not a certification.** The cryptography is standard and
+  the compositions are ordinary. In October 2026 an AI auditing agent, not a
+  security firm, reviewed it and found issues in the credential, agent and
+  LAN-host layers; they are being fixed.
 
 ## The honest positioning
 

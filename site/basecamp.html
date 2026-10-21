@@ -98,7 +98,8 @@ Agents</strong> beside it (<a href="agents.html">what that is</a>).</p></li>
 
 <ul>
     <li><strong>Its name</strong>, and whether it runs as an edge node
-    (~3 MB/h) or a core node of the gossip network (~20 MB/h).</li>
+    (~3 MB/h) or a core node of the gossip network (more, as it relays
+    for others).</li>
     <li><strong>Per mesh</strong>: switch it on or off, leave it, publish
     services, tell peers about them and about bound ports, relay for others,
     repeat revocations.</li>
@@ -156,8 +157,9 @@ roster.</p></li>
     <p>
         <strong>Why only with a card.</strong> Anyone in the socket group can
         ask the daemon to publish a signed statement. With a card, only the
-        card could have signed it, whoever asked. With a key file, anybody
-        running as that file's owner could have — so on a mesh with a key file,
+        card could have signed it, whoever asked. With a key file, the daemon
+        would need its passphrase, and anybody running as that file's owner
+        who had it could have signed — so on a mesh with a key file,
         admitting stays with <code>shrooms invite</code> and
         <code>shrooms admin</code>, run where the key is.
         <a href="https://github.com/vpavlin/shrooms/blob/master/docs/adr/051-a-card-lets-the-socket-group-renew-and-revoke.md">ADR-051</a>

@@ -25,6 +25,10 @@ on:
       # comparison would leave the published page stale — the same trap the
       # ADR line above exists to close.
       - 'docs/comparison.md'
+      # And the Agents pages (agents-*.html), rendered from these; they were
+      # missing, so an edit to them waited for an unrelated site change.
+      - 'docs/agents.md'
+      - 'docs/agents/**'
       - 'scripts/render-adrs.py'
       - '.github/workflows/pages.yml'
   # So the site can be republished without a commit, after a Pages setting
