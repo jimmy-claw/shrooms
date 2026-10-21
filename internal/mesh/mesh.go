@@ -653,6 +653,9 @@ func (m *Mesh) Authority() *cred.Authority { return m.authority }
 // Self returns this node's overlay address.
 func (m *Mesh) Self() netip.Addr { return m.self }
 
+// DevicePub is this device's key on this mesh (per mesh since ADR-015).
+func (m *Mesh) DevicePub() []byte { return m.st.Identity.DevicePub }
+
 // Run drives the mesh until ctx is cancelled.
 func (m *Mesh) Run(ctx context.Context) error {
 	m.started = time.Now()

@@ -881,6 +881,15 @@ func deviceByName(sock, label, name string) (string, error) {
 			"Without a running daemon, pass the key itself with --device", name, err)
 	}
 	var hits []peerStatus
+	// This machine too: the admin's own device is not in its roster, and is
+	// as likely as any to be the one named (a LAN host's gateway, ADR-068).
+	if st.Name == name {
+		for _, m := range st.Meshes {
+			if m.Device != "" && (label == "" || m.Label == label) {
+				hits = append(hits, peerStatus{Name: name, Mesh: m.Label, Device: m.Device})
+			}
+		}
+	}
 	for _, p := range st.Peers {
 		if p.Name != name || p.Device == "" {
 			continue

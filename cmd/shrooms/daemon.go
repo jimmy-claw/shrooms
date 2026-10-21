@@ -456,7 +456,10 @@ func cmdDaemon(args []string) error {
 
 // meshStatus is one mesh, for a node that has more than one.
 type meshStatus struct {
-	Label     string `json:"label"`
+	Label string `json:"label"`
+	// Device is this device's key on the mesh, which is per mesh (ADR-015):
+	// what an admin command names this machine by.
+	Device    string `json:"device,omitempty"`
 	Overlay   string `json:"overlay"`
 	OverlayV4 string `json:"overlay_v4,omitempty"`
 	Prefix    string `json:"prefix"`
@@ -1541,6 +1544,7 @@ func serveControl(ctx context.Context, log *slog.Logger, path string, instances 
 		for _, in := range instances {
 			ms := meshStatus{
 				Label:   in.label,
+				Device:  hex.EncodeToString(in.mesh.DevicePub()),
 				Overlay: in.self.String(),
 				Prefix:  in.prefix.String(),
 				Iface:   in.iface,

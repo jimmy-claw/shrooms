@@ -65,8 +65,20 @@ func (m *Mesh) LanGrant(raw []byte) error {
 	if _, err := m.applyLanGrant(raw, true); err != nil && !errors.Is(err, errStaleLanGrant) {
 		return err
 	}
+	// Said twice: in the lab the first grant, published moments after the
+	// gateway restarted, reached nobody, and the next chance was the epoch's
+	// repetition (2026-10-21). A second copy a little later costs one small
+	// message; a receiver that has it already ignores the repeat.
+	time.AfterFunc(lanGrantRepeat, func() {
+		if err := m.publishLanGrant(raw, time.Now()); err != nil {
+			m.log.Debug("could not repeat a LAN host grant", "err", err)
+		}
+	})
 	return m.publishLanGrant(raw, time.Now())
 }
+
+// lanGrantRepeat is how long after the admin's grant it is said again.
+const lanGrantRepeat = 20 * time.Second
 
 // handleLanGrant takes a grant off the bus.
 func (m *Mesh) handleLanGrant(raw []byte, now time.Time) {
