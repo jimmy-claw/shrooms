@@ -2,7 +2,8 @@
 
 **Status:** accepted 2026-10-21 by the owner, as the scope; not built. Amended
 the same day after the auditor's review (`08-adr-068-review.md` in the audit
-folder). Narrows the "subnet routing" in `docs/an-exit-node-for-the-mesh.md`,
+folder) and the owner's answers to it: normal cages stay network-open, and
+services become local-only when LAN hosts ship. Narrows the "subnet routing" in `docs/an-exit-node-for-the-mesh.md`,
 and doesn't change ADR-030's "no exit nodes".
 
 ## Context
@@ -56,7 +57,8 @@ own LAN.** What this design adds is:
 
 **A member can offer named LAN hosts, one at a time: each with its own mesh name
 and address, its own list of ports, and a grant signed by the mesh admin. Every
-member can reach them. Cages and anything acting for a cage can't.**
+member can reach them; sealed cages can't. This is the one way a LAN device
+reaches the mesh: services become this machine's own ports only.**
 
 ### The host
 
@@ -133,18 +135,20 @@ member can reach them. Cages and anything acting for a cage can't.**
 - **Every member of the mesh.** There is no per-member list. A compromised
   member, or an uncaged session on any member machine, can use the host's
   granted ports. That's the same trust as reaching any member's services today.
-- **Not caged sessions, and not on their behalf.** "Not for cages" needs two
-  things today's code doesn't do:
-  - **Every cage blocks the whole mesh range,** members, services and LAN hosts
-    alike. Today an unsealed cage blocks only the agent's port
-    (`cageRules(false)`), and the cage's traffic leaves with its machine's
-    mesh address, so the far side can't tell it came from a cage.
-  - **A caged session can't make another session do it.** A task from a caged
-    session to an uncaged one (`/a2a`, `ask_agent`) could ask it to fetch the
-    host: a confused deputy no network rule stops. The agent marks such tasks
-    as coming from a cage. A LAN host's gateway refuses connections made for a
-    cage-originated task, and the receiving session is told its asker is
-    caged, so it shouldn't fetch mesh resources for it.
+- **Sealed cages can't, and nothing new is needed for that.** A sealed cage
+  already blocks the LAN and the whole mesh range (ADR-045), and a LAN host's
+  address is derived inside that range.
+- **A normal cage can, as its machine can.** Caged is network-open by
+  definition (ADR-060: "no network limits on it"), so it reaches members'
+  services today, and would reach LAN hosts. That's the design, not a gap.
+  Limiting the network is what sealed is for. The auditor's review read the
+  cage rule against the stricter goal; the owner confirmed this one
+  (2026-10-21).
+- **A sealed session can't reach a host through another session either.** A
+  sealed session's task to an uncaged one (`/a2a`, `ask_agent`) could ask it
+  to fetch a LAN host: a confused deputy no network rule stops. Tasks from a
+  sealed session are marked as such, and the receiving session is told its
+  asker is sealed, so it shouldn't fetch mesh or LAN resources for it.
 - **Visible.** `shrooms status` and both apps list LAN hosts as "printer via
   pi5", with whether the gateway is online.
 
@@ -161,14 +165,19 @@ member can reach them. Cages and anything acting for a cage can't.**
   - if they obey the reply, gate the printer case on a client that uses EPSV
     (address-free) or reuses the control host;
   - an FTPS proxy that terminates TLS is the alternative, and isn't planned.
-- **Two issues in today's code, recorded here and fixed on their own:**
-  - **Unsealed cages reach the whole mesh.** They should block the mesh range
-    whatever this ADR does: a caged session today can reach every member's
-    services.
-  - **`services` targets aren't restricted.** Today they may be any host. Either
-    restrict them to this machine's own addresses (with LAN devices going
-    through this ADR), or keep them open and say plainly that a member can
-    always proxy its LAN. To be decided with the cage fix.
+- **Services become local-only, but only when LAN hosts ship.**
+  - Today a service may forward to any `host:port`. The owner runs Home
+    Assistant on the home mesh that way (a service pointing at a LAN address),
+    so Home Assistant doesn't have to join the mesh.
+  - Once this is built, a service target must be one of this machine's own
+    addresses, and a LAN device is offered only as a LAN host, with its grant.
+  - The restriction lands in the same release as LAN hosts, never before, and
+    existing LAN-pointing services are moved to LAN hosts (Home Assistant
+    first). A daemon that finds one after the upgrade refuses it and says
+    what to write instead.
+  - This makes the grant meaningful for shrooms' own features. A member can
+    still proxy its LAN with programs of its own; nothing in shrooms stops
+    that, and nothing claims to.
 - **The gateway is the host's single point of failure**, and its compromise
   opens that host's granted ports, and, honestly, anything else on its LAN it
   chooses to proxy. The grant names the gateway, so moving a host to another
