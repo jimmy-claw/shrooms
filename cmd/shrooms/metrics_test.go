@@ -2,6 +2,7 @@ package main
 
 import (
 	"github.com/vpavlin/shrooms/internal/hostload"
+	"time"
 
 	"encoding/json"
 	"io"
@@ -113,8 +114,33 @@ func TestMetricsWithoutTheDeliveryNode(t *testing.T) {
 	m.delivery = "http://127.0.0.1:1/metrics"
 	var b strings.Builder
 	m.write(&b)
-	if strings.Contains(b.String(), "shrooms_delivery") || !strings.Contains(b.String(), "shrooms_peer_up") {
+	// The delivery node's own counters are absent; what this node itself
+	// sent (shrooms_delivery_sent_*) is ours and always there.
+	for _, passed := range []string{"shrooms_delivery_bytes_total", "shrooms_delivery_peers", "shrooms_delivery_messages_total"} {
+		if strings.Contains(b.String(), passed+" ") || strings.Contains(b.String(), passed+"{") {
+			t.Errorf("%s served without a delivery node", passed)
+		}
+	}
+	if !strings.Contains(b.String(), "shrooms_peer_up") {
 		t.Fatalf("unexpected:\n%s", b.String())
+	}
+}
+
+// What this node published, for RLN's rate limits: counted, sized, and the
+// busiest second, in the text format Prometheus reads (2026-10-21).
+func TestWhatThisNodeSentIsExported(t *testing.T) {
+	var b strings.Builder
+	sentMetrics(&expo{w: &b}, time.Now())
+	out := b.String()
+	for _, want := range []string{
+		"# TYPE shrooms_delivery_sent_messages_total counter",
+		"# TYPE shrooms_delivery_sent_message_bytes histogram",
+		"# TYPE shrooms_delivery_sent_peak_per_second gauge",
+		"shrooms_delivery_sent_peak_per_second ",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in:\n%s", want, out)
+		}
 	}
 }
 

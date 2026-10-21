@@ -24,6 +24,7 @@ package main
 
 import (
 	"github.com/vpavlin/shrooms/internal/hostload"
+	"github.com/vpavlin/shrooms/internal/mesh"
 
 	"bufio"
 	"context"
@@ -201,6 +202,38 @@ func (m *metricsServer) write(w io.Writer) {
 	if m.delivery != "" {
 		deliveryMetrics(w, m.delivery)
 	}
+	sentMetrics(e, time.Now())
+}
+
+// sentMetrics is what this node itself published on the rendezvous plane, by
+// mesh and kind (internal/mesh/sendstats.go): for sizing RLN's per-publisher
+// rate limits, which the delivery node's own counters cannot answer — they
+// count everything it relays.
+func sentMetrics(e *expo, now time.Time) {
+	counts, peak := mesh.SendStats(now)
+	e.family("shrooms_delivery_sent_messages_total", "counter", "Messages this node published on the rendezvous plane (its own, not relayed), by mesh and kind.")
+	for _, c := range counts {
+		e.sample("shrooms_delivery_sent_messages_total", float64(c.Messages), "mesh", c.Mesh, "kind", c.Kind)
+	}
+	e.family("shrooms_delivery_sent_bytes_total", "counter", "Payload bytes of those messages, as handed to the delivery node (the wire adds the envelope).")
+	for _, c := range counts {
+		e.sample("shrooms_delivery_sent_bytes_total", float64(c.Bytes), "mesh", c.Mesh, "kind", c.Kind)
+	}
+	e.family("shrooms_delivery_send_failures_total", "counter", "Publishes the delivery node refused or failed.")
+	for _, c := range counts {
+		e.sample("shrooms_delivery_send_failures_total", float64(c.Failures), "mesh", c.Mesh, "kind", c.Kind)
+	}
+	e.family("shrooms_delivery_sent_message_bytes", "histogram", "Payload size of each published message.")
+	for _, c := range counts {
+		for i, b := range mesh.SendSizeBuckets {
+			e.sample("shrooms_delivery_sent_message_bytes_bucket", float64(c.Buckets[i]), "mesh", c.Mesh, "kind", c.Kind, "le", strconv.FormatFloat(b, 'f', -1, 64))
+		}
+		e.sample("shrooms_delivery_sent_message_bytes_bucket", float64(c.Messages), "mesh", c.Mesh, "kind", c.Kind, "le", "+Inf")
+		e.sample("shrooms_delivery_sent_message_bytes_sum", float64(c.Bytes), "mesh", c.Mesh, "kind", c.Kind)
+		e.sample("shrooms_delivery_sent_message_bytes_count", float64(c.Messages), "mesh", c.Mesh, "kind", c.Kind)
+	}
+	e.family("shrooms_delivery_sent_peak_per_second", "gauge", "Most messages this node published in any one second over the last 10 minutes, all meshes together: what an RLN epoch of one second would have to allow.")
+	e.sample("shrooms_delivery_sent_peak_per_second", float64(peak))
 }
 
 // deliveryRenames are the delivery node's metrics passed through, and what

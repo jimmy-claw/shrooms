@@ -454,7 +454,9 @@ func (m *Mesh) answerAgain(topic string, payload []byte, now time.Time) bool {
 	// Off the reader: a publish can block, and this runs on the node's event
 	// path, which every mesh in the process shares.
 	go func() {
-		if _, err := m.invBus().Send(topic, blob, true); err != nil {
+		_, err := m.invBus().Send(topic, blob, true)
+		recordSend(m.cfg.MeshLabel, SendInvite, len(blob), err, now)
+		if err != nil {
 			m.log.Warn("could not re-send an invite answer", "name", name, "err", err)
 			return
 		}

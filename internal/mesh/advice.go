@@ -254,6 +254,6 @@ func (m *Mesh) publishRelayAdvice(raw []byte, now time.Time) error {
 	if err != nil {
 		return err
 	}
-	_, err = m.node.Send(topic.Current(m.nk, now), sealed, true)
+	_, err = m.send(SendAdvice, sealed, now)
 	return err
 }

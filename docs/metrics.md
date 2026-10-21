@@ -18,6 +18,9 @@ candidates, so there are three kinds of metric.
 | `shrooms_mesh_peers` | `mesh` | Peers known on each mesh. |
 | `shrooms_delivery_bytes_total` | `direction` | What the delivery (rendezvous) node exchanged. A Core node does this for the whole cluster, not only for itself. |
 | `shrooms_delivery_peers`, `shrooms_delivery_messages_total` | `type` | Delivery node peers and messages. |
+| `shrooms_delivery_sent_messages_total`, `shrooms_delivery_sent_bytes_total`, `shrooms_delivery_send_failures_total` | `mesh`, `kind` | What this node itself published on the rendezvous plane, not what it relayed. Bytes are payload bytes as handed to the delivery node; the wire adds the envelope. |
+| `shrooms_delivery_sent_message_bytes` (histogram) | `mesh`, `kind`, `le` | The payload size of each published message. |
+| `shrooms_delivery_sent_peak_per_second` | | The most messages this node published in any one second over the last 10 minutes, all meshes together. |
 | `shrooms_host_receive_bytes_total`, `shrooms_host_transmit_bytes_total` | `interface` | Every interface on the machine except `lo`, from `/proc/net/dev`. This is what a router sees, shrooms or not. |
 | `shrooms_process_resident_bytes` | | The daemon's memory. |
 | `shrooms_host_cpu_seconds_total` | `mode` | All the machine's CPUs' time, by mode, from `/proc/stat`. |
@@ -35,6 +38,20 @@ listens on a loopback port that the kernel hands out as free, and shrooms
 passes its output through under new names. A fixed port broke a second node
 on the same machine, and a delivery node cannot be recreated in a running
 process, so retrying is not an option.
+
+The `sent` figures are for sizing RLN's per-publisher rate limits. The
+delivery team asked what an application like this actually sends
+(2026-10-21), and the delivery node's own counters can't say: they count
+everything it relays. They are counted at shrooms' own publishes instead.
+The `kind`s are:
+- `announce`: every 45 s per mesh, plus one in answer to a peer that
+  restarted;
+- `rekey`: the announce generation after a revocation;
+- `relay_advice`, `services`;
+- `revocation`, `grant`: admin actions relayed;
+- `invite_answer`.
+
+Probes travel over WireGuard, not delivery, and aren't counted.
 
 `/targets` on the same port lists this node and every peer, once each, in
 Prometheus' `http_sd` format. A scraper is told about one node and finds the

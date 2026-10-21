@@ -128,7 +128,7 @@ func (m *Mesh) publishServices(now time.Time) error {
 	for {
 		sealed, err := m.keys().Seal(topic.Epoch(now), m.st.Identity.DevicePriv, msg)
 		if err == nil {
-			_, err = m.node.Send(topic.Current(m.nk, now), sealed, true)
+			_, err = m.send(SendServices, sealed, now)
 			return err
 		}
 		if len(msg.Names) <= 1 {

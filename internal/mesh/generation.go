@@ -152,7 +152,7 @@ func (m *Mesh) publishRekeys(now time.Time) {
 			m.log.Debug("could not seal a rekey", "peer", p.Name, "err", err)
 			continue
 		}
-		if _, err := m.node.Send(topic.Current(m.nk, now), raw, true); err != nil {
+		if _, err := m.send(SendRekey, raw, now); err != nil {
 			m.log.Debug("could not publish a rekey", "peer", p.Name, "err", err)
 		}
 	}

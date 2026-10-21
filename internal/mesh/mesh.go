@@ -1261,7 +1261,7 @@ func (m *Mesh) publishRevocation(raw []byte, now time.Time) error {
 	if err != nil {
 		return err
 	}
-	_, err = m.node.Send(topic.Current(m.nk, now), sealed, true)
+	_, err = m.send(SendRevocation, sealed, now)
 	return err
 }
 
@@ -1378,7 +1378,7 @@ func (m *Mesh) publishGrant(raw []byte, now time.Time) error {
 	if err != nil {
 		return err
 	}
-	_, err = m.node.Send(topic.Current(m.nk, now), sealed, true)
+	_, err = m.send(SendGrant, sealed, now)
 	return err
 }
 
@@ -1740,7 +1740,7 @@ func (m *Mesh) announceWith(now time.Time, fresh bool) error {
 
 	// Ephemeral: endpoint announces are worthless once stale, and keeping them
 	// out of Store avoids handing an observer an archive.
-	if _, err := m.node.Send(topic.Current(m.nk, now), raw, true); err != nil {
+	if _, err := m.send(SendAnnounce, raw, now); err != nil {
 		return fmt.Errorf("publish announce: %w", err)
 	}
 	m.lastAnnounce = now
