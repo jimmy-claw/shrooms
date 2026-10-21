@@ -98,3 +98,26 @@ func TestRevokeWithNoDaemonPointsAtTheHex(t *testing.T) {
 		t.Errorf("no way forward offered: %v", err)
 	}
 }
+
+// A device that only claims a name is not chosen by it, even when the holder
+// is offline and the claimant is the one other match (audit F-33): the admin's
+// grant or revocation would go to whoever squatted the name.
+func TestANameResolvesToItsHolderNotAClaimant(t *testing.T) {
+	sock := rosterSocket(t, `{"peers":[
+  {"name":"pi5","mesh":"office","device":"3333333333333333333333333333333333333333333333333333333333333333","online":false},
+  {"name":"pi5","mesh":"office","device":"4444444444444444444444444444444444444444444444444444444444444444","online":true,"contested":true,"dns_name":"pi5-1a2b.office.mesh"}
+]}`)
+	got, err := deviceByName(sock, "office", "pi5")
+	if err != nil || !strings.HasPrefix(got, "3333") {
+		t.Fatalf("resolved to %s, %v; want the holder", got, err)
+	}
+
+	sock = rosterSocket(t, `{"peers":[
+  {"name":"pi5","mesh":"office","device":"4444444444444444444444444444444444444444444444444444444444444444","contested":true,"dns_name":"pi5-1a2b.office.mesh"}
+]}`)
+	if got, err := deviceByName(sock, "office", "pi5"); err == nil {
+		t.Fatalf("resolved to the claimant %s", got)
+	} else if !strings.Contains(err.Error(), "--device") || !strings.Contains(err.Error(), "4444") {
+		t.Errorf("the error does not show the claimant and the way out: %v", err)
+	}
+}

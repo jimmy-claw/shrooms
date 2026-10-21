@@ -890,11 +890,19 @@ func deviceByName(sock, label, name string) (string, error) {
 			}
 		}
 	}
+	var claimants []peerStatus
 	for _, p := range st.Peers {
 		if p.Name != name || p.Device == "" {
 			continue
 		}
 		if label != "" && p.Mesh != "" && p.Mesh != label {
+			continue
+		}
+		// A device that claims a name another holds is not that name: with
+		// the real one offline, it would otherwise be the only match, and the
+		// admin's grant or revocation would go to it (audit F-33).
+		if p.Contested {
+			claimants = append(claimants, p)
 			continue
 		}
 		hits = append(hits, p)
@@ -903,6 +911,14 @@ func deviceByName(sock, label, name string) (string, error) {
 	case 1:
 		return hits[0].Device, nil
 	case 0:
+		if len(claimants) > 0 {
+			var who []string
+			for _, c := range claimants {
+				who = append(who, fmt.Sprintf("  %s (%s)", c.DNSName, c.Device))
+			}
+			return "", fmt.Errorf("%q belongs to another device; these only claim it:\n%s\n\n"+
+				"If one of those is the device you mean, pass its key with --device", name, strings.Join(who, "\n"))
+		}
 		return "", fmt.Errorf("no peer called %q. `shrooms status` lists the "+
 			"roster; a device that has never announced is not in it, and its key "+
 			"has to come from `shrooms keys` on the device itself", name)

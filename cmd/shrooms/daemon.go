@@ -1687,14 +1687,25 @@ func serveControl(ctx context.Context, log *slog.Logger, path string, instances 
 			// qualified everywhere, so a peer's name needs its mesh however
 			// many meshes this device is on.
 			meshLabel := in.label
+			var links map[string]string
+			if in.lan != nil {
+				links = in.lan.Links()
+			}
 			for _, h := range m.LanHosts(now) {
-				out.LanHosts = append(out.LanHosts, lanHostStatus{
+				st := lanHostStatus{
 					Mesh: meshLabel, Name: h.Name, Gateway: h.GatewayName, Self: h.Self, Online: h.Online,
 					Overlay: h.Overlay.String(), OverlayV4: v4Of(m, h.Overlay),
 					Ports:   cred.FormatLanPorts(h.Ports),
 					Until:   h.NotAfter.Unix(),
 					DNSName: lanHostDNSName(h.Name, h.GatewayName, meshLabel, cfg.HostsSuffix),
-				})
+				}
+				if h.Self {
+					st.LAN = links[h.Name]
+					if st.LAN == "" {
+						st.LAN = "granted, but not in this device's lan_hosts"
+					}
+				}
+				out.LanHosts = append(out.LanHosts, st)
 			}
 			svc, bnd := m.Services(now), m.Bound(now)
 			holds := mesh.Holders(m.Roster().Peers())
@@ -2188,6 +2199,9 @@ type lanHostStatus struct {
 	Ports     string `json:"ports"`
 	Until     int64  `json:"until"`
 	DNSName   string `json:"dns_name"`
+	// LAN is, on the gateway only, where the host really is: its LAN
+	// address and interface, or why it cannot be served (F-30).
+	LAN string `json:"lan,omitempty"`
 }
 
 // lanHostDNSName is <host>.lan.<gateway>.<mesh>.<suffix>.

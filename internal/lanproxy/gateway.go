@@ -158,6 +158,11 @@ func NewGateway(inner tun.Device, specs []lanhost.Spec, prefix netip.Prefix, gat
 			}
 		}
 	}
+	// Said once at the start, so the owner sees where each host really is,
+	// or why it will not be served, without waiting for a member to try.
+	for name, where := range g.Links() {
+		log.Info("LAN host", "host", name, "lan", where)
+	}
 	go g.pumpInner()
 	go g.pumpStack()
 	go g.recheckLoop()
@@ -222,6 +227,20 @@ func (g *Gateway) Overlays() map[string]netip.Addr {
 	out := make(map[string]netip.Addr, len(g.hosts))
 	for o, h := range g.hosts {
 		out[h.spec.Name] = o
+	}
+	return out
+}
+
+// Links is where each host's LAN address is, for status: "192.168.10.143
+// on wlan0", or why it cannot be served.
+func (g *Gateway) Links() map[string]string {
+	out := make(map[string]string, len(g.hosts))
+	for _, h := range g.hosts {
+		if ifc, err := LinkOf(h.spec.Addr); err != nil {
+			out[h.spec.Name] = err.Error()
+		} else {
+			out[h.spec.Name] = h.spec.Addr.String() + " on " + ifc
+		}
 	}
 	return out
 }
@@ -522,17 +541,31 @@ func splice(a, b net.Conn) {
 	<-done
 }
 
-// OnLink checks a LAN address against this machine's interfaces now: it must
-// be inside a subnet of an up, non-loopback interface that is not a mesh
-// tunnel, and must not be one of this machine's own addresses.
+// OnLink checks a LAN address against this machine's interfaces now.
 func OnLink(a netip.Addr) error {
+	_, err := LinkOf(a)
+	return err
+}
+
+// LinkOf is the interface a LAN address is on: inside the subnet of an up
+// interface that is a LAN, not one of this machine's own addresses, and not
+// that subnet's network or broadcast address. It names the interface so that
+// status can show where a host really is.
+//
+// A LAN is a physical interface, or a bridge or bond over one (physicalLink).
+// This used to accept any interface not named after ours, which took in a
+// WAN neighbour, a host behind another VPN and a container on docker0: each
+// "on a link the gateway is on", none what the admin thought they granted
+// (F-30). The type decides, not the name, so a tunnel called eth1 is still a
+// tunnel.
+func LinkOf(a netip.Addr) (string, error) {
 	ifs, err := net.Interfaces()
 	if err != nil {
-		return err
+		return "", err
 	}
-	on := false
+	var off []string
 	for _, ifc := range ifs {
-		if ifc.Flags&net.FlagUp == 0 || ifc.Flags&net.FlagLoopback != 0 || meshInterface(ifc.Name) {
+		if ifc.Flags&net.FlagUp == 0 || ifc.Flags&net.FlagLoopback != 0 {
 			continue
 		}
 		addrs, _ := ifc.Addrs()
@@ -545,23 +578,45 @@ func OnLink(a netip.Addr) error {
 			if !ok {
 				continue
 			}
-			if own.Unmap() == a {
-				return fmt.Errorf("%s is this gateway's own address", a)
+			own = own.Unmap()
+			if own == a {
+				return "", fmt.Errorf("%s is this gateway's own address", a)
 			}
 			ones, _ := ipn.Mask.Size()
-			if netip.PrefixFrom(own.Unmap(), ones).Masked().Contains(a) {
-				on = true
+			subnet := netip.PrefixFrom(own, ones).Masked()
+			if !subnet.Contains(a) {
+				continue
 			}
+			if !physicalLink(ifc.Name) {
+				off = append(off, ifc.Name)
+				continue
+			}
+			if edge(subnet, a) {
+				return "", fmt.Errorf("%s is the network or broadcast address of %s", a, subnet)
+			}
+			return ifc.Name, nil
 		}
 	}
-	if !on {
-		return fmt.Errorf("%s is not on a LAN this gateway is on", a)
+	if len(off) > 0 {
+		return "", fmt.Errorf("%s is on %s, which is a tunnel, a container bridge or another virtual link, not a LAN",
+			a, strings.Join(off, ", "))
 	}
-	return nil
+	return "", fmt.Errorf("%s is not on a LAN this gateway is on", a)
 }
 
-// meshInterface is a tunnel of ours: a host behind one would be reached over
-// the mesh, which is a member's job, not a LAN host's.
-func meshInterface(name string) bool {
-	return strings.HasPrefix(name, "logos") || strings.HasPrefix(name, "shrooms")
+// edge reports whether a is the network or broadcast address of an IPv4
+// subnet that has such things (/31 and /32 do not), so a broadcast is not
+// offered as a host (F-35). IPv6 has neither.
+func edge(subnet netip.Prefix, a netip.Addr) bool {
+	if !a.Is4() || subnet.Bits() >= 31 {
+		return false
+	}
+	if a == subnet.Addr() {
+		return true
+	}
+	b := subnet.Addr().As4()
+	host := 32 - subnet.Bits()
+	n := uint32(b[0])<<24 | uint32(b[1])<<16 | uint32(b[2])<<8 | uint32(b[3])
+	n |= 1<<host - 1
+	return a == netip.AddrFrom4([4]byte{byte(n >> 24), byte(n >> 16), byte(n >> 8), byte(n)})
 }

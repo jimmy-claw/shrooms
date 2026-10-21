@@ -425,7 +425,7 @@ func printLanHosts(out io.Writer, hosts []lanHostStatus) {
 		via := "via " + h.Gateway
 		switch {
 		case h.Self:
-			via = "offered by this device"
+			via = "offered by this device: " + h.LAN
 		case !h.Online:
 			via += " (gateway offline)"
 		}

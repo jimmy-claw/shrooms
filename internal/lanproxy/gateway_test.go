@@ -7,6 +7,8 @@ import (
 	"log/slog"
 	"net"
 	"net/netip"
+	"os"
+	"path/filepath"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -175,7 +177,7 @@ func TestOnLinkRefusesTheGatewayAndElsewhere(t *testing.T) {
 	}
 	ifs, _ := net.Interfaces()
 	for _, ifc := range ifs {
-		if ifc.Flags&net.FlagLoopback != 0 || ifc.Flags&net.FlagUp == 0 || meshInterface(ifc.Name) {
+		if ifc.Flags&net.FlagLoopback != 0 || ifc.Flags&net.FlagUp == 0 || !physicalLink(ifc.Name) {
 			continue
 		}
 		addrs, _ := ifc.Addrs()
@@ -276,5 +278,51 @@ func TestAWithdrawalClosesAnOpenConnection(t *testing.T) {
 	c.Write([]byte("again"))
 	if n, err := io.ReadFull(c, buf); err == nil {
 		t.Fatalf("still answered after the withdrawal: %q", buf[:n])
+	}
+}
+
+// A subnet's network and broadcast addresses are not hosts (F-35).
+func TestASubnetsEdgesAreNotHosts(t *testing.T) {
+	lan := netip.MustParsePrefix("192.168.10.0/24")
+	for a, want := range map[string]bool{
+		"192.168.10.0": true, "192.168.10.255": true, "192.168.10.143": false, "192.168.10.1": false,
+	} {
+		if edge(lan, netip.MustParseAddr(a)) != want {
+			t.Errorf("edge(%s) = %v", a, !want)
+		}
+	}
+	if edge(netip.MustParsePrefix("10.0.0.0/31"), netip.MustParseAddr("10.0.0.1")) {
+		t.Error("a /31 has no broadcast address")
+	}
+}
+
+// A LAN is hardware, or a bridge or bond over it; a container bridge, a veth
+// and a tunnel are not, whatever they are called (F-30).
+func TestOnlyAPhysicalLinkIsALan(t *testing.T) {
+	root := t.TempDir()
+	mk := func(name string, parts ...string) {
+		if err := os.MkdirAll(filepath.Join(root, name), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		for _, p := range parts {
+			if err := os.MkdirAll(filepath.Join(root, name, p), 0o755); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	mk("eth0", "device")
+	mk("wlan0", "device")
+	mk("br0", "brif/eth0")
+	mk("docker0", "brif/veth1")
+	mk("veth1")
+	mk("eth1") // a tunnel with an ordinary name
+	mk("bond0", "lower_wlan0")
+	for name, want := range map[string]bool{
+		"eth0": true, "wlan0": true, "br0": true, "bond0": true,
+		"docker0": false, "veth1": false, "eth1": false, "missing": false, "../eth0": false,
+	} {
+		if got := physicalUnder(root, name, 0); got != want {
+			t.Errorf("%s: physical = %v, want %v", name, got, want)
+		}
 	}
 }
