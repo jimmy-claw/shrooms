@@ -53,7 +53,7 @@ func (m *Mesh) loadLanGrants() {
 		return
 	}
 	for _, raw := range m.st.LanGrants(m.networkID) {
-		if _, err := m.applyLanGrant(raw, false); err != nil && !errors.Is(err, errStaleLanGrant) {
+		if _, err := m.applyLanGrant(raw, false); err != nil && !errors.As(err, new(heldSerial)) {
 			m.log.Debug("dropping a stored LAN host grant", "err", err)
 		}
 	}
@@ -61,20 +61,57 @@ func (m *Mesh) loadLanGrants() {
 
 // LanGrant takes a grant from the admin tooling and puts it on the bus,
 // verified exactly as one from a peer would be.
+//
+// A grant that is not newer than the one held is the admin's mistake, and is
+// refused rather than published: this used to report success, so a withdrawal
+// in the same second as its grant (the default serial was the time in
+// seconds) said "Withdrew" and left the host granted (F-28). Only the very
+// statement already held is accepted again, which makes a retry harmless.
 func (m *Mesh) LanGrant(raw []byte) error {
-	if _, err := m.applyLanGrant(raw, true); err != nil && !errors.Is(err, errStaleLanGrant) {
+	if _, err := m.applyLanGrant(raw, true); err != nil {
+		var held heldSerial
+		if errors.As(err, &held) && held.same {
+			return m.publishLanGrant(raw, time.Now())
+		}
 		return err
 	}
 	// Said twice: in the lab the first grant, published moments after the
 	// gateway restarted, reached nobody, and the next chance was the epoch's
 	// repetition (2026-10-21). A second copy a little later costs one small
-	// message; a receiver that has it already ignores the repeat.
+	// message; a receiver that has it already ignores the repeat. Only if it
+	// is still the latest: repeating a grant the admin has since withdrawn
+	// would offer it again to a node that missed the withdrawal (F-38).
 	time.AfterFunc(lanGrantRepeat, func() {
+		if !m.holdsLanGrant(raw) {
+			return
+		}
 		if err := m.publishLanGrant(raw, time.Now()); err != nil {
 			m.log.Debug("could not repeat a LAN host grant", "err", err)
 		}
 	})
 	return m.publishLanGrant(raw, time.Now())
+}
+
+// holdsLanGrant reports whether raw is the statement held for its gateway and
+// host.
+func (m *Mesh) holdsLanGrant(raw []byte) bool {
+	g, err := cred.UnmarshalLanGrant(raw)
+	if err != nil {
+		return false
+	}
+	m.lanMu.Lock()
+	defer m.lanMu.Unlock()
+	h, ok := m.lanGrants[lanGrantKey(g.Gateway, g.Host)]
+	return ok && bytes.Equal(h.raw, raw)
+}
+
+// OnLanGrant registers f to run whenever the grants held change: the gateway
+// closes, at once, the connections a withdrawal or narrowing no longer
+// covers (F-27).
+func (m *Mesh) OnLanGrant(f func()) {
+	m.lanMu.Lock()
+	m.lanChanged = f
+	m.lanMu.Unlock()
 }
 
 // lanGrantRepeat is how long after the admin's grant it is said again.
@@ -84,7 +121,7 @@ const lanGrantRepeat = 20 * time.Second
 func (m *Mesh) handleLanGrant(raw []byte, now time.Time) {
 	fresh, err := m.applyLanGrant(raw, true)
 	if err != nil {
-		if !errors.Is(err, errStaleLanGrant) {
+		if !errors.As(err, new(heldSerial)) {
 			m.log.Warn("ignoring a LAN host grant", "err", err)
 		}
 		return
@@ -97,7 +134,21 @@ func (m *Mesh) handleLanGrant(raw []byte, now time.Time) {
 	}
 }
 
-var errStaleLanGrant = errors.New("not newer than the LAN host grant already held")
+// heldSerial is a grant not newer than the one held for its gateway and host.
+// same is when it is that very grant, which is nothing to complain about.
+type heldSerial struct {
+	serial uint64
+	same   bool
+}
+
+// IsStaleLanGrant reports whether err is a grant refused for not being newer
+// than the one held.
+func IsStaleLanGrant(err error) bool { return errors.As(err, new(heldSerial)) }
+
+func (e heldSerial) Error() string {
+	return fmt.Sprintf("this mesh already holds serial %d for that gateway and host; a new statement needs a higher one (--serial %d)",
+		e.serial, e.serial+1)
+}
 
 // applyLanGrant verifies a grant and keeps it when it is newer than the one
 // held for its gateway and host. Reports whether it was new.
@@ -120,10 +171,7 @@ func (m *Mesh) applyLanGrant(raw []byte, persist bool) (bool, error) {
 	}
 	if old, ok := m.lanGrants[key]; ok && g.Serial <= old.g.Serial {
 		m.lanMu.Unlock()
-		if g.Serial == old.g.Serial {
-			return false, nil
-		}
-		return false, errStaleLanGrant
+		return false, heldSerial{serial: old.g.Serial, same: bytes.Equal(old.raw, raw)}
 	}
 	if _, ok := m.lanGrants[key]; !ok {
 		if len(m.lanGrants) >= maxLanGrantsHeld {
@@ -137,7 +185,11 @@ func (m *Mesh) applyLanGrant(raw []byte, persist bool) (bool, error) {
 	}
 	m.lanGrants[key] = heldLanGrant{g: g, raw: append([]byte(nil), raw...)}
 	all := m.lanRawsLocked()
+	changed := m.lanChanged
 	m.lanMu.Unlock()
+	if changed != nil {
+		changed()
+	}
 
 	if persist && m.st != nil {
 		if err := m.st.SetLanGrants(m.networkID, all); err != nil {
@@ -213,7 +265,10 @@ func (m *Mesh) LanHosts(now time.Time) []LanHost {
 		}
 		if m.st != nil && bytes.Equal(g.Gateway, m.st.Identity.DevicePub) {
 			h.Self, h.Online, h.GatewayName = true, true, sanitiseName(m.cfg.Name)
-		} else if p, ok := peers[hex.EncodeToString(g.Gateway)]; ok {
+		} else if p, ok := peers[hex.EncodeToString(g.Gateway)]; ok && !m.expired(p.ID(), now) {
+			// An expired gateway is in the roster until ForgetAfter, but it
+			// has no tunnel, so its hosts would resolve to an address with no
+			// route (F-31). A revoked one has already left the roster.
 			h.GatewayName, h.Online = sanitiseName(p.Name), p.Online(now)
 		} else {
 			continue

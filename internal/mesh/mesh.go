@@ -155,6 +155,7 @@ type Mesh struct {
 	lanMu      sync.Mutex
 	lanGrants  map[string]heldLanGrant
 	lastLanOut time.Time
+	lanChanged func() // OnLanGrant
 
 	// relayNow is the relay currently in use, for logging changes.
 	relayNow netip.AddrPort

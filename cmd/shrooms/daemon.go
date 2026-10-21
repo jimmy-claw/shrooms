@@ -2007,7 +2007,11 @@ func serveControl(ctx context.Context, log *slog.Logger, path string, instances 
 		}
 		if err := target.LanGrant(blob); err != nil {
 			log.Warn("refused a LAN host grant", "err", err)
-			http.Error(w, err.Error(), http.StatusBadRequest)
+			code := http.StatusBadRequest
+			if mesh.IsStaleLanGrant(err) {
+				code = http.StatusConflict
+			}
+			http.Error(w, err.Error(), code)
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)

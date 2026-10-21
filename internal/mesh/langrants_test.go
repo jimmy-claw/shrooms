@@ -1,6 +1,7 @@
 package mesh
 
 import (
+	"encoding/hex"
 	"testing"
 	"time"
 
@@ -125,5 +126,65 @@ func TestALanHostHasANameNobodyElseCanTake(t *testing.T) {
 	}
 	if got, ok := f.m.Lookup("printer.lan.other"); ok {
 		t.Errorf("a host resolved under the wrong gateway: %v", got)
+	}
+}
+
+// The admin's statement that is not newer than the one held is refused, not
+// reported as done: a withdrawal at the grant's own serial used to print
+// "Withdrew" and leave the host granted (F-28). The very statement held may
+// be sent again.
+func TestAStaleOrEqualSerialIsRefused(t *testing.T) {
+	f := newAdviceFixture(t, state.Config{})
+	gw, _ := identity.New()
+	f.m.roster.Apply(newAnnounce(t, gw, "pi5", nil, 1), time.Now())
+	noBus := func(err error) bool { return err == nil || err.Error() == "no rendezvous connection" }
+
+	grant := f.lanGrant(t, gw.DevicePub, "printer", "8883", 10, false)
+	if err := f.m.LanGrant(grant); !noBus(err) {
+		t.Fatal(err)
+	}
+	if err := f.m.LanGrant(f.lanGrant(t, gw.DevicePub, "printer", "", 10, true)); !IsStaleLanGrant(err) {
+		t.Errorf("a withdrawal at the grant's serial: %v", err)
+	}
+	if err := f.m.LanGrant(f.lanGrant(t, gw.DevicePub, "printer", "", 9, true)); !IsStaleLanGrant(err) {
+		t.Errorf("a withdrawal at a lower serial: %v", err)
+	}
+	if len(f.m.LanHosts(time.Now())) != 1 {
+		t.Error("a refused withdrawal changed what is held")
+	}
+	if err := f.m.LanGrant(grant); !noBus(err) {
+		t.Errorf("the same statement again: %v", err)
+	}
+
+	// The repeat is only of what is still held (F-38).
+	if !f.m.holdsLanGrant(grant) {
+		t.Fatal("the grant is not held")
+	}
+	if err := f.m.LanGrant(f.lanGrant(t, gw.DevicePub, "printer", "", 11, true)); !noBus(err) {
+		t.Fatal(err)
+	}
+	if f.m.holdsLanGrant(grant) {
+		t.Error("a superseded grant would still be repeated")
+	}
+}
+
+// A gateway whose credential has run out is still in the roster for a while,
+// but its hosts are not listed: they would have no route (F-31).
+func TestAnExpiredGatewaysHostsAreNotListed(t *testing.T) {
+	f := newAdviceFixture(t, state.Config{})
+	gw, _ := identity.New()
+	f.m.roster.Apply(newAnnounce(t, gw, "pi5", nil, 1), time.Now())
+	f.m.handleLanGrant(f.lanGrant(t, gw.DevicePub, "printer", "8883", 1, false), time.Now())
+	if len(f.m.LanHosts(time.Now())) != 1 {
+		t.Fatal("not listed while the gateway is in force")
+	}
+	f.m.mu.Lock()
+	if f.m.expiry == nil {
+		f.m.expiry = map[string]int64{}
+	}
+	f.m.expiry[hex.EncodeToString(gw.DevicePub)] = time.Now().Add(-time.Minute).Unix()
+	f.m.mu.Unlock()
+	if got := f.m.LanHosts(time.Now()); len(got) != 0 {
+		t.Errorf("an expired gateway's host is listed: %+v", got)
 	}
 }

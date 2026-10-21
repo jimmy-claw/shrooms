@@ -46,7 +46,7 @@ func adminLanPublish(name string, args []string, withdraw bool) error {
 	life := fs.Duration("life", 365*24*time.Hour, "how long the grant is in force")
 	signWith := fs.String("sign-with", "", "a command that signs a digest, instead of the admin key file")
 	external := fs.Bool("external-signer", false, "print the digest and read the signature back (ADR-022)")
-	serial := fs.Uint64("serial", 0, "the grant's serial; must exceed the one the mesh holds for this host (default: now)")
+	serial := fs.Uint64("serial", 0, "the grant's serial; must exceed the one the mesh holds for this host (default: now, in nanoseconds)")
 	sock := fs.String("socket", DefaultSocket, "control socket of the local daemon")
 	publish := fs.Bool("publish", true, "hand it to the local daemon to put on the mesh")
 	if err := fs.Parse(splitArgs(fs, args)); err != nil {
@@ -80,8 +80,12 @@ func adminLanPublish(name string, args []string, withdraw bool) error {
 	if _, err := fmt.Sscanf(*devHex, "%x", &gw); err != nil || len(gw) != ed25519.PublicKeySize {
 		return fmt.Errorf("--device must be a %d-byte hex key", ed25519.PublicKeySize)
 	}
+	// Nanoseconds, not seconds: with seconds, a withdrawal in the same second
+	// as its grant carried the same serial, and was ignored (F-28). Either
+	// unit exceeds every serial the other ever produced, so grants made
+	// before the change are still superseded.
 	if *serial == 0 {
-		*serial = uint64(time.Now().Unix())
+		*serial = uint64(time.Now().UnixNano())
 	}
 
 	admin, auth, err := signerFor(*dir, *label, *signWith, *external)
@@ -97,27 +101,34 @@ func adminLanPublish(name string, args []string, withdraw bool) error {
 		return err
 	}
 
-	if withdraw {
-		fmt.Printf("Withdrew LAN host %q from gateway %x (serial %d).\n", *host, gw[:8], *serial)
-	} else {
-		fmt.Printf("Granted gateway %x to offer LAN host %q on TCP %s, until %s (serial %d).\n",
-			gw[:8], *host, cred.FormatLanPorts(rs), time.Unix(g.NotAfter, 0).Format(time.DateOnly), *serial)
-		fmt.Println("The gateway serves it once its own config lists the host and its LAN")
-		fmt.Printf("address: mesh.<label>.lan_hosts = [\"%s=<LAN address>/tcp:%s\"]\n", *host, cred.FormatLanPorts(rs))
+	// What it says, only once the daemon has taken it: this printed
+	// "Withdrew" before asking, and the daemon then ignored the withdrawal
+	// (F-28).
+	said := func() {
+		if withdraw {
+			fmt.Printf("Withdrew LAN host %q from gateway %x (serial %d).\n", *host, gw[:8], *serial)
+		} else {
+			fmt.Printf("Granted gateway %x to offer LAN host %q on TCP %s, until %s (serial %d).\n",
+				gw[:8], *host, cred.FormatLanPorts(rs), time.Unix(g.NotAfter, 0).Format(time.DateOnly), *serial)
+			fmt.Println("The gateway serves it once its own config lists the host and its LAN")
+			fmt.Printf("address: mesh.<label>.lan_hosts = [\"%s=<LAN address>/tcp:%s\"]\n", *host, cred.FormatLanPorts(rs))
+		}
+		fmt.Println()
 	}
-	fmt.Println()
 
 	if !*publish {
+		fmt.Printf("Signed, not yet in force (serial %d):\n\n", *serial)
 		fmt.Printf("  %s\n\n", base64.StdEncoding.EncodeToString(raw))
 		fmt.Println("Hand that to any running node to put it on the mesh.")
 		return nil
 	}
 	if err := postSigned(*sock, "/lan-grant", *label, raw); err != nil {
-		fmt.Printf("Not published: %v\n\n", err)
-		fmt.Printf("It is signed; publish it later with --serial %d, or re-run this\n", *serial)
-		fmt.Println("where a daemon is running.")
+		fmt.Printf("Not published, so nothing changed: %v\n\n", err)
+		fmt.Println("Re-run this where a daemon is running, with a --serial higher than the")
+		fmt.Println("one the mesh holds if that is what it refused.")
 		return err
 	}
+	said()
 	fmt.Println("Published. Every node verifies the signature and repeats the grant each")
 	fmt.Println("epoch, so a node that was offline learns it from whoever is up.")
 	return nil
