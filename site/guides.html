@@ -242,14 +242,30 @@ mesh.home.lan_hosts = ["ha=192.168.0.116/tcp:80,8123"]
     <li><strong>Members never see its LAN address.</strong> The host gets an
     address of its own on the mesh, and the gateway proxies.</li>
     <li><strong>Only the listed ports, only while granted.</strong> Nothing else
-    on the LAN is reachable; UDP and ping do not cross.
-    <code>shrooms admin lan withdraw</code> takes it away.</li>
+    on the LAN is reachable, nor anything else on the gateway; UDP and ping do
+    not cross. <code>shrooms admin lan withdraw</code> takes it away, and
+    closes connections already open.</li>
     <li><strong>A mesh with no admin has no LAN hosts</strong>, and a sealed
     cage cannot reach one.</li>
-    <li><strong>FTP and anything else that names an address inside its own
-    protocol</strong> may not work through it: the device can tell the client to
-    connect to its LAN address directly, which only works on that LAN.</li>
 </ul>
+
+<p>
+    Some applications dial the device's LAN address instead of the one they
+    were given. Bambu Studio opens the printer's camera and its FTPS data
+    connections to the address the printer reports, which from home goes
+    nowhere, or, on a LAN with the same range, to whatever local device has
+    that address. The member that runs such an application gives it a
+    <strong>LAN alias</strong>:
+</p>
+
+<pre><code><span class="c"># on the laptop that prints</span>
+mesh.office.lan_aliases = ["192.168.10.143=printer.lan.proteus"]</code></pre>
+
+<p>
+    That address goes to the printer over the mesh while the printer is on
+    it, and back to the LAN when it is not, so the laptop still reaches it
+    directly in the office. Private IPv4 addresses only, on desktops.
+</p>
 
 <div class="warn">
     <p><strong>This is still a way from the mesh into your LAN, and it is worth

@@ -651,13 +651,25 @@ including the phone on mobile data.
 - **Members never see its LAN address.** They reach an address of the host's
   own on the mesh, and the gateway proxies to the LAN.
 - **What stays closed:** the gateway serves only the listed ports, and only
-  while the grant is in force. Nothing else on the LAN is reachable. UDP and
-  ping don't cross.
+  while the grant is in force; withdrawing it closes connections already
+  open. Nothing else on the LAN is reachable, and nothing else on the
+  gateway: a node takes from the mesh only packets addressed to itself. UDP
+  and ping don't cross.
 - **A mesh with no admin has no LAN hosts.** Neither does a sealed cage.
-- **FTP, and anything else that names an address inside its own protocol,**
-  may not work through it. The device can tell the client to connect to its
-  LAN address directly, which only works on that LAN. That's a known gap,
-  found with a Bambu printer's file uploads.
+- **An application that dials the device's LAN address** instead of the one
+  it was given needs a LAN alias on the member that runs it. Bambu Studio
+  does: it opens the printer's camera and FTPS data connections to the
+  address the printer reports. Without the alias those go nowhere, or, on a
+  LAN with the same range, to whatever local device has that address. On
+  the laptop that prints:
+
+  ```toml
+  mesh.office.lan_aliases = ["192.168.10.143=printer.lan.proteus"]
+  ```
+
+  That address goes to the printer over the mesh while the printer is on
+  it, and back to the LAN when it isn't, so the laptop still reaches it
+  directly in the office. Private IPv4 addresses only; desktop only.
 
 > **This is still a way from the mesh into your LAN, and it is worth naming.**
 > Every member can reach the host's listed ports, including a phone that

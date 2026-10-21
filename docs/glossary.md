@@ -31,6 +31,10 @@ that every path, ADR and package symbol below (such as `agent.LocalAddr`) still 
   Assistant box), offered on listed TCP ports by a member on its LAN, its
   gateway, under the mesh admin's grant. Named `<host>.lan.<gateway>.<mesh>.mesh`.
   `internal/lanhost`, `internal/lanproxy`, `cred.LanGrant`; ADR-068.
+- **LAN alias**: a member's own mapping of a LAN address to a LAN host
+  (`mesh.<label>.lan_aliases`), for applications that dial the device's LAN
+  address. Routed into the mesh only while the host is on it.
+  `lanhost.Alias`; ADR-068.
 - **`.mesh` names**: `laptop.office.mesh`, answered by the daemon's own DNS
   (`internal/dns`, `mesh.QualifiedDNSName`); ADR-032.
 

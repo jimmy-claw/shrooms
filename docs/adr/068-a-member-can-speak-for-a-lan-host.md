@@ -4,7 +4,10 @@
 LanGrant, `internal/lanhost`, `internal/lanproxy`, `shrooms admin lan`). Amended
 the same day after the auditor's review (`08-adr-068-review.md` in the audit
 folder) and the owner's answers to it: normal cages stay network-open, and
-services become local-only when LAN hosts ship. Narrows the "subnet routing" in `docs/an-exit-node-for-the-mesh.md`,
+services become local-only when LAN hosts ship. Amended again the same day
+after the auditor's implementation audit (`09-adr-068-implementation.md`):
+the sentences below now say what the code enforces, and members gained LAN
+aliases for the printer's passive FTPS. Narrows the "subnet routing" in `docs/an-exit-node-for-the-mesh.md`,
 and doesn't change ADR-030's "no exit nodes".
 
 ## Context
@@ -68,11 +71,19 @@ reaches the mesh: services become this machine's own ports only.**
   `mesh.office.lan_hosts = ["printer=192.168.10.42/tcp:8883,990,6000,50000-50100"]`.
   There is no way to route a range of LAN addresses.
 - **The LAN address is a literal, checked.** An exact IPv4 or IPv6 literal,
-  never a name (no DNS, so no rebinding). It must be on a link the gateway is
-  on, and must not be:
+  never a name (no DNS, so no rebinding). It must be inside the subnet of one
+  of the gateway's LAN interfaces, checked each time it is dialled, and must
+  not be:
   - loopback, link-local, unspecified, multicast or broadcast;
+  - its subnet's network or broadcast address;
   - one of the gateway's own addresses;
   - a mesh or synthetic range (ADR-005, ADR-021).
+
+  A LAN interface is decided by type, not name: a physical one, or a bridge,
+  bond or VLAN over one (sysfs). A WAN neighbour is still on a physical link,
+  so the gateway's owner is trusted not to list one; a container on docker0,
+  a host behind another VPN and a tunnel are refused (audit F-30). Status
+  shows, on the gateway, which interface each host is on.
 - **Limits.** At most 16 hosts per gateway and 256 ports per host, in at most
   8 ranges. A grant for 1–65535 is the whole device, so it's refused. These
   caps also bound the announce.
@@ -99,7 +110,10 @@ reaches the mesh: services become this machine's own ports only.**
   - the mesh;
   - the gateway's device key;
   - the host ID and name;
-  - the protocol and ports;
+  - the ports, TCP by definition: the grant has no protocol field, so its
+    domain separator grants TCP and nothing else. A UDP grant needs a
+    protocol field and a new domain, so no grant signed now can be read as
+    one (audit F-37);
   - a serial, not-before and not-after;
   - a domain separator.
 
@@ -111,17 +125,37 @@ reaches the mesh: services become this machine's own ports only.**
 - **Members verify it.** A node offers a host only with a valid, unexpired,
   unrevoked grant naming it. Members reject a host announced without one, or
   with ports beyond its grant.
-- **Revocable.** Revoking the grant drops that host; revoking the gateway's
-  credential drops all its hosts. On a mesh with no admin, the feature doesn't
-  exist.
+- **Revocable.** Withdrawing the grant, narrowing its ports or letting it
+  lapse drops that host or port, including connections already open: the
+  gateway closes them at once on a grant change and within five seconds of a
+  lapse (audit F-27). Revoking the gateway's credential, or its running out,
+  drops all its hosts from every listing (F-31). On a mesh with no admin, the
+  feature doesn't exist.
+- **Ordered by serial.** A node keeps the highest serial for each gateway and
+  host. The admin tool's default serial is the time in nanoseconds, and a
+  statement not newer than the one held is refused with the serial to use,
+  not reported as done (audit F-28: a withdrawal in the same second as its
+  grant once printed "Withdrew" and changed nothing). The admin names the
+  gateway by `--device`, or by `--name`, which matches only the device that
+  holds the name, never a later claimant (F-33).
 
 ### The gateway
 
 - **A per-port TCP proxy, default deny.** The gateway accepts connections to the
   host's overlay address on its granted ports only, and opens its own
-  connection to the LAN address. There is no IP forwarding and no broad DNAT,
-  so nothing unlisted has anything to reach. Connections are capped per host
-  and per member.
+  connection to the LAN address. A packet for a port no grant in force opens
+  is dropped before the stack, so it isn't even answered with a reset; the
+  grant and the caps are checked before a connection costs a goroutine
+  (audit F-32). Connections are capped per host and per member.
+- **Nothing else reaches the gateway's kernel**, and this holds on every node,
+  not just gateways. WireGuard checks a packet's source, never its
+  destination, so a member could address a packet to a node's LAN or public
+  IPv6 and the kernel would take it: to a local service, or, with forwarding
+  on, onward to the LAN or the internet. The audit found it on the gateway
+  (F-26); every node did it. Each node now hands its kernel only packets
+  addressed to its own overlay address (`wg.SelfOnly`, desktop and phone),
+  and the gateway checks the same in its own wrapper. So there is no IP
+  forwarding and no broad DNAT, whatever the kernel's forwarding setting.
 - **In no kernel namespace at all** (as built). The gateway wraps its data
   plane's TUN device: packets WireGuard delivers for a host's overlay address
   go into a userspace TCP stack (gVisor, through wireguard-go's netstack), and
@@ -161,25 +195,57 @@ reaches the mesh: services become this machine's own ports only.**
 - **Visible.** `shrooms status` and both apps list LAN hosts as "printer via
   pi5", with whether the gateway is online.
 
+### LAN aliases (added after the audit)
+
+Some applications use the address a device reports, not the one they were
+given. Bambu Studio is told the printer's mesh address, then opens the camera
+and the FTPS data connection to the printer's LAN address, which it reads
+from the printer. From another LAN that address is either nobody, or
+whatever local device has it (audit F-29; seen 2026-10-21: control worked
+from home, the camera didn't).
+
+- **A member may alias a LAN address to a host**, in its own config:
+  `mesh.office.lan_aliases = ["192.168.10.143=printer.lan.proteus"]`. That
+  address is routed into the mesh on this device, as a /32, more specific
+  than any LAN's route, and translated to the host's overlay address; the
+  replies come back from the address the application dialled.
+- **Only while the host is on the mesh.** The route is added when the host
+  resolves and taken away when its grant or gateway goes, so the address
+  belongs to the LAN again: a laptop back in the office reaches the printer
+  directly.
+- **A private IPv4 address only.** A public one would quietly take a piece of
+  the internet with it.
+- **Nothing changes for the gateway or anyone else.** The gateway sees the
+  same connections to the host's overlay address, under the same grant. The
+  alias is local config, so the mesh learns nothing more about the LAN.
+- **Desktop only, for now.** Android fixes a VPN's routes when it starts, and
+  no phone client has needed it.
+
 ## Consequences
 
-- **The printer's FTPS is a real risk, not just a gap.** The FTPS server's
+- **The printer's FTPS is a real risk without an alias.** The FTPS server's
   passive reply names its own LAN address, and that reply is inside TLS, so the
   gateway can't rewrite it. A client that obeys it, rather than reusing the
   control connection's host, connects to that address on *its own* LAN. If the
   member's home LAN uses the same range, credentials and the file go to
-  whatever local device has that address. Before the printer case ships:
-  - test Bambu Studio and OrcaSlicer against the real printer for which host
-    they use;
-  - if they obey the reply, gate the printer case on a client that uses EPSV
-    (address-free) or reuses the control host;
-  - an FTPS proxy that terminates TLS is the alternative, and isn't planned.
+  whatever local device has that address. Bambu Studio does use the LAN
+  address, for the camera at least (2026-10-21). So:
+  - a member that prints sets a LAN alias for the printer's address (above),
+    and its passive data connections go to the printer through the gateway;
+  - the grant includes the printer's passive data port (2024 on the office
+    printer, seen in its connections; check the model's own);
+  - a member without the alias is told to add one by the docs, and nothing
+    stops it obeying the reply on its own LAN; an FTPS proxy that terminates
+    TLS is the alternative, and isn't planned.
 - **Services become local-only, but only when LAN hosts ship.**
   - Today a service may forward to any `host:port`. The owner runs Home
     Assistant on the home mesh that way (a service pointing at a LAN address),
     so Home Assistant doesn't have to join the mesh.
   - Once this is built, a service target must be one of this machine's own
     addresses, and a LAN device is offered only as a LAN host, with its grant.
+    `localhost` is dialled as 127.0.0.1 or ::1, never looked up, and each
+    connection checks again that the target is still this machine's (audit
+    F-34).
   - The restriction lands in the same release as LAN hosts, never before, and
     existing LAN-pointing services are moved to LAN hosts (Home Assistant
     first). A daemon that finds one after the upgrade refuses it and says
