@@ -12,6 +12,8 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -651,12 +653,92 @@ func (h *handler) taskUpdate(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, h.view(t))
 }
 
-// tasksList is GET /v1/tasks[?session=]: the tasks, as the apps show them.
+// tasksList is GET /v1/tasks[?session=][&history=0][&since=RFC3339][&limit=N]:
+// the tasks, as the apps show them.
+//
+// The three parameters exist because a poller does not need the same task as a
+// reader does. Measured 21-22/10 on the hub, which polls every session every
+// 30 s: one peer's four sessions cost 589,776 B per cycle (~67 MB/h), the
+// reviewer's list alone 383,644 B, because every task carried its request and
+// its result text. The same request also took 0.8 s to 9.1 s depending on the
+// peer's load, which at the hub's old 6 s abort read as an outage.
+//
+//	history=0   drop `history` and `artifacts` (the conversation); keep id,
+//	            contextId, status (state, timestamp, message) and metadata.
+//	since=      only tasks whose status timestamp is strictly after it. An
+//	            unparseable value is a 400 rather than a silent full list:
+//	            unknown parameters have always been ignored here, and that
+//	            silence is exactly how the cost above went unseen.
+//	limit=      the newest N, applied AFTER visibility, so a task the caller
+//	            may not see never uses up the limit.
+//
+// A task that was deleted or pruned cannot appear in a since= list, so a
+// poller still needs a full history=0 list now and then to drop tasks that are
+// gone (ADR-063). Defaults are unchanged: no parameters means what it always
+// meant.
 func (h *handler) tasksList(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+
+	var since time.Time
+	if v := q.Get("since"); v != "" {
+		t, err := time.Parse(time.RFC3339, v)
+		if err != nil {
+			fail(w, http.StatusBadRequest, fmt.Errorf("since must be RFC3339, e.g. 2026-10-21T18:00:00Z"))
+			return
+		}
+		since = t
+	}
+
+	limit := 0
+	if v := q.Get("limit"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 0 {
+			fail(w, http.StatusBadRequest, fmt.Errorf("limit must be a whole number, 0 or more"))
+			return
+		}
+		limit = n
+	}
+
+	withHistory := q.Get("history") != "0"
+
 	var out []a2aTask
-	for _, t := range h.m.Tasks(r.URL.Query().Get("session")) {
-		if h.visible(r, t.Session) {
-			out = append(out, h.view(t))
+	var updated []time.Time
+	for _, t := range h.m.Tasks(q.Get("session")) {
+		// visibility first: a task this caller may not see must not consume
+		// a limit, or a small limit could return nothing while visible tasks
+		// wait behind hidden ones
+		if !h.visible(r, t.Session) {
+			continue
+		}
+		if !since.IsZero() && !t.Updated.After(since) {
+			continue
+		}
+		out = append(out, h.view(t))
+		updated = append(updated, t.Updated)
+	}
+
+	// newest first, so limit= means "the newest N" rather than "whichever
+	// order the store happened to hold"
+	if limit > 0 || !since.IsZero() {
+		order := make([]int, len(out))
+		for i := range order {
+			order[i] = i
+		}
+		sort.SliceStable(order, func(a, b int) bool { return updated[order[a]].After(updated[order[b]]) })
+		tasks := make([]a2aTask, len(out))
+		ts := make([]time.Time, len(updated))
+		for i, o := range order {
+			tasks[i], ts[i] = out[o], updated[o]
+		}
+		out, updated = tasks, ts
+	}
+	if limit > 0 && len(out) > limit {
+		out = out[:limit]
+	}
+
+	if !withHistory {
+		for i := range out {
+			out[i].History, out[i].Artifacts = nil, nil
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"tasks": out})
