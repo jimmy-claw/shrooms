@@ -674,7 +674,7 @@ func (h *handler) taskUpdate(w http.ResponseWriter, r *http.Request) {
 //
 // A task that was deleted or pruned cannot appear in a since= list, so a
 // poller still needs a full history=0 list now and then to drop tasks that are
-// gone (ADR-063). Defaults are unchanged: no parameters means what it always
+// gone (ADR-069). Defaults are unchanged: no parameters means what it always
 // meant.
 func (h *handler) tasksList(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()

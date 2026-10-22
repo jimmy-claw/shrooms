@@ -51,7 +51,12 @@ keep their behaviour.
 Ordering is newest first whenever `limit` or `since` is in play, so that `limit`
 means "the newest N" rather than "whichever N the store happened to hold".
 
-## What it is worth, measured on the real reviewer session
+## What it is worth, measured on the reviewer's payload
+
+These figures come from the laptop/reviewer **payload** as the hub receives it today, with the
+conversation fields dropped — not from the new code running on the laptop. Peer-side bytes and
+time are the reviewer's to measure after deploying the agent; the numbers below are what the
+same rule is expected to save.
 
 | | |
 |---|---|

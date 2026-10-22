@@ -1,7 +1,7 @@
 package agent
 
 // The three parameters of GET /v1/tasks exist because a poller wants a
-// different task than a reader does (ADR-063). The hub polls every session of
+// different task than a reader does (ADR-069). The hub polls every session of
 // every peer every 30 s and paid 589,776 B per cycle for it.
 //
 // Each test here is written so that it FAILS if its rule is removed — the
